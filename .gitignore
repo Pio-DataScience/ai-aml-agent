@@ -1,0 +1,65 @@
+# ─── Python ──────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+*.so
+
+# ─── Virtual Environments ─────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ─── Distribution / Packaging ─────────────────────────────────────────────────
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# ─── Testing ──────────────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+*.test.db
+
+# ─── Environment & Secrets ────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ─── Databases & Checkpoints ─────────────────────────────────────────────────
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db
+
+# ─── Logs ─────────────────────────────────────────────────────────────────────
+logs/
+*.log
+
+# ─── LangGraph / LangChain ────────────────────────────────────────────────────
+.langgraph_api/
+
+# ─── IDEs ─────────────────────────────────────────────────────────────────────
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln.user
+
+# ─── OS ───────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ─── Artifacts ────────────────────────────────────────────────────────────────
+artifacts/
+*.pkl
+*.xlsx
