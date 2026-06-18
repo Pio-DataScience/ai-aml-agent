@@ -1288,14 +1288,16 @@ def build_graph() -> Any:
     Returns:
         CompiledGraph: The compiled LangGraph ready for invocation.
     """
-    import os
+    import sqlite3
     from pathlib import Path
 
     # Ensure checkpoint directory exists
     checkpoint_path = settings.CHECKPOINT_DB_PATH
     Path(checkpoint_path).parent.mkdir(parents=True, exist_ok=True)
 
-    checkpointer = SqliteSaver.from_conn_string(checkpoint_path)
+    # Newer langgraph-checkpoint-sqlite requires a direct sqlite3 connection
+    conn = sqlite3.connect(checkpoint_path, check_same_thread=False)
+    checkpointer = SqliteSaver(conn)
 
     graph = StateGraph(AMLScenarioState)
 
