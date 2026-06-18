@@ -48,11 +48,16 @@ orchestrator → intent_analyst → sql_bridge → decomposer → qb_writer → 
 `FILL_PIO_AML_CUSTOMERS` → alerts land in `PIO_AML_CUSTOMERS` → filtered by `AML_SCENARIO_CODE`
 
 ### How To Run
+
+#### On Windows (PowerShell):
+```powershell
+.\run_dev.ps1
+```
+
+#### On Linux/macOS/Git Bash:
 ```bash
-cd services/aml_builder
-pip install -r requirements.txt
-cp ../../.env.example ../../.env   # Fill in your values
-uvicorn web.api.main:app --reload --port 8005
+export PYTHONPATH=services/aml_builder
+uvicorn web.api.main:app --reload --port 8005 --host 0.0.0.0
 ```
 
 ### Test via Postman
