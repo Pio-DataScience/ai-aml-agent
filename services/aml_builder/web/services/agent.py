@@ -1117,13 +1117,32 @@ def validator_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str,
         settings.MAX_VALIDATION_RETRIES,
     )
 
-    from web.services.oracle import call_procedure, run_readonly
+    from web.services.oracle import run_readonly, get_connection
+    import oracledb
 
     try:
         # Step 1: Run the QB engine to process all active scenarios
-        logger.info("[VALIDATOR] Calling FILL_PIO_AML_CUSTOMERS...")
-        call_procedure("FILL_PIO_AML_CUSTOMERS")
-        logger.info("[VALIDATOR] Procedure completed.")
+        logger.info("[VALIDATOR] Calling FILL_PIO_AML_CUSTOMERS with parameters...")
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            p_status = cursor.var(oracledb.NUMBER)
+            cursor.execute(
+                """
+                BEGIN
+                    FILL_PIO_AML_CUSTOMERS(
+                        COUNTRYCODE => :country_code,
+                        INSTCODE => :inst_code,
+                        P_STATUS => :p_status
+                    );
+                END;
+                """,
+                {
+                    "country_code": int(settings.AML_COUNTRY_CODE),
+                    "inst_code": int(settings.AML_INST_CODE),
+                    "p_status": p_status
+                }
+            )
+            logger.info("[VALIDATOR] Procedure completed. P_STATUS=%s", p_status.getvalue())
 
         # Step 2: Count alerts for our scenario
         cols, rows = run_readonly(
