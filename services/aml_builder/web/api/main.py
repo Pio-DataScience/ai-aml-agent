@@ -57,7 +57,7 @@ async def lifespan(app: FastAPI):
 
     # Pre-warm the LangGraph
     try:
-        get_graph()
+        await get_graph()
         logger.info("[STARTUP] LangGraph compiled and warmed.")
     except Exception as exc:
         logger.error("[STARTUP] LangGraph compilation failed: %s", exc)
@@ -65,6 +65,13 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
+    logger.info("[SHUTDOWN] Closing SQLite checkpointer connection.")
+    try:
+        from web.services.agent import close_checkpointer
+        await close_checkpointer()
+    except Exception as exc:
+        logger.error("[SHUTDOWN] Error closing checkpointer: %s", exc)
+
     logger.info("[SHUTDOWN] Closing Oracle pool.")
     close_pool()
     logger.info("[SHUTDOWN] AML Builder service stopped.")
@@ -165,7 +172,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
         for m in request.messages
     ]
 
-    graph = get_graph()
+    graph = await get_graph()
     config = {"configurable": {"thread_id": thread_id}}
 
     initial_state: AMLScenarioState = {

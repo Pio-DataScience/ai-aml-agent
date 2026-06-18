@@ -24,7 +24,7 @@ from typing import Annotated, Any, Dict, List, Literal, Optional
 import httpx
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
-from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, StateGraph, add_messages
 from pydantic import BaseModel
 from typing_extensions import TypedDict
@@ -1282,22 +1282,29 @@ def route_after_validator(state: AMLScenarioState) -> str:
 # =============================================================================
 
 
-def build_graph() -> Any:
+# Module-level singletons for graph and checkpointer connection
+_graph = None
+_checkpointer_conn = None
+
+
+async def build_graph() -> Any:
     """Construct and compile the AML Scenario StateGraph.
 
     Returns:
         CompiledGraph: The compiled LangGraph ready for invocation.
     """
-    import sqlite3
+    import aiosqlite
     from pathlib import Path
+
+    global _checkpointer_conn
 
     # Ensure checkpoint directory exists
     checkpoint_path = settings.CHECKPOINT_DB_PATH
     Path(checkpoint_path).parent.mkdir(parents=True, exist_ok=True)
 
-    # Newer langgraph-checkpoint-sqlite requires a direct sqlite3 connection
-    conn = sqlite3.connect(checkpoint_path, check_same_thread=False)
-    checkpointer = SqliteSaver(conn)
+    # Use aiosqlite for async checkpointing
+    _checkpointer_conn = await aiosqlite.connect(checkpoint_path)
+    checkpointer = AsyncSqliteSaver(_checkpointer_conn)
 
     graph = StateGraph(AMLScenarioState)
 
@@ -1323,11 +1330,7 @@ def build_graph() -> Any:
     return graph.compile(checkpointer=checkpointer)
 
 
-# Module-level singleton — built once at import time
-_graph = None
-
-
-def get_graph() -> Any:
+async def get_graph() -> Any:
     """Return the singleton compiled graph (lazy init).
 
     Returns:
@@ -1335,9 +1338,21 @@ def get_graph() -> Any:
     """
     global _graph
     if _graph is None:
-        _graph = build_graph()
+        _graph = await build_graph()
         logger.info("[AGENT] LangGraph compiled and ready.")
     return _graph
+
+
+async def close_checkpointer() -> None:
+    """Close the SQLite checkpointer connection if open."""
+    global _checkpointer_conn
+    if _checkpointer_conn is not None:
+        try:
+            await _checkpointer_conn.close()
+            logger.info("[AGENT] Checkpointer database connection closed.")
+        except Exception as exc:
+            logger.error("[AGENT] Error closing checkpointer database connection: %s", exc)
+        _checkpointer_conn = None
 
 
 # =============================================================================
