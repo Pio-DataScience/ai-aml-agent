@@ -103,7 +103,7 @@ class Settings(BaseSettings):
         description="Default institution code for all AML scenario inserts.",
     )
     AML_CREATED_BY: str = Field(
-        default="AI_AGENT",
+        default="999",
         description="Value written to CREATED_BY on all agent-generated rows.",
     )
     AML_DEFAULT_ACTIVE_FLAG: str = Field(

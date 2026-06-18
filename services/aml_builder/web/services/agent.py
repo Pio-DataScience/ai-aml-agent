@@ -1094,6 +1094,22 @@ def validator_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str,
     scenario_code = state.get("scenario_code", "")
     intent_dict = state.get("enriched_intent") or {}
 
+    if not state.get("scenario_write_success", False):
+        logger.warning("[VALIDATOR] Scenario write failed in previous step. Skipping database validation.")
+        return {
+            "validation_result": {
+                "success": False,
+                "scenario_status": "ERROR",
+                "alert_count": 0,
+                "sample_alerts": [],
+                "diagnosis": "The scenario parameters could not be written to Oracle. Check the error log for details.",
+                "suggested_fix": "Verify that all configuration parameters and database column mappings are correct.",
+                "retry_count": retry_count,
+                "confidence_score": 0.0,
+            },
+            "next_action": "ORCHESTRATOR",
+        }
+
     logger.info(
         "[VALIDATOR] Validating scenario_code=%s (attempt %d/%d)",
         scenario_code,
