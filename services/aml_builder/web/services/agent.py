@@ -975,7 +975,7 @@ def _insert_rule(rule: QBRule) -> None:
 
     sql = """
         INSERT INTO PIO_AML_RULES
-            (COUNTRY_CODE, INST_CODE, RULE_CODE, RULE_DES_ENG,
+            (COUNTRY_CODE, INST_CODE, RULE_CODE, RULE_DESC_ENG,
              ACTIVE_FLAG, PERIOD_TYPE, PERIOD_DAYS,
              LTG_CODE, CREATED_BY, CREATED_DATE)
         VALUES
