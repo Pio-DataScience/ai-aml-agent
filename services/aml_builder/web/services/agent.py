@@ -634,9 +634,16 @@ def decomposer_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str
     sql_meta = SQLMetadata(**sql_meta_dict)
 
     # Generate unique codes
+    # SCENARIO_CODE is VARCHAR2(40) in header, but NUMBER in rules details.
+    # Therefore, generate a purely numeric string for the scenario code.
+    import time
+    import random
+    epoch_ms = int(time.time() * 1000)
+    rand_suffix = random.randint(100, 999)
+    scenario_code = f"{epoch_ms}{rand_suffix}"
+
     timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
     short_id = uuid.uuid4().hex[:4].upper()
-    scenario_code = f"AI_{timestamp}_{short_id}"
     rule_code = f"RL_{timestamp}_{short_id}"
 
     # Build scenario header
