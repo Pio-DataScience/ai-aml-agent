@@ -1,8 +1,8 @@
-# run_dev.ps1 — Start the AML Builder service in development mode
+# run_dev.ps1 - Start the AML Builder service in development mode
 # Usage: .\run_dev.ps1
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
-Write-Host "🚀 Starting AML Builder Agent — Port 8005" -ForegroundColor Cyan
+Write-Host "Starting AML Builder Agent - Port 8005" -ForegroundColor Cyan
 
 # Set Python path so 'web.*' imports resolve from the service root
 $env:PYTHONPATH = Join-Path $PSScriptRoot "services\aml_builder"
@@ -17,7 +17,7 @@ if (-not (Test-Path $checkpointDir)) {
 # Verify .env exists
 $envFile = Join-Path $PSScriptRoot ".env"
 if (-not (Test-Path $envFile)) {
-    Write-Host "  ⚠️  .env file not found. Copy .env.example to .env and fill in values." -ForegroundColor Yellow
+    Write-Host "  .env file not found. Copy .env.example to .env and fill in values." -ForegroundColor Yellow
     exit 1
 }
 
