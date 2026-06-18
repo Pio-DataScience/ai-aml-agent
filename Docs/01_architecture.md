@@ -1,4 +1,5 @@
 # AI AML Agentic Scenario Builder — Architectural Proposal
+
 **PioTech Internal | Confidential | v1.0**
 **Date: 2026-06-17**
 
@@ -15,11 +16,13 @@ The gap in the market is not intelligence; it is **grounded autonomy with domain
 ## The Problem We Are Solving
 
 The existing PioTech AML module lets implementation teams manually create scenarios by:
+
 1. Picking tables/fields from dropdown lists
 2. Adding operators (`>`, `<`, `=`, `BETWEEN`, etc.)
 3. Submitting to the legacy Oracle **Query Builder** procedure/engine
 
 This is:
+
 - **Expert-gated** — only a trained implementation team can do it
 - **Slow** — each scenario takes hours/days
 - **Un-scalable** — a bank with 50 compliance use-cases is bottlenecked
@@ -75,26 +78,26 @@ This is a **LangGraph StateGraph** — the same battle-tested framework running 
 class AMLScenarioState(TypedDict):
     # === Conversation ===
     messages: Annotated[list[BaseMessage], add_messages]
-    
+  
     # === Intent ===
     user_intent: str                        # Raw natural language goal
     enriched_intent: AMLIntent             # Structured, clarified intent
-    
+  
     # === SQL Bridge ===
     raw_sql: Optional[str]                 # SQL from PioTech AI agent
     sql_metadata: Optional[SQLMetadata]   # Tables, columns, operators extracted
-    
+  
     # === Decomposition ===
     scenario_parameters: Optional[ScenarioParameters]  # QB-ready payload
     decomposition_confidence: float        # 0.0 – 1.0 self-assessment score
-    
+  
     # === QB Execution ===
     scenario_id: Optional[str]            # ID of created scenario in AML DB
     scenario_status: Optional[str]        # DRAFT | ACTIVE | ERROR
-    
+  
     # === Validation ===
     validation_result: Optional[ValidationResult]  # Alert counts, sample data
-    
+  
     # === Control ===
     iteration_count: int
     next_action: str                       # Router signal
@@ -106,7 +109,9 @@ class AMLScenarioState(TypedDict):
 ## Node Breakdown — What Each Node Does
 
 ### 1. ORCHESTRATOR NODE (Supervisor)
+
 The router and state manager. It:
+
 - Reads the current `next_action` signal
 - Routes to the correct next node
 - Enforces the lifecycle: `INTENT → SQL → DECOMPOSE → WRITE → VALIDATE`
@@ -118,20 +123,21 @@ The router and state manager. It:
 ---
 
 ### 2. INTENT ANALYST NODE
+
 **Goal:** Convert a vague manager sentence into a *grounded, unambiguous AML intent object*.
 
 ```python
 class AMLIntent(BaseModel):
     scenario_name: str                    # e.g., "Large Cash Transactions - Retail"
     scenario_type: str                    # "TRANSACTION" | "ACCOUNT" | "CUSTOMER"
-    
+  
     primary_entity: str                   # The main table domain (transactions, accounts)
     detection_logic: str                  # Business logic in plain English
-    
+  
     thresholds: list[Threshold]           # [{field: "amount", op: ">", value: 50000}]
     time_window: Optional[TimeWindow]     # {unit: "days", value: 30}
     customer_segments: Optional[list]     # ["RETAIL", "CORPORATE"]
-    
+  
     exclusions: Optional[list[str]]       # What to explicitly NOT include
     clarification_needed: bool
     clarification_questions: list[str]    # Business questions (NOT technical)
@@ -140,6 +146,7 @@ class AMLIntent(BaseModel):
 **Protocol:** Uses the same "Domain Expert Clarification" pattern from the existing supervisor — never asks technical questions, always maps uncertainty to business choices.
 
 **Example:**
+
 ```
 User: "Flag suspicious cash activity"
 
@@ -157,6 +164,7 @@ Output to user:
 ---
 
 ### 3. SQL BRIDGE NODE
+
 **Goal:** Take the enriched intent and get battle-tested SQL that represents the detection logic.
 
 This node calls **PioTech AI** (the existing text-to-SQL agent) as an **external sub-agent** via HTTP. It does NOT rebuild the SQL stack — it delegates.
@@ -164,9 +172,9 @@ This node calls **PioTech AI** (the existing text-to-SQL agent) as an **external
 ```python
 class SQLBridgeProtocol:
     """How we communicate with PioTech AI agent."""
-    
+  
     endpoint: str = "http://piotech-ai-service/chat/stream"
-    
+  
     # The constructed prompt we send
     prompt_template = """
     <AML_SCENARIO_REQUEST>
@@ -175,14 +183,14 @@ class SQLBridgeProtocol:
     THRESHOLDS: {thresholds}
     TIME_WINDOW: {time_window}
     CUSTOMER_SEGMENTS: {segments}
-    
+  
     TASK: Write a SQL SELECT query that identifies records matching this AML scenario.
     Return ONLY customers/accounts/transactions that should trigger an alert.
     Include the key fields needed to populate the scenario parameters.
     RETURN_FORMAT: SQL only — no explanation.
     </AML_SCENARIO_REQUEST>
     """
-    
+  
     # What we extract from the response
     output: SQLMetadata  # tables, columns, operators, filters used
 ```
@@ -192,6 +200,7 @@ class SQLBridgeProtocol:
 ---
 
 ### 4. DECOMPOSER NODE — The Core Brain
+
 **Goal:** Reverse-engineer the SQL into Query Builder parameters.
 
 This is the most intellectually complex node. It must understand the **semantic mapping** between SQL constructs and QB parameter tables.
@@ -215,24 +224,24 @@ HAVING COUNT(*) > 3        →  QB_AGGREGATION: having_op=">", having_val=3
 
 ```python
 class SQLDecomposer:
-    
+  
     def decompose(self, sql: str, intent: AMLIntent) -> ScenarioParameters:
         # Step 1: AST Parse the SQL (using sqlglot — Oracle dialect)
         ast = parse_sql(sql)
-        
+      
         # Step 2: Extract each QB-mappable construct
         tables     = self._extract_tables(ast)        # FROM + JOINs
         conditions = self._extract_conditions(ast)    # WHERE clauses
         time_filters = self._extract_time(ast)        # Date-based conditions
         aggregations = self._extract_aggregations(ast) # GROUP BY + HAVING
-        
+      
         # Step 3: Map to QB parameter objects
         qb_tables     = [self._map_table_to_qb(t) for t in tables]
         qb_conditions = [self._map_condition_to_qb(c) for c in conditions]
-        
+      
         # Step 4: Validate completeness
         confidence = self._assess_confidence(qb_tables, qb_conditions, intent)
-        
+      
         return ScenarioParameters(
             tables=qb_tables,
             conditions=qb_conditions,
@@ -240,7 +249,7 @@ class SQLDecomposer:
             aggregations=aggregations,
             confidence=confidence
         )
-    
+  
     def _assess_confidence(self, ...):
         """Self-assess how well the decomposition covers the intent.
         If < 0.8, trigger a re-query or clarification cycle."""
@@ -253,11 +262,12 @@ class SQLDecomposer:
 ---
 
 ### 5. QB WRITER NODE
+
 **Goal:** Call the legacy Oracle Query Builder procedure with the decomposed parameters.
 
 ```python
 class QBWriterNode:
-    
+  
     def execute(self, params: ScenarioParameters) -> str:
         """
         Calls the existing Oracle QB engine.
@@ -265,7 +275,7 @@ class QBWriterNode:
           A) If QB has a stored procedure API → call it directly
           B) If QB reads from parameter tables → INSERT then trigger
         """
-        
+      
         # Mode A: Stored procedure call
         conn.execute("""
             BEGIN
@@ -277,12 +287,12 @@ class QBWriterNode:
                 );
             END;
         """, params.to_oracle_bindings())
-        
+      
         # Mode B: Table-based
         # INSERT INTO QB_SCENARIOS (...)
         # INSERT INTO QB_CONDITIONS (...) for each condition
         # Then trigger or call activation procedure
-        
+      
         return scenario_id
 ```
 
@@ -291,25 +301,26 @@ class QBWriterNode:
 ---
 
 ### 6. SCENARIO VALIDATOR NODE
+
 **Goal:** Agentic self-verification — did the scenario actually work?
 
 This is what separates this system from anything in the market. After writing the scenario, the agent **hunts its own output**.
 
 ```python
 class ScenarioValidatorNode:
-    
+  
     def validate(self, scenario_id: str, intent: AMLIntent) -> ValidationResult:
-        
+      
         # STEP 1: Check if scenario is ACTIVE (not in error state)
         status = self._check_scenario_status(scenario_id)
         if status != "ACTIVE":
             return ValidationResult(success=False, reason="QB failed to activate scenario")
-        
+      
         # STEP 2: Run the detection query independently
         # Call PioTech AI: "how many alerts does scenario X produce?"
         alert_count_sql = self._build_alert_count_query(scenario_id)
         alert_count = self._execute_via_piotech_ai(alert_count_sql)
-        
+      
         # STEP 3: Sanity-check the alert count
         if alert_count == 0:
             # Could mean: wrong thresholds, wrong table, wrong time window
@@ -320,7 +331,7 @@ class ScenarioValidatorNode:
                 diagnosis="Zero alerts. Likely threshold too restrictive or wrong time window.",
                 suggested_fix=self._diagnose_zero_alerts(intent)
             )
-        
+      
         if alert_count > intent.expected_max_alerts:
             # Threshold too permissive → would flood compliance team
             return ValidationResult(
@@ -329,10 +340,10 @@ class ScenarioValidatorNode:
                 diagnosis=f"Alert volume ({alert_count}) exceeds expected range. Scenario may be too broad.",
                 suggested_fix="Tighten threshold or add exclusion criteria."
             )
-        
+      
         # STEP 4: Pull sample alerts for human review
         sample_alerts = self._pull_sample_alerts(scenario_id, limit=5)
-        
+      
         return ValidationResult(
             success=True,
             alert_count=alert_count,
@@ -342,6 +353,7 @@ class ScenarioValidatorNode:
 ```
 
 **The self-correction loop:**
+
 ```
 Validate → FAIL (0 alerts) → Feed diagnosis back to Decomposer →
 Decomposer adjusts parameters → QB Writer re-writes → Validate again
@@ -437,16 +449,16 @@ The new AML Scenario Agent is **a new microservice inside the existing PioTech m
 
 ## Technology Decisions
 
-| Concern | Decision | Rationale |
-|---------|----------|-----------|
-| **Orchestration** | LangGraph StateGraph | Same as existing system — no new infra |
-| **SQL Decomposition** | `sqlglot` (Python AST library) | Production-grade, handles Oracle dialect natively |
-| **PioTech AI Integration** | HTTP/SSE streaming client | Reuse existing `/chat/stream` endpoint |
-| **QB Integration** | `cx_Oracle` direct call | Same Oracle pool already in the codebase |
-| **State Persistence** | SQLite Checkpointer | Same as existing agents |
-| **API** | FastAPI + SSE streaming | Identical to existing services |
-| **Memory Pattern** | Trajectory Compression | Proven pattern documented in `doc/Notes.md` |
-| **LLM** | Configurable (OpenAI / LMStudio) | Same `settings.py` pattern as all other modules |
+| Concern                          | Decision                         | Rationale                                         |
+| -------------------------------- | -------------------------------- | ------------------------------------------------- |
+| **Orchestration**          | LangGraph StateGraph             | Same as existing system — no new infra           |
+| **SQL Decomposition**      | `sqlglot` (Python AST library) | Production-grade, handles Oracle dialect natively |
+| **PioTech AI Integration** | HTTP/SSE streaming client        | Reuse existing `/chat/stream` endpoint          |
+| **QB Integration**         | `cx_Oracle` direct call        | Same Oracle pool already in the codebase          |
+| **State Persistence**      | SQLite Checkpointer              | Same as existing agents                           |
+| **API**                    | FastAPI + SSE streaming          | Identical to existing services                    |
+| **Memory Pattern**         | Trajectory Compression           | Proven pattern documented in `doc/Notes.md`     |
+| **LLM**                    | Configurable (OpenAI / LMStudio) | Same `settings.py` pattern as all other modules |
 
 ---
 
@@ -521,30 +533,39 @@ A key static artifact: `qb_field_mappings.json` — a declarative map of how SQL
 > **These must be answered before the Decomposer and QB Writer can be finalized.**
 
 ### Q1: Query Builder Parameter Table Schema
+
 What are the exact Oracle table names and column definitions for:
+
 - The **scenario header table** (name, type, status, created_by)?
 - The **conditions table** (field reference, operator code, value)?
 - The **time window table** (rolling vs. fixed, unit, value)?
 - The **aggregation/grouping table** (GROUP BY field, HAVING operator, HAVING value)?
 
 ### Q2: QB Engine Invocation Method
+
 How does the current human implementation team commit a scenario to the engine?
+
 - Is there an Oracle stored procedure? (If yes: package name, procedure name, parameter list)
 - Do they INSERT directly into QB tables, then call a separate activation/build procedure?
 - Is there a REST API on the PioTech AML backend that wraps the QB engine?
 
 ### Q3: QB Table / Field Catalog
+
 Does the QB engine maintain a catalog of allowed tables and fields?
+
 - Is there a lookup table listing valid QB table references with their internal IDs?
 - Or does the QB engine accept raw Oracle schema-qualified table names directly?
 
 ### Q4: Alert Output Table
+
 When a scenario runs and produces alerts:
+
 - What is the Oracle table where alerts are stored?
 - What column links an alert row to its source scenario (`SCENARIO_ID` or equivalent)?
 - What query would return `COUNT(*) of alerts for scenario X`?
 
 ### Q5: PioTech AI Internal Endpoint
+
 - What is the internal base URL of the DWH/AML text-to-SQL agent (e.g., `http://localhost:8001`)?
 - Which specific service should the SQL Bridge call — DWH (general) or AML (domain-tuned)?
 
@@ -553,6 +574,7 @@ When a scenario runs and produces alerts:
 ## What Makes This Different
 
 Most "AI AML tools" in the market:
+
 - ❌ Generate SQL and stop — no QB integration, still requires human translation
 - ❌ Require a technical intermediary between AI output and the product
 - ❌ Have no self-validation loop — no way to know if the scenario even fires
@@ -560,6 +582,7 @@ Most "AI AML tools" in the market:
 - ❌ Cannot handle the long-tail of ambiguous, real-world compliance language
 
 This system:
+
 - ✅ Completes the **full lifecycle** autonomously — intent to live scenario
 - ✅ Uses **PioTech AI** as a grounded sub-capability — no hallucinated SQL
 - ✅ **Self-validates** its own output against live Oracle data
@@ -573,6 +596,7 @@ This system:
 ## Phased Delivery
 
 ### Phase 1 — Foundation (Week 1–2)
+
 - [ ] Module skeleton (`services/aml_builder/`)
 - [ ] State schema & all Pydantic contracts (`schemas.py`)
 - [ ] Orchestrator node + routing logic
@@ -580,21 +604,25 @@ This system:
 - [ ] FastAPI streaming endpoint (`main.py`)
 
 ### Phase 2 — SQL Bridge (Week 2–3)
+
 - [ ] PioTech AI HTTP/SSE streaming client (`sql_bridge.py`)
 - [ ] SQL metadata extractor (tables, columns, operators from response)
 - [ ] QB field mapping config skeleton (`qb_field_mappings.json`)
 
 ### Phase 3 — Decomposer + QB Writer (Week 3–5)
+
 - [ ] `sqlglot`-based SQL AST decomposer (`decomposer.py`)
 - [ ] QB parameter mapping engine (requires Q1–Q3 answers)
 - [ ] Oracle QB procedure / table writer (`qb_writer.py`)
 
 ### Phase 4 — Validator (Week 5–6)
+
 - [ ] Alert count query builder
 - [ ] Self-correction loop (diagnosis → adjust → re-write)
 - [ ] Diagnosis engine for zero-alert and over-alert cases
 
 ### Phase 5 — Polish & Hardening (Week 6–7)
+
 - [ ] Full lifecycle test harness
 - [ ] Error recovery & user escalation paths
 - [ ] Deployment config (`docker-compose` entry, `.env` vars)
