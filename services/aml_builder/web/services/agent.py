@@ -348,29 +348,6 @@ def orchestrator_node(
 
     action = decision.next_action
 
-    # ── Safety Guard: Ensure no transition to SQL_BRIDGE unless explicitly approved ──
-    if action == "SQL_BRIDGE" and not state.get("plan_approved", False):
-        last_user_msg = next(
-            (m.content for m in reversed(history) if isinstance(m, HumanMessage)), ""
-        ).lower().strip()
-        APPROVAL_KEYWORDS = {"proceed", "yes", "approve", "go ahead", "confirm", "start", "execute", "ok", "okay"}
-        if not any(kw in last_user_msg for kw in APPROVAL_KEYWORDS):
-            logger.warning("[ORCHESTRATOR] LLM tried to bypass plan approval. Forcing WAIT_APPROVAL.")
-            action = "WAIT_APPROVAL"
-            msg = (
-                "I have generated the scenario execution plan in the side panel. "
-                "Please review the details and reply **proceed** when you are ready to create it, "
-                "or let me know if you would like to adjust anything."
-            )
-            add_kwargs = {}
-            plan_art = state.get("plan_artifact")
-            val_res = state.get("validation_result")
-            if plan_art:
-                add_kwargs["plan_artifact"] = plan_art
-            if val_res:
-                add_kwargs["validation_result"] = val_res
-            updates["messages"] = [AIMessage(content=msg, additional_kwargs=add_kwargs)]
-
     # ── Mechanical side effects based on LLM decision ─────────────────────────
 
     if action == "REDEFINE" or decision.clear_scenario_state:
@@ -1515,9 +1492,13 @@ def _fetch_and_map_parameters(
     # Step 1: Map WHERE conditions dynamically from SQL                  #
     # ------------------------------------------------------------------ #
     for cond in sql_meta.where_conditions:
+        # Strip SQL comments
+        cond_clean = re.sub(r"--.*$", "", cond)
+        cond_clean = re.sub(r"/\*.*?\*/", "", cond_clean).strip()
+
         # Match: COLUMN_NAME Operator VALUE
         match = re.search(
-            r"(\w+(?:\.\w+)?)\s*([><=!]+|LIKE|IN)\s*(.*)", cond, re.IGNORECASE
+            r"(\w+(?:\.\w+)?)\s*([><=!]+|LIKE|IN)\s*(.*)", cond_clean, re.IGNORECASE
         )
         if not match:
             continue
@@ -1584,13 +1565,17 @@ def _fetch_and_map_parameters(
     # Step 2: Map HAVING conditions dynamically from SQL (Aggregates)    #
     # ------------------------------------------------------------------ #
     for having in sql_meta.having_conditions:
+        # Strip SQL comments
+        having_clean = re.sub(r"--.*$", "", having)
+        having_clean = re.sub(r"/\*.*?\*/", "", having_clean).strip()
+
         # Check for Standard Deviation first in aggregate functions
         # e.g., SUM(TRA_AMT) > AVG(TRA_AMT) + 0.1 * STDDEV(TRA_AMT)
-        if "STDDEV" in having.upper() or "STDDEV_SAMP" in having.upper():
+        if "STDDEV" in having_clean.upper() or "STDDEV_SAMP" in having_clean.upper():
             # Parse multiplier of STDDEV, e.g. 0.1 * STDDEV or STDDEV * 0.1
-            mult_match = re.search(r"([\d\.]+)\s*\*\s*STDDEV", having, re.IGNORECASE)
+            mult_match = re.search(r"([\d\.]+)\s*\*\s*STDDEV", having_clean, re.IGNORECASE)
             if not mult_match:
-                mult_match = re.search(r"STDDEV\s*\([^)]+\)\s*\*\s*([\d\.]+)", having, re.IGNORECASE)
+                mult_match = re.search(r"STDDEV\s*\([^)]+\)\s*\*\s*([\d\.]+)", having_clean, re.IGNORECASE)
 
             mult = float(mult_match.group(1)) if mult_match else 1.0
             from_perc = int(mult * 100)
@@ -1598,7 +1583,7 @@ def _fetch_and_map_parameters(
             # Map operator
             op_raw = ">="
             for op in (">=", "<=", ">", "<", "="):
-                if op in having:
+                if op in having_clean:
                     op_raw = op
                     break
 
@@ -1620,7 +1605,7 @@ def _fetch_and_map_parameters(
 
         # SUM(...) >= N  -> Parameter 6 (Summation of Transactions)
         sum_match = re.search(
-            r"SUM\s*\([^)]+\)\s*([><=!]+)\s*([\d,\.]+)", having, re.IGNORECASE
+            r"SUM\s*\([^)]+\)\s*([><=!]+)\s*([\d,\.]+)", having_clean, re.IGNORECASE
         )
         if sum_match:
             op_raw = sum_match.group(1).strip()
