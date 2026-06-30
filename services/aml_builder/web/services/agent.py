@@ -338,12 +338,18 @@ def orchestrator_node(
     if decision.message_to_user:
         # Persist plan_artifact and validation_result inside message additional_kwargs for history reload
         add_kwargs = {}
-        plan_art = state.get("plan_artifact")
-        val_res = state.get("validation_result")
-        if plan_art:
-            add_kwargs["plan_artifact"] = plan_art
-        if val_res:
-            add_kwargs["validation_result"] = val_res
+        # Only attach the plan_artifact if we are presenting the plan (WAIT_APPROVAL)
+        if decision.next_action == "WAIT_APPROVAL":
+            plan_art = state.get("plan_artifact")
+            if plan_art:
+                add_kwargs["plan_artifact"] = plan_art
+
+        # Only attach validation_result if we are displaying final results or failure recovery options
+        if decision.next_action in ("FINALIZE", "WAIT_USER") or state.get("next_action") == "VALIDATE":
+            val_res = state.get("validation_result")
+            if val_res:
+                add_kwargs["validation_result"] = val_res
+
         updates["messages"] = [AIMessage(content=decision.message_to_user, additional_kwargs=add_kwargs)]
 
     action = decision.next_action
