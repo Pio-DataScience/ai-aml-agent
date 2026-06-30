@@ -32,6 +32,8 @@ from typing_extensions import TypedDict
 from web.services.schemas import (
     AMLIntent,
     AlertSample,
+    CatalogCreation,
+    PlanCondition,
     QBRule,
     QBRuleDetail,
     QBScenario,
@@ -39,10 +41,15 @@ from web.services.schemas import (
     ScenarioParameters,
     SQLMetadata,
     ValidationResult,
+    WriteVerification,
 )
 from web.services.settings import settings
 
 logger = logging.getLogger(__name__)
+
+
+class PlanDriftError(Exception):
+    """Raised when generated rule_details diverge from the approved plan conditions."""
 
 
 # =============================================================================
@@ -84,6 +91,21 @@ class AMLScenarioState(TypedDict):
     next_action: str  # Router signal between nodes
     iteration_count: int
     error_log: List[str]
+
+    # Plan layer
+    plan_artifact: Optional[str]          # markdown plan streamed to frontend side panel
+    plan_conditions: Optional[List[Dict[str, Any]]]  # machine-readable conditions for drift check
+    plan_approved: bool                   # True once user says "proceed"
+
+    # Catalog auto-creation log
+    catalog_creations: List[Dict[str, Any]]  # one entry per auto-provisioned catalog row
+
+    # Post-write verification
+    write_verification: Optional[Dict[str, Any]]  # per-table row counts after INSERT
+
+    # Escalation
+    escalation_report: Optional[str]      # markdown escalation report on terminal failure
+    failure_mode: Optional[str]           # "REDEFINE" | "ADJUST" | "ESCALATE"
 
 
 # =============================================================================
@@ -152,12 +174,15 @@ def _load_prompt(filename: str) -> str:
 def orchestrator_node(
     state: AMLScenarioState, config: RunnableConfig
 ) -> Dict[str, Any]:
-    """Route the conversation and manage the lifecycle.
+    """Route the conversation and manage the full AML scenario lifecycle.
 
-    The Orchestrator is the entry point for every user turn. It:
-    - Detects the current stage and routes to the correct next node
-    - Owns all final user-facing communication
-    - Enforces loop limits
+    Entry point for every user turn. Handles:
+    - Plan approval gate (WAIT_APPROVAL)
+    - Structured failure menu with 3 user paths (FAILURE / WAIT_USER)
+    - User choice routing: REDEFINE → intent_analyst, ADJUST → decomposer, ESCALATE → report
+    - Final response formatting (FINALIZE)
+    - Clarification requests (CLARIFY)
+    - Hard iteration cap enforcement
 
     Args:
         state (AMLScenarioState): Current agent state.
@@ -166,33 +191,214 @@ def orchestrator_node(
     Returns:
         Dict[str, Any]: State updates including next_action routing signal.
     """
-    logger.info("[ORCHESTRATOR] Iteration %d", state.get("iteration_count", 0))
+    logger.info("[ORCHESTRATOR] Iteration %d  next_action=%s",
+                state.get("iteration_count", 0), state.get("next_action", "INTENT"))
 
-    messages = state.get("messages", [])
+    messages_list = state.get("messages", [])
     iteration = state.get("iteration_count", 0) + 1
-    next_action = state.get("next_action", "INTENT")
+    next_action = state.get("next_action") or "INTENT"
 
-    # Guard: enforce hard iteration cap
+    # ── Approval gate ─────────────────────────────────────────────────────────
+    if next_action == "WAIT_APPROVAL" and not state.get("plan_approved", False):
+        last_user = next(
+            (m.content for m in reversed(messages_list) if isinstance(m, HumanMessage)), ""
+        ).strip()
+
+        # Dynamic LLM classification to distinguish approval vs adjustment vs general chat/questions
+        llm = _build_llm(fast=True)
+        classify_prompt = (
+            f"You are an orchestrator classifier in an AML builder assistant.\n"
+            f"The assistant has presented a scenario execution plan to the user and is waiting for approval.\n"
+            f"Approved meanings: user wants to proceed, build it, execute it, write it, confirm, yes, go ahead, start, run.\n"
+            f"Adjustment meanings: user wants to change, modify, edit, adjust, or rejects/refuses/says no.\n"
+            f"Chat/Question meanings: user is greeting (hi, hello), asking how it works, asking why something was done, or asking a general question.\n\n"
+            f"User message: \"{last_user}\"\n\n"
+            f"Classify the user message into exactly one of these categories:\n"
+            f"- 'APPROVE'\n"
+            f"- 'ADJUST'\n"
+            f"- 'CHAT'\n\n"
+            f"Return ONLY the category name (APPROVE, ADJUST, or CHAT). Do not return any other text."
+        )
+        try:
+            resp = llm.invoke([HumanMessage(content=classify_prompt)])
+            decision = resp.content.strip().upper()
+        except Exception as e:
+            logger.warning("[ORCHESTRATOR] Fast LLM classification failed: %s. Falling back to keyword check.", e)
+            decision = "CHAT"
+            APPROVAL_KEYWORDS = {"proceed", "yes", "approve", "go ahead", "confirm", "start", "execute"}
+            if any(kw in last_user.lower() for kw in APPROVAL_KEYWORDS):
+                decision = "APPROVE"
+            elif any(kw in last_user.lower() for kw in {"change", "modify", "adjust", "edit", "no"}):
+                decision = "ADJUST"
+
+        logger.info("[ORCHESTRATOR] Classification decision for user message: %s", decision)
+
+        if decision == "APPROVE":
+            logger.info("[ORCHESTRATOR] Plan approved by user. Routing to SQL_BRIDGE.")
+            return {
+                "plan_approved": True,
+                "next_action": "SQL_BRIDGE",
+                "iteration_count": iteration,
+            }
+        
+        if decision == "ADJUST":
+            logger.info("[ORCHESTRATOR] User requested plan adjustments. Routing back to INTENT for refinement.")
+            return {
+                "next_action": "INTENT",
+                "iteration_count": iteration,
+            }
+
+        # User is just chatting or asking a question/clarification about the plan
+        logger.info("[ORCHESTRATOR] User is asking a question or chatting. Generating conversational reply.")
+        system_prompt = _load_prompt("orchestrator_system.md")
+        chat_llm = _build_llm(fast=False)
+        
+        # Build prompt to answer user contextually without losing the plan state
+        chat_messages = [
+            SystemMessage(content=(
+                f"{system_prompt}\n\n"
+                f"You have already presented the scenario execution plan to the user.\n"
+                f"The user has asked a question or made a comment instead of saying 'proceed'.\n"
+                f"Your task: Respond to the user's question or comment professionally as an AML regulator/advisor.\n"
+                f"At the end of your response, politely remind them that their scenario plan is ready in the side panel, and they can reply 'proceed' to create it or tell you if they want to adjust any details."
+            ))
+        ]
+        # Append history (limited to avoid too much noise, e.g. last 10 messages)
+        chat_messages.extend(messages_list[-10:])
+        
+        try:
+            response = chat_llm.invoke(chat_messages)
+            reply = response.content
+        except Exception as exc:
+            logger.error("[ORCHESTRATOR] Orchestrator chat LLM failed: %s", exc)
+            reply = (
+                "I have your scenario plan ready in the side panel. "
+                "Please review it and reply **proceed** when you're ready to create it, "
+                "or let me know if you'd like to adjust anything."
+            )
+
+        return {
+            "messages": [AIMessage(content=reply)],
+            "next_action": "WAIT_APPROVAL",
+            "iteration_count": iteration,
+        }
+
+    # ── Guard: enforce hard iteration cap ────────────────────────────────────
     if iteration > settings.MAX_AGENT_ITERATIONS:
         logger.error("[ORCHESTRATOR] Max iterations reached. Halting.")
         return {
-            "messages": [
-                AIMessage(
-                    content=(
-                        "I've reached my processing limit for this request. "
-                        "Please try rephrasing or breaking the request into smaller steps."
-                    )
-                )
-            ],
+            "messages": [AIMessage(content=(
+                "I've reached my processing limit for this request. "
+                "Please try rephrasing or breaking the request into smaller steps."
+            ))],
             "next_action": "END",
             "iteration_count": iteration,
         }
 
-    # If validation succeeded → format final answer and end
+    # ── Validation succeeded → format final answer ────────────────────────────
     if next_action == "FINALIZE":
         return _finalize_response(state, iteration)
 
-    # If we need clarification → pass through the question to user
+    # ── Terminal failure → present structured 3-option menu ───────────────────
+    if next_action in ("FAILURE", "ERROR"):
+        error_log = state.get("error_log", [])
+        last_error = error_log[-1] if error_log else "An unspecified error occurred."
+        logger.error("[ORCHESTRATOR] Failure state reached: %s", last_error)
+        return {
+            "messages": [AIMessage(content=_format_failure_menu(last_error))],
+            "next_action": "WAIT_USER",
+            "iteration_count": iteration,
+        }
+
+    # ── Waiting for user to choose a failure path ─────────────────────────────
+    if next_action == "WAIT_USER":
+        last_user = next(
+            (m.content for m in reversed(messages_list) if isinstance(m, HumanMessage)), ""
+        ).lower().strip()
+
+        if any(k in last_user for k in ("1", "redefine", "re-define", "rephrase", "different", "new scenario")):
+            logger.info("[ORCHESTRATOR] User chose REDEFINE — clearing intent state.")
+            return {
+                "messages": [AIMessage(content=(
+                    "Understood. Please describe the new scenario you'd like to create "
+                    "and I'll start fresh."
+                ))],
+                "enriched_intent": None,
+                "raw_sql": None,
+                "sql_metadata": None,
+                "scenario_parameters": None,
+                "scenario_code": None,
+                "plan_artifact": None,
+                "plan_conditions": None,
+                "plan_approved": False,
+                "catalog_creations": [],
+                "write_verification": None,
+                "error_log": [],
+                "failure_mode": "REDEFINE",
+                "next_action": "WAIT_USER",
+                "iteration_count": iteration,
+            }
+
+        if any(k in last_user for k in ("2", "adjust", "threshold", "change", "modify", "tweak")):
+            logger.info("[ORCHESTRATOR] User chose ADJUST — waiting for new threshold values.")
+            return {
+                "messages": [AIMessage(content=(
+                    "Of course. Please specify which threshold or value you'd like to adjust "
+                    "and what it should be changed to (e.g. 'change the minimum amount from 5000 to 3000')."
+                ))],
+                "failure_mode": "ADJUST",
+                "next_action": "WAIT_USER",
+                "iteration_count": iteration,
+            }
+
+        if any(k in last_user for k in ("3", "escalat", "ticket", "team", "report", "implementation")):
+            logger.info("[ORCHESTRATOR] User chose ESCALATE — generating technical report.")
+            report = _generate_escalation_report(state)
+            return {
+                "messages": [AIMessage(content=(
+                    "I've generated a full technical escalation report. "
+                    "Please forward it to your implementation team for investigation."
+                ))],
+                "escalation_report": report,
+                "failure_mode": "ESCALATE",
+                "next_action": "ESCALATE",
+                "iteration_count": iteration,
+            }
+
+        # User is in ADJUST mode and is now providing new threshold values
+        if state.get("failure_mode") == "ADJUST" and last_user:
+            logger.info("[ORCHESTRATOR] User provided adjusted thresholds — routing to DECOMPOSE.")
+            return {
+                "user_intent": last_user,
+                "next_action": "DECOMPOSE",
+                "iteration_count": iteration,
+            }
+
+        # No recognisable choice yet — re-present the menu
+        if state.get("failure_mode") == "REDEFINE" and last_user:
+            # User has now provided a new scenario description — continue normally
+            return {
+                "user_intent": last_user,
+                "next_action": "INTENT",
+                "iteration_count": iteration,
+            }
+
+        error_log = state.get("error_log", [])
+        last_error = error_log[-1] if error_log else "An unspecified error occurred."
+        return {
+            "messages": [AIMessage(content=_format_failure_menu(last_error))],
+            "next_action": "WAIT_USER",
+            "iteration_count": iteration,
+        }
+
+    # ── Escalation complete → end ─────────────────────────────────────────────
+    if next_action == "ESCALATE":
+        return {
+            "next_action": "END",
+            "iteration_count": iteration,
+        }
+
+    # ── Clarification needed ──────────────────────────────────────────────────
     if next_action == "CLARIFY":
         intent_data = state.get("enriched_intent") or {}
         questions = intent_data.get("clarification_questions", [])
@@ -212,26 +418,7 @@ def orchestrator_node(
             "iteration_count": iteration,
         }
 
-    # If there was a write error
-    if next_action == "ERROR":
-        error_log = state.get("error_log", [])
-        last_error = error_log[-1] if error_log else "Unknown error occurred."
-        return {
-            "messages": [
-                AIMessage(
-                    content=(
-                        f"I encountered an issue while creating the scenario:\n\n"
-                        f"```\n{last_error}\n```\n\n"
-                        "Please check the Oracle connection or try again. "
-                        "If this persists, the implementation team can investigate."
-                    )
-                )
-            ],
-            "next_action": "END",
-            "iteration_count": iteration,
-        }
-
-    # Default: route to intent analyst for new user input
+    # ── Default: route to intent analyst for new user input ───────────────────
     return {
         "next_action": "INTENT",
         "iteration_count": iteration,
@@ -306,6 +493,89 @@ def _finalize_response(state: AMLScenarioState, iteration: int) -> Dict[str, Any
         "next_action": "END",
         "iteration_count": iteration,
     }
+
+
+def _format_failure_menu(error_detail: str) -> str:
+    """Build the structured failure menu presented to the user on any terminal error.
+
+    Args:
+        error_detail (str): The last error message from the error_log.
+
+    Returns:
+        str: Formatted markdown failure menu with 3 actionable paths.
+    """
+    return (
+        f"## Scenario Creation Failed\n\n"
+        f"**What went wrong:**\n"
+        f"```\n{error_detail}\n```\n\n"
+        f"---\n\n"
+        f"**Your options:**\n\n"
+        f"1. **Redefine** — Describe your scenario differently and I'll start fresh.\n"
+        f"2. **Adjust thresholds** — Tell me which values to change and what to change them to.\n"
+        f"3. **Escalate** — I'll generate a full technical report for your implementation team.\n\n"
+        f"_Reply with the number (1, 2, or 3) or describe your choice._"
+    )
+
+
+def _generate_escalation_report(state: AMLScenarioState) -> str:
+    """Build a structured markdown escalation report for the implementation team.
+
+    Includes everything needed to reproduce and diagnose the failure:
+    scenario intent, generated parameters, Oracle errors, catalog provisions,
+    write and validation results, and timestamps.
+
+    Args:
+        state (AMLScenarioState): Current agent state at time of escalation.
+
+    Returns:
+        str: Full markdown escalation report.
+    """
+    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    intent_dict = state.get("enriched_intent") or {}
+    scenario_code = state.get("scenario_code", "Not generated")
+    error_log = state.get("error_log", [])
+    catalog_creations = state.get("catalog_creations") or []
+    params_dict = state.get("scenario_parameters") or {}
+    write_verification = state.get("write_verification") or {}
+    validation_result = state.get("validation_result") or {}
+
+    errors_text = "\n".join(f"- {e}" for e in error_log) or "_No errors logged._"
+    catalog_text = (
+        "\n".join(
+            f"- **{c.get('entity_type')}** `{c.get('code')}`: "
+            f"{c.get('name')} ({c.get('business_name')})"
+            for c in catalog_creations
+        )
+        or "_None — all parameters were pre-existing in the catalog._"
+    )
+
+    return (
+        f"# AML Scenario Escalation Report\n\n"
+        f"**Generated:** {now}  \n"
+        f"**Scenario Code:** `{scenario_code}`  \n"
+        f"**System:** PioTech AML Builder — Automated Agent\n\n"
+        f"---\n\n"
+        f"## Intent Submitted\n\n"
+        f"```json\n{json.dumps(intent_dict, indent=2, default=str)}\n```\n\n"
+        f"---\n\n"
+        f"## Error Log (Chronological)\n\n"
+        f"{errors_text}\n\n"
+        f"---\n\n"
+        f"## Catalog Auto-Provisions Attempted\n\n"
+        f"{catalog_text}\n\n"
+        f"---\n\n"
+        f"## Scenario Parameters Generated\n\n"
+        f"```json\n{json.dumps(params_dict, indent=2, default=str)}\n```\n\n"
+        f"---\n\n"
+        f"## Write Verification Results\n\n"
+        f"```json\n{json.dumps(write_verification, indent=2, default=str)}\n```\n\n"
+        f"---\n\n"
+        f"## Validation Results\n\n"
+        f"```json\n{json.dumps(validation_result, indent=2, default=str)}\n```\n\n"
+        f"---\n\n"
+        f"_This report was generated automatically by the AML Builder agent._  \n"
+        f"_Please reference Scenario Code `{scenario_code}` in all correspondence._"
+    )
 
 
 # =============================================================================
@@ -407,6 +677,98 @@ Schema:
         return {
             "next_action": "ERROR",
             "error_log": state.get("error_log", []) + [f"Intent parsing failed: {exc}"],
+        }
+
+
+# =============================================================================
+# NODE 2b — PLANNER
+# =============================================================================
+
+
+def planner_node(
+    state: AMLScenarioState, config: RunnableConfig
+) -> Dict[str, Any]:
+    """Generate and emit the human-readable execution plan for user approval.
+
+    Reads the enriched AMLIntent and uses the LLM to produce:
+    1. A structured markdown plan artifact (for the frontend side panel).
+    2. A machine-readable CONDITIONS_BLOCK JSON array (for drift assertion).
+
+    Sets next_action to WAIT_APPROVAL. Execution halts until the user
+    sends a message containing an approval keyword ("proceed", "yes",
+    "approve", "go ahead", "confirm", "start", "execute").
+
+    Args:
+        state (AMLScenarioState): Current agent state with enriched_intent set.
+        config (RunnableConfig): LangGraph runtime config.
+
+    Returns:
+        Dict[str, Any]: State updates with plan_artifact, plan_conditions, next_action.
+    """
+    logger.info("[PLANNER] Generating execution plan for user approval.")
+
+    intent_dict = state.get("enriched_intent") or {}
+    try:
+        intent = AMLIntent(**intent_dict)
+    except Exception as exc:
+        logger.error("[PLANNER] Could not deserialize AMLIntent: %s", exc)
+        return {
+            "next_action": "ERROR",
+            "error_log": state.get("error_log", []) + [f"Planner failed to read intent: {exc}"],
+        }
+
+    system_prompt = _load_prompt("planner_system.md")
+    llm = _build_llm(fast=False)
+
+    user_prompt = (
+        f"Generate the AML Scenario Execution Plan for the following intent:\n\n"
+        f"{json.dumps(intent.model_dump(), indent=2, default=str)}\n\n"
+        f"Follow the OUTPUT FORMAT exactly. "
+        f"Produce the full markdown plan AND the CONDITIONS_BLOCK JSON."
+    )
+
+    try:
+        response = llm.invoke([
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_prompt),
+        ])
+        raw = response.content.strip()
+
+        # Extract the CONDITIONS_BLOCK JSON from the response
+        conditions_match = re.search(
+            r"## CONDITIONS_BLOCK\s*```json\s*([\s\S]+?)```",
+            raw,
+            re.IGNORECASE,
+        )
+        plan_conditions: List[Dict[str, Any]] = []
+        if conditions_match:
+            try:
+                conditions_raw = json.loads(conditions_match.group(1).strip())
+                plan_conditions = [PlanCondition(**c).model_dump() for c in conditions_raw]
+                logger.info("[PLANNER] Extracted %d plan conditions.", len(plan_conditions))
+            except Exception as exc:
+                logger.warning("[PLANNER] Could not parse CONDITIONS_BLOCK: %s", exc)
+        else:
+            logger.warning("[PLANNER] No CONDITIONS_BLOCK found in planner response.")
+
+        logger.info(
+            "[PLANNER] Plan generated. length=%d chars conditions=%d.",
+            len(raw),
+            len(plan_conditions),
+        )
+
+        return {
+            "plan_artifact": raw,
+            "plan_conditions": plan_conditions,
+            "plan_approved": False,
+            "next_action": "WAIT_APPROVAL",
+        }
+
+    except Exception as exc:
+        logger.error("[PLANNER] LLM call failed: %s", exc, exc_info=True)
+        return {
+            "next_action": "ERROR",
+            "error_log": state.get("error_log", []) + [f"Planner LLM failed: {exc}"],
         }
 
 
@@ -796,13 +1158,15 @@ def decomposer_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str
             stop_period=0,
         )
 
-        # Use live PIO_AML_PARAMETERS catalog + LLM to map conditions.
+        # Use live PIO_AML_PARAMETERS catalog + auto-provisioning to map conditions.
+        existing_creations: List[Dict[str, Any]] = list(state.get("catalog_creations") or [])
         rule_details = _fetch_and_map_parameters(
             intent=intent,
             sql_meta=sql_meta,
             rule_code=rule_code,
             scenario_code=scenario_code,
             created_date=now,
+            catalog_creations=existing_creations,
         )
 
         if not rule_details:
@@ -811,6 +1175,16 @@ def decomposer_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str
                 "The scenario must define at least one valid threshold or condition "
                 "that maps to the PIO_AML_PARAMETERS catalog."
             )
+
+        # Verify auto-provisioned catalog entries are reachable via QB join path
+        if existing_creations:
+            catalog_ok = _verify_catalog_integrity(existing_creations)
+            if not catalog_ok:
+                raise ValueError(
+                    "Catalog integrity check failed: one or more auto-created parameters "
+                    "are not reachable via the PIO_AML_PARAMETERS → PIO_AML_COLUMNS join path. "
+                    "Check the auto-provisioned PIO_AML_COLUMNS entries."
+                )
 
         # Self-assess decomposition confidence
         confidence = _assess_confidence(intent, rule_details)
@@ -843,15 +1217,303 @@ def decomposer_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str
             "scenario_parameters": params.model_dump(mode="json"),
             "decomposition_confidence": confidence,
             "scenario_code": scenario_code,
+            "catalog_creations": existing_creations,
             "next_action": "QB_WRITE",
         }
 
     except Exception as exc:
         logger.error("[DECOMPOSER] Failed to decompose: %s", exc, exc_info=True)
         return {
-            "next_action": "ERROR",
+            "next_action": "FAILURE",
             "error_log": state.get("error_log", []) + [f"Decomposition failed: {exc}"],
         }
+
+
+def _query_oracle_column_type(table_name: str, column_name: str) -> Optional[str]:
+    """Query Oracle's ALL_TAB_COLUMNS for the physical data type of a column.
+
+    COLUMN_TYPE must never be LLM-inferred — it is always read from the DB schema.
+    Returns None if the column is not found.
+
+    Args:
+        table_name (str): Physical Oracle table name (e.g., 'PIO_TRANSACTIONS').
+        column_name (str): Physical column name (e.g., 'TRA_AMT').
+
+    Returns:
+        Optional[str]: Oracle DATA_TYPE string (e.g., 'NUMBER', 'VARCHAR2(40)', 'DATE')
+            or None if not found in ALL_TAB_COLUMNS.
+    """
+    from web.services.oracle import run_readonly
+    try:
+        _, rows = run_readonly(
+            """
+            SELECT DATA_TYPE, DATA_LENGTH
+            FROM ALL_TAB_COLUMNS
+            WHERE UPPER(TABLE_NAME) = UPPER(:table_name)
+              AND UPPER(COLUMN_NAME) = UPPER(:column_name)
+            """,
+            {"table_name": table_name, "column_name": column_name},
+        )
+        if rows:
+            data_type = str(rows[0][0]).strip()
+            data_length = rows[0][1]
+            if data_length is not None and str(data_length) not in ("None", "0"):
+                return f"{data_type}({data_length})"
+            return data_type
+        logger.warning(
+            "[CATALOG] Column %s.%s not found in ALL_TAB_COLUMNS.", table_name, column_name
+        )
+        return None
+    except Exception as exc:
+        logger.error("[CATALOG] ALL_TAB_COLUMNS query failed: %s", exc)
+        return None
+
+
+def _infer_column_metadata(col_name: str, col_type: str, table_name: str) -> Dict[str, Any]:
+    """Use the LLM to infer business metadata for a new catalog column.
+
+    Infers: COLUMN_BUSINESS_NAME, COLUMN_BUSINESS_NAME_NAT (Arabic),
+    AGGREGATION_CODE, SD_USED_FLAG, BALANCE_FLAG.
+    COLUMN_TYPE is explicitly excluded — it is passed in, never inferred.
+
+    Args:
+        col_name (str): Physical column name (e.g., 'DAILY_LIMIT').
+        col_type (str): Actual Oracle data type from ALL_TAB_COLUMNS.
+        table_name (str): Table this column belongs to.
+
+    Returns:
+        Dict[str, Any]: Inferred metadata keys with safe defaults for any LLM failure.
+    """
+    llm = _build_llm(fast=True)
+    prompt = (
+        f"You are an AML compliance metadata expert for a banking system.\n\n"
+        f"A new column needs to be registered in the AML parameter catalog.\n\n"
+        f"Column: {col_name}\n"
+        f"Table: {table_name}\n"
+        f"Oracle Type: {col_type}\n\n"
+        f'Return a JSON object with EXACTLY these fields:\n{{\n'
+        f'  "column_business_name": "<clear English business name, max 40 chars>",\n'
+        f'  "column_business_name_nat": "<Arabic translation, max 200 chars>",\n'
+        f'  "aggregation_code": "<1=None/Direct, 2=Count, 3=Sum, 4=Average, 5=StdDev — '
+        f'pick based on column type and name>",\n'
+        f'  "sd_used_flag": "<0 or 1 — 1 only if this is a numeric amount/balance column>",\n'
+        f'  "balance_flag": "<0 or 1 — 1 only if this column represents an account balance>"\n'
+        f"}}\n\nReturn ONLY the JSON. No explanation. No markdown fences."
+    )
+
+    defaults: Dict[str, Any] = {
+        "column_business_name": col_name.replace("_", " ").title()[:40],
+        "column_business_name_nat": col_name.replace("_", " ").title()[:200],
+        "aggregation_code": "1",
+        "sd_used_flag": "0",
+        "balance_flag": "0",
+    }
+
+    try:
+        response = llm.invoke([HumanMessage(content=prompt)])
+        raw = response.content.strip()
+        raw = re.sub(r"^```(?:json)?\s*", "", raw)
+        raw = re.sub(r"\s*```$", "", raw)
+        inferred = json.loads(raw)
+        return {**defaults, **inferred}
+    except Exception as exc:
+        logger.warning(
+            "[CATALOG] LLM metadata inference failed for %s: %s — using defaults.", col_name, exc
+        )
+        return defaults
+
+
+def _provision_catalog_entry(
+    col_name: str,
+    table_name: str,
+    catalog_creations: List[Dict[str, Any]],
+) -> Optional[tuple]:
+    """Self-provision a missing column into the AML catalog and return its codes.
+
+    Three sequential steps:
+      1. Check / INSERT PIO_AML_TABLES for the source table.
+      2. Query ALL_TAB_COLUMNS for the physical data type (never LLM-inferred).
+      3. Check / INSERT PIO_AML_COLUMNS for the column.
+      4. Check / INSERT PIO_AML_PARAMETERS for the parameter.
+
+    Each step uses individual commits so partial catalog state is preserved
+    on retry. The QB writer's atomic transaction covers scenario/rule writes,
+    not catalog provisioning.
+
+    Args:
+        col_name (str): Physical column name to provision (e.g., 'DAILY_LIMIT').
+        table_name (str): Physical Oracle table name (e.g., 'PIO_TRANSACTIONS').
+        catalog_creations (List[Dict]): Mutable list — entries appended for each new row.
+
+    Returns:
+        Optional[Tuple[str, str]]: (parameter_code, aggregation_code) on success,
+            or None if provisioning fails (e.g., column not in ALL_TAB_COLUMNS).
+    """
+    from web.services.oracle import run_readonly, run_write, get_next_numeric_code
+    now = datetime.utcnow()
+
+    logger.info("[CATALOG] Provisioning catalog for col=%s table=%s", col_name, table_name)
+
+    # ── Step 1: Ensure PIO_AML_TABLES has the source table ────────────────────
+    _, table_rows = run_readonly(
+        "SELECT TABLE_CODE FROM PIO_AML_TABLES WHERE UPPER(TABLE_NAME) = UPPER(:tn)",
+        {"tn": table_name},
+    )
+    if table_rows:
+        table_code = str(table_rows[0][0]).strip()
+        logger.info("[CATALOG] TABLE already registered: TABLE_CODE=%s", table_code)
+    else:
+        table_code = get_next_numeric_code("PIO_AML_TABLES", "TABLE_CODE")
+        biz_name = table_name.replace("PIO_", "").replace("_", " ").title()[:40]
+        run_write(
+            """INSERT INTO PIO_AML_TABLES
+               (TABLE_CODE, TABLE_NAME, BUSINESS_NAME, BUSINESS_NAME_NAT)
+               VALUES (:tc, :tn, :bn, :bnn)""",
+            {"tc": table_code, "tn": table_name[:40], "bn": biz_name, "bnn": biz_name},
+        )
+        catalog_creations.append(CatalogCreation(
+            entity_type="TABLE", code=table_code, name=table_name, business_name=biz_name
+        ).model_dump(mode="json"))
+        logger.info("[CATALOG] Inserted PIO_AML_TABLES: TABLE_CODE=%s NAME=%s",
+                    table_code, table_name)
+
+    # ── Step 2: Query ALL_TAB_COLUMNS for actual data type (NEVER inferred) ───
+    col_type = _query_oracle_column_type(table_name, col_name)
+    if col_type is None:
+        logger.error(
+            "[CATALOG] Column %s not found in ALL_TAB_COLUMNS for table %s. Cannot provision.",
+            col_name, table_name,
+        )
+        return None
+
+    # ── Step 3: Ensure PIO_AML_COLUMNS has the column ────────────────────────
+    _, col_rows = run_readonly(
+        """SELECT COLUMN_CODE FROM PIO_AML_COLUMNS
+           WHERE UPPER(COLUMN_NAME) = UPPER(:cn) AND TABLE_CODE = :tc""",
+        {"cn": col_name, "tc": table_code},
+    )
+    if col_rows:
+        col_code = str(col_rows[0][0]).strip()
+        logger.info("[CATALOG] COLUMN already registered: COLUMN_CODE=%s", col_code)
+    else:
+        col_code = get_next_numeric_code("PIO_AML_COLUMNS", "COLUMN_CODE")
+        meta = _infer_column_metadata(col_name, col_type, table_name)
+        run_write(
+            """INSERT INTO PIO_AML_COLUMNS
+               (COLUMN_CODE, COLUMN_TYPE, TABLE_CODE, COLUMN_NAME,
+                COLUMN_BUSINESS_NAME, COLUMN_BUSINESS_NAME_NAT,
+                LOOKUP_FLAG, SD_USED_FLAG, BALANCE_FLAG, HIS_FLAG)
+               VALUES (:cc, :ct, :tc, :cn, :cbn, :cbnnat, '0', :sd, :bal, '0')""",
+            {
+                "cc": col_code,
+                "ct": str(col_type)[:40],
+                "tc": table_code,
+                "cn": col_name[:40],
+                "cbn": meta["column_business_name"][:200],
+                "cbnnat": meta["column_business_name_nat"][:200],
+                "sd": meta["sd_used_flag"],
+                "bal": meta["balance_flag"],
+            },
+        )
+        catalog_creations.append(CatalogCreation(
+            entity_type="COLUMN", code=col_code, name=col_name,
+            business_name=meta["column_business_name"]
+        ).model_dump(mode="json"))
+        logger.info("[CATALOG] Inserted PIO_AML_COLUMNS: COLUMN_CODE=%s NAME=%s TYPE=%s",
+                    col_code, col_name, col_type)
+
+    # ── Step 4: Create PARAMETER_CODE in PIO_AML_PARAMETERS ──────────────────
+    _, param_rows = run_readonly(
+        """SELECT PARAMETER_CODE, AGGREGATION_CODE FROM PIO_AML_PARAMETERS
+           WHERE TABLE_CODE = :tc AND COLUMN_CODE = :cc""",
+        {"tc": table_code, "cc": col_code},
+    )
+    if param_rows:
+        p_code = str(param_rows[0][0]).strip()
+        agg_code = str(param_rows[0][1]).strip() if param_rows[0][1] else "1"
+        logger.info("[CATALOG] PARAMETER already registered: PARAMETER_CODE=%s", p_code)
+        return p_code, agg_code
+
+    meta = _infer_column_metadata(col_name, col_type, table_name)
+    agg_code = str(meta.get("aggregation_code", "1"))
+    p_code = get_next_numeric_code("PIO_AML_PARAMETERS", "PARAMETER_CODE")
+    param_element = meta["column_business_name"][:400]
+    run_write(
+        """INSERT INTO PIO_AML_PARAMETERS
+           (PARAMETER_CODE, PARAMETER_ELEMENT, TABLE_CODE, COLUMN_CODE,
+            AGGREGATION_CODE, PARAMETER_PERC_FLAG, PARAMETER_ELEMENT_NAT,
+            LGM_SCENARIO_BASED_FLAG, LGM_GROUP_BASED_FLAG,
+            CREATED_BY, CREATED_DATE, UPDATED_BY, UPDATED_DATE)
+           VALUES (:pc, :pe, :tc, :cc, :ac, '0', :penat, '0', '0',
+                   :cb, :cd, :ub, :ud)""",
+        {
+            "pc": p_code,
+            "pe": param_element,
+            "tc": table_code,
+            "cc": col_code,
+            "ac": agg_code,
+            "penat": meta["column_business_name_nat"][:400],
+            "cb": 999,
+            "cd": now,
+            "ub": 999,
+            "ud": now,
+        },
+    )
+    catalog_creations.append(CatalogCreation(
+        entity_type="PARAMETER", code=p_code, name=col_name,
+        business_name=param_element, aggregation_code=agg_code
+    ).model_dump(mode="json"))
+    logger.info(
+        "[CATALOG] Inserted PIO_AML_PARAMETERS: PARAMETER_CODE=%s for %s.%s",
+        p_code, table_name, col_name,
+    )
+    return p_code, agg_code
+
+
+def _verify_catalog_integrity(catalog_creations: List[Dict[str, Any]]) -> bool:
+    """Verify that auto-created catalog entries are reachable via the QB join path.
+
+    Checks that each new PARAMETER_CODE can be found via:
+    PIO_AML_PARAMETERS JOIN PIO_AML_COLUMNS ON TABLE_CODE + COLUMN_CODE.
+
+    Args:
+        catalog_creations (List[Dict]): Entries logged by _provision_catalog_entry.
+
+    Returns:
+        bool: True if all checks pass, False if any new entry is orphaned.
+    """
+    from web.services.oracle import run_readonly
+
+    param_codes = [
+        c["code"] for c in catalog_creations if c.get("entity_type") == "PARAMETER"
+    ]
+    if not param_codes:
+        return True
+
+    try:
+        for p_code in param_codes:
+            _, rows = run_readonly(
+                """
+                SELECT P.PARAMETER_CODE
+                FROM PIO_AML_PARAMETERS P
+                JOIN PIO_AML_COLUMNS C
+                    ON P.TABLE_CODE = C.TABLE_CODE AND P.COLUMN_CODE = C.COLUMN_CODE
+                WHERE P.PARAMETER_CODE = :pc
+                """,
+                {"pc": p_code},
+            )
+            if not rows:
+                logger.error(
+                    "[CATALOG] Integrity FAILED for PARAMETER_CODE=%s — "
+                    "not reachable via PIO_AML_PARAMETERS ⟶ PIO_AML_COLUMNS join.",
+                    p_code,
+                )
+                return False
+            logger.info("[CATALOG] Integrity check PASSED for PARAMETER_CODE=%s", p_code)
+        return True
+    except Exception as exc:
+        logger.error("[CATALOG] Integrity check query failed: %s", exc)
+        return False
 
 
 def _fetch_and_map_parameters(
@@ -860,6 +1522,7 @@ def _fetch_and_map_parameters(
     rule_code: str,
     scenario_code: str,
     created_date: datetime,
+    catalog_creations: Optional[List[Dict[str, Any]]] = None,
 ) -> List[QBRuleDetail]:
     """Map intent thresholds and SQL conditions to QBRuleDetail rows.
 
@@ -876,11 +1539,14 @@ def _fetch_and_map_parameters(
     Returns:
         List[QBRuleDetail]: List of condition rows for PIO_AML_RULES_DETAILS.
     """
+    if catalog_creations is None:
+        catalog_creations = []
+
     details: List[QBRuleDetail] = []
     seq = 1
 
     # Load dynamic catalog mappings from database
-    column_map = {}
+    column_map: Dict[str, tuple] = {}
     try:
         from web.services.oracle import run_readonly
         _, catalog_rows = run_readonly(
@@ -889,28 +1555,18 @@ def _fetch_and_map_parameters(
             FROM PIO_AML_PARAMETERS P
             JOIN PIO_AML_COLUMNS C ON P.TABLE_CODE = C.TABLE_CODE AND P.COLUMN_CODE = C.COLUMN_CODE
             """,
-            {}
+            {},
         )
         for row in catalog_rows:
             p_code = str(row[0]).strip()
-            col_name = str(row[1]).strip().upper()
-            agg_code = str(row[2]).strip()
-            column_map[col_name] = (p_code, agg_code)
-            
+            col_name_upper = str(row[1]).strip().upper()
+            agg_code = str(row[2]).strip() if row[2] else "1"
+            column_map[col_name_upper] = (p_code, agg_code)
+
         logger.info("[DECOMPOSER] Loaded %d dynamic parameter mappings from catalog.", len(column_map))
     except Exception as exc:
-        logger.error("[DECOMPOSER] Failed to query live parameter catalog: %s. Using hardcoded fallback.", exc)
-        column_map = {
-            "EXPL_CODE": ("1", "1"),
-            "CUS_CLASS": ("7", "1"),
-            "INDV_CORP_IND": ("104", "1"),
-            "EQU_TRA_AMT": ("5", "1"),
-            "TRA_DATE": ("14", "3"),
-            "DAY_DATE": ("103", "1"),
-            "CUST_RISK_LVL": ("106", "1"),
-            "BLA_REF": ("108", "1"),
-            "DATE_CLOSED": ("113", "1"),
-        }
+        logger.error("[DECOMPOSER] Failed to query live parameter catalog: %s.", exc)
+        # No hardcoded fallback — auto-provisioning handles unknowns below
 
     # Helper: build a QBRuleDetail with all required fields.
     def _make_detail(
@@ -979,12 +1635,22 @@ def _fetch_and_map_parameters(
         if col_name in ("CUS_STATUS", "DAY_DATE", "COUNTRY_CODE", "INST_CODE", "UPDATED_DATE", "CREATED_DATE", "STATUS_CODE", "TRA_DATE", "TRANS_DATE"):
             continue
 
-        # Raise error if column is not supported in the database catalog
+        # Column not in catalog — attempt auto-provisioning
         if col_name not in column_map:
-            raise ValueError(
-                f"Column '{raw_col}' in SQL condition '{cond}' is not supported by the compliance catalog. "
-                f"Please ensure it is registered in PIO_AML_COLUMNS."
+            logger.info(
+                "[DECOMPOSER] Column '%s' not in catalog — attempting auto-provisioning.", col_name
             )
+            source_table = (sql_meta.primary_table or "PIO_TRANSACTIONS").split(".")[-1].upper()
+            provision_result = _provision_catalog_entry(col_name, source_table, catalog_creations)
+            if provision_result is None:
+                raise ValueError(
+                    f"Column '{raw_col}' (table: {source_table}) could not be auto-provisioned. "
+                    f"It does not exist in ALL_TAB_COLUMNS. "
+                    f"Verify the column name is correct or register it manually in PIO_AML_COLUMNS."
+                )
+            p_new, agg_new = provision_result
+            column_map[col_name] = (p_new, agg_new)
+            logger.info("[DECOMPOSER] Auto-provisioned '%s' → PARAMETER_CODE=%s", col_name, p_new)
 
         p_code, agg_code = column_map[col_name]
 
@@ -1197,162 +1863,350 @@ def _assess_confidence(intent: AMLIntent, details: List[QBRuleDetail]) -> float:
 
 
 # =============================================================================
-# NODE 5 — QB WRITER
+# NODE 5 — QB WRITER (helpers + atomic node)
 # =============================================================================
 
 
-def qb_writer_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str, Any]:
-    """Write the decomposed parameters into Oracle AML tables.
+def _assert_plan_drift(
+    plan_conditions: List[Dict[str, Any]],
+    rule_details: List[QBRuleDetail],
+) -> None:
+    """Assert that generated rule_details match every approved plan condition.
 
-    Inserts rows into:
-    1. PIO_AML_SCENARIO (scenario header)
-    2. PIO_AML_RULES (rule definition)
-    3. PIO_AML_SCENARIO_RULES (linkage)
-    4. PIO_AML_RULES_DETAILS (conditions)
+    Checks that each PlanCondition has a corresponding QBRuleDetail with the
+    same operator and value_from. Extra rule_details generate a WARNING only.
+
+    Args:
+        plan_conditions (List[Dict]): Serialized PlanCondition dicts from state.
+        rule_details (List[QBRuleDetail]): Generated condition rows from decomposer.
+
+    Raises:
+        PlanDriftError: If any approved plan condition has no matching rule_detail.
+    """
+    if not plan_conditions:
+        logger.warning(
+            "[DRIFT] No plan conditions to check — drift assertion skipped. "
+            "Planner may not have emitted a CONDITIONS_BLOCK."
+        )
+        return
+
+    # Build lookup: (operator_upper, value_from_stripped)
+    generated_sigs = {
+        (d.rule_operator.upper().strip(), str(d.comparison_value_from or "").strip())
+        for d in rule_details
+    }
+
+    drifted = []
+    for cond in plan_conditions:
+        op = str(cond.get("operator", "")).upper().strip()
+        val = str(cond.get("value_from", "")).strip()
+        if (op, val) not in generated_sigs:
+            drifted.append(
+                f"  • [{cond.get('condition_id')}] {cond.get('description')} "
+                f"— expected {op} {val}"
+            )
+
+    if drifted:
+        drift_detail = "\n".join(drifted)
+        logger.error(
+            "[DRIFT] %d plan condition(s) unmatched in generated parameters:\n%s",
+            len(drifted), drift_detail,
+        )
+        raise PlanDriftError(
+            f"Execution halted — {len(drifted)} approved plan condition(s) "
+            f"are absent from the generated scenario parameters:\n\n"
+            f"{drift_detail}\n\n"
+            f"The scenario was NOT written to Oracle. "
+            f"Please review the plan and resubmit."
+        )
+
+    # Warn about extra rule_details with no plan counterpart
+    plan_sigs = {
+        (str(c.get("operator", "")).upper().strip(), str(c.get("value_from", "")).strip())
+        for c in plan_conditions
+    }
+    extras = [
+        d for d in rule_details
+        if (d.rule_operator.upper().strip(), str(d.comparison_value_from or "").strip())
+           not in plan_sigs
+    ]
+    if extras:
+        logger.warning(
+            "[DRIFT] %d extra rule_detail(s) have no corresponding plan condition "
+            "(will be written): %s",
+            len(extras),
+            [(d.rule_operator, d.comparison_value_from) for d in extras],
+        )
+
+
+def _verify_write_integrity(
+    scenario_code: str,
+    rule_code: str,
+    expected_detail_rows: int,
+) -> WriteVerification:
+    """SELECT COUNT from all 4 Oracle tables to verify atomic write landed correctly.
+
+    Args:
+        scenario_code (str): The scenario code written.
+        rule_code (str): The rule code written.
+        expected_detail_rows (int): Number of QBRuleDetail rows that were inserted.
+
+    Returns:
+        WriteVerification: Per-table counts, pass/fail, and discrepancy descriptions.
+    """
+    from web.services.oracle import run_readonly
+
+    discrepancies: List[str] = []
+
+    def _count(sql: str, params: dict) -> int:
+        try:
+            _, rows = run_readonly(sql, params)
+            return int(rows[0][0]) if rows else 0
+        except Exception as exc:
+            logger.error("[WRITER] Count query failed: %s", exc)
+            return -1
+
+    sce_rows = _count(
+        "SELECT COUNT(*) FROM PIO_AML_SCENARIO WHERE SCENARIO_CODE = :sc",
+        {"sc": scenario_code},
+    )
+    rule_rows = _count(
+        "SELECT COUNT(*) FROM PIO_AML_RULES WHERE RULE_CODE = :rc",
+        {"rc": rule_code},
+    )
+    sr_rows = _count(
+        "SELECT COUNT(*) FROM PIO_AML_SCENARIO_RULES WHERE AML_SCENARIO = :sc",
+        {"sc": scenario_code},
+    )
+    det_rows = _count(
+        "SELECT COUNT(*) FROM PIO_AML_RULES_DETAILS WHERE RULE_CODE = :rc",
+        {"rc": rule_code},
+    )
+
+    if sce_rows != 1:
+        discrepancies.append(f"PIO_AML_SCENARIO: expected 1, found {sce_rows}")
+    if rule_rows != 1:
+        discrepancies.append(f"PIO_AML_RULES: expected 1, found {rule_rows}")
+    if sr_rows != 1:
+        discrepancies.append(f"PIO_AML_SCENARIO_RULES: expected 1, found {sr_rows}")
+    if det_rows != expected_detail_rows:
+        discrepancies.append(
+            f"PIO_AML_RULES_DETAILS: expected {expected_detail_rows}, found {det_rows}"
+        )
+
+    return WriteVerification(
+        scenario_rows=sce_rows,
+        rule_rows=rule_rows,
+        scenario_rule_rows=sr_rows,
+        rule_detail_rows=det_rows,
+        expected_detail_rows=expected_detail_rows,
+        all_pass=len(discrepancies) == 0,
+        discrepancies=discrepancies,
+    )
+
+
+def _extract_table_from_oracle_error(error_str: str) -> str:
+    """Extract a table name from an Oracle error string for precise diagnostics.
+
+    Args:
+        error_str (str): The string representation of the Oracle exception.
+
+    Returns:
+        str: Matching table name, or 'unknown table'.
+    """
+    for table in (
+        "PIO_AML_SCENARIO", "PIO_AML_RULES", "PIO_AML_SCENARIO_RULES",
+        "PIO_AML_RULES_DETAILS", "PIO_AML_PARAMETERS", "PIO_AML_COLUMNS", "PIO_AML_TABLES",
+    ):
+        if table in error_str.upper():
+            return table
+    return "unknown table"
+
+
+def qb_writer_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str, Any]:
+    """Write the decomposed parameters into Oracle AML tables — atomically.
+
+    All 4 INSERTs are wrapped in a SINGLE Oracle transaction using
+    atomic_connection(). Any exception triggers a full rollback — no
+    partial scenarios can be left in the database.
+
+    Pre-flight: performs plan drift assertion before opening any connection.
+    If drift is detected, raises PlanDriftError and exits without writing.
+
+    Post-write: runs write integrity verification (SELECT COUNT on all 4 tables).
 
     Args:
         state (AMLScenarioState): Current agent state.
         config (RunnableConfig): LangGraph runtime config.
 
     Returns:
-        Dict[str, Any]: State updates with scenario_write_success and next_action.
+        Dict[str, Any]: State updates with scenario_write_success, write_verification,
+            and next_action.
     """
-    logger.info("[QB_WRITER] Writing scenario to Oracle.")
+    logger.info("[QB_WRITER] Starting atomic write sequence.")
 
     params_dict = state.get("scenario_parameters") or {}
     params = ScenarioParameters(**params_dict)
+    plan_conditions: List[Dict[str, Any]] = state.get("plan_conditions") or []
 
-    from web.services.oracle import run_write, run_write_many
+    # ── Pre-flight: drift assertion (before touching Oracle) ──────────────────
+    try:
+        _assert_plan_drift(plan_conditions, params.rule_details)
+        logger.info(
+            "[QB_WRITER] Drift assertion passed — %d plan condition(s) verified.",
+            len(plan_conditions),
+        )
+    except PlanDriftError as drift_exc:
+        logger.error("[QB_WRITER] Drift assertion FAILED — aborting write. %s", drift_exc)
+        return {
+            "scenario_write_success": False,
+            "next_action": "FAILURE",
+            "error_log": state.get("error_log", []) + [str(drift_exc)],
+        }
+
+    from web.services.oracle import atomic_connection
 
     try:
-        # Delete existing records under this scenario code to prevent duplicate scenario rows on retry
-        _delete_scenario_if_exists(params.scenario.scenario_code)
+        # ── Single atomic transaction: delete + 4 INSERTs ────────────────────
+        with atomic_connection() as conn:
+            cursor = conn.cursor()
 
-        # 1. Insert scenario header
-        _insert_scenario(params.scenario)
+            # Cleanup any previous attempt for this scenario_code
+            _delete_scenario_atomic(cursor, params.scenario.scenario_code)
 
-        # 2. Insert rules
-        for rule in params.rules:
-            _insert_rule(rule)
+            # 1. Scenario header
+            _insert_scenario_cursor(cursor, params.scenario)
 
-        # 3. Insert scenario-rule links
-        for sr in params.scenario_rules:
-            _insert_scenario_rule(sr)
+            # 2. Rule definitions
+            for rule in params.rules:
+                _insert_rule_cursor(cursor, rule)
 
-        # 4. Insert rule details (batch)
-        _insert_rule_details(params.rule_details)
+            # 3. Scenario-rule links
+            for sr in params.scenario_rules:
+                _insert_scenario_rule_cursor(cursor, sr)
+
+            # 4. Rule details (batch)
+            _insert_rule_details_cursor(cursor, params.rule_details)
 
         logger.info(
-            "[QB_WRITER] All rows written. scenario_code=%s",
+            "[QB_WRITER] Atomic commit successful. scenario_code=%s",
             params.scenario.scenario_code,
         )
 
-        return {
-            "scenario_write_success": True,
-            "scenario_code": params.scenario.scenario_code,
-            "next_action": "VALIDATE",
-        }
-
     except Exception as exc:
-        logger.error("[QB_WRITER] Oracle write failed: %s", exc, exc_info=True)
+        table_hint = _extract_table_from_oracle_error(str(exc))
+        detailed_error = (
+            f"Oracle write failed on {table_hint}. "
+            f"Error type: {type(exc).__name__}. "
+            f"Detail: {exc}. "
+            f"All writes were rolled back — the database is clean."
+        )
+        logger.error("[QB_WRITER] %s", detailed_error, exc_info=True)
         return {
             "scenario_write_success": False,
-            "next_action": "ERROR",
-            "error_log": state.get("error_log", []) + [f"QB Write failed: {exc}"],
+            "next_action": "FAILURE",
+            "error_log": state.get("error_log", []) + [detailed_error],
         }
 
+    # ── Post-write integrity verification ────────────────────────────────────
+    rule_code = params.rules[0].rule_code if params.rules else ""
+    verification = _verify_write_integrity(
+        scenario_code=params.scenario.scenario_code,
+        rule_code=rule_code,
+        expected_detail_rows=len(params.rule_details),
+    )
 
-def _delete_scenario_if_exists(scenario_code: str) -> None:
-    """Delete all database records related to scenario_code before rewriting.
+    if not verification.all_pass:
+        disc_text = "; ".join(verification.discrepancies)
+        logger.error("[QB_WRITER] Write integrity check FAILED: %s", disc_text)
+        return {
+            "scenario_write_success": False,
+            "write_verification": verification.model_dump(mode="json"),
+            "next_action": "FAILURE",
+            "error_log": state.get("error_log", []) + [
+                f"Write integrity check failed after commit: {disc_text}"
+            ],
+        }
 
-    Ensures that validation retry loops do not write duplicate scenario rows
-    or raise unique/primary key constraints.
+    logger.info("[QB_WRITER] Write integrity verified — all row counts match.")
+    return {
+        "scenario_write_success": True,
+        "scenario_code": params.scenario.scenario_code,
+        "write_verification": verification.model_dump(mode="json"),
+        "next_action": "VALIDATE",
+    }
+
+
+def _delete_scenario_atomic(cursor: Any, scenario_code: str) -> None:
+    """Delete all DB records for scenario_code using a shared cursor (within atomic tx).
+
+    Runs inside the atomic_connection transaction — no individual commit.
+    Ensures retry loops never hit primary key violations.
 
     Args:
-        scenario_code (str): The unique scenario identifier.
+        cursor: An open Oracle cursor from atomic_connection.
+        scenario_code (str): The unique scenario identifier to clean up.
     """
-    from web.services.oracle import run_write
     logger.info("[QB_WRITER] Cleaning existing rows for scenario_code=%s", scenario_code)
 
-    # 1. Delete condition details
-    run_write(
-        """
-        DELETE FROM PIO_AML_RULES_DETAILS
-        WHERE RULE_CODE IN (
-            SELECT AML_RULE_CODE
-            FROM PIO_AML_SCENARIO_RULES
-            WHERE AML_SCENARIO = :scenario_code
-        )
-        """,
-        {"scenario_code": scenario_code},
+    cursor.execute(
+        """DELETE FROM PIO_AML_RULES_DETAILS
+           WHERE RULE_CODE IN (
+               SELECT AML_RULE_CODE FROM PIO_AML_SCENARIO_RULES
+               WHERE AML_SCENARIO = :sc
+           )""",
+        {"sc": scenario_code},
     )
-
-    # 2. Delete rule definitions linked to this scenario
-    run_write(
-        """
-        DELETE FROM PIO_AML_RULES
-        WHERE RULE_CODE IN (
-            SELECT AML_RULE_CODE
-            FROM PIO_AML_SCENARIO_RULES
-            WHERE AML_SCENARIO = :scenario_code
-        )
-        """,
-        {"scenario_code": scenario_code},
+    cursor.execute(
+        """DELETE FROM PIO_AML_RULES
+           WHERE RULE_CODE IN (
+               SELECT AML_RULE_CODE FROM PIO_AML_SCENARIO_RULES
+               WHERE AML_SCENARIO = :sc
+           )""",
+        {"sc": scenario_code},
     )
-
-    # 3. Delete scenario-rule linkages
-    run_write(
-        "DELETE FROM PIO_AML_SCENARIO_RULES WHERE AML_SCENARIO = :scenario_code",
-        {"scenario_code": scenario_code},
+    cursor.execute(
+        "DELETE FROM PIO_AML_SCENARIO_RULES WHERE AML_SCENARIO = :sc",
+        {"sc": scenario_code},
     )
-
-    # 4. Delete scenario header
-    run_write(
-        "DELETE FROM PIO_AML_SCENARIO WHERE SCENARIO_CODE = :scenario_code",
-        {"scenario_code": scenario_code},
+    cursor.execute(
+        "DELETE FROM PIO_AML_SCENARIO WHERE SCENARIO_CODE = :sc",
+        {"sc": scenario_code},
     )
 
 
-def _insert_scenario(scenario: QBScenario) -> None:
-    """INSERT a row into PIO_AML_SCENARIO.
-
-    Inserts every column from the reference scenario_creation.md template.
-    All field names match the live PIO_AML_SCENARIO schema exactly.
+def _insert_scenario_cursor(cursor: Any, scenario: QBScenario) -> None:
+    """INSERT a row into PIO_AML_SCENARIO using a shared cursor.
 
     Args:
+        cursor: Open Oracle cursor from atomic_connection.
         scenario (QBScenario): Scenario header data.
     """
-    from web.services.oracle import run_write
-
-    sql = """
-        INSERT INTO PIO_AML_SCENARIO
-            (COUNTRY_CODE, INST_CODE, SCENARIO_CODE, SCENARIO_DES_ENG,
-             SCENARIO_DES_NAT_LAN, ACTIVE_FLAG, EXCLUDE_EXPL_FLAG,
-             USE_WATCHLIST_FLAG, VIOLATION_LEVEL, DEGREE_RISK_FLAG,
-             DEFAULT_SCENARIO_FLAG, RUN_FLAG, APPROVAL_FLAG,
-             GROUP_BY_FLAG, USE_WORLDCHECK_FLAG,
-             CREATED_BY, CREATED_DATE, UPDATED_BY, UPDATED_DATE,
-             TRANS_WITHOUTTRANS_FLAG, CATEGORY_CODE,
-             ACTIVE_THRESHOLD_CURR_FLAG, SCE_TYPE_CODE, CLASS_CODE)
-        VALUES
-            (:country_code, :inst_code, :scenario_code, :scenario_des_eng,
-             :scenario_des_nat_lan, :active_flag, :exclude_expl_flag,
-             :use_watchlist_flag, :violation_level, :degree_risk_flag,
-             :default_scenario_flag, :run_flag, :approval_flag,
-             :group_by_flag, :use_worldcheck_flag,
-             :created_by, :created_date, :updated_by, :updated_date,
-             :trans_withouttrans_flag, :category_code,
-             :active_threshold_curr_flag, :sce_type_code, :class_code)
-    """
-    run_write(
-        sql,
+    cursor.execute(
+        """INSERT INTO PIO_AML_SCENARIO
+               (COUNTRY_CODE, INST_CODE, SCENARIO_CODE, SCENARIO_DES_ENG,
+                SCENARIO_DES_NAT_LAN, ACTIVE_FLAG, EXCLUDE_EXPL_FLAG,
+                USE_WATCHLIST_FLAG, VIOLATION_LEVEL, DEGREE_RISK_FLAG,
+                DEFAULT_SCENARIO_FLAG, RUN_FLAG, APPROVAL_FLAG,
+                GROUP_BY_FLAG, USE_WORLDCHECK_FLAG,
+                CREATED_BY, CREATED_DATE, UPDATED_BY, UPDATED_DATE,
+                TRANS_WITHOUTTRANS_FLAG, CATEGORY_CODE,
+                ACTIVE_THRESHOLD_CURR_FLAG, SCE_TYPE_CODE, CLASS_CODE)
+           VALUES
+               (:country_code, :inst_code, :scenario_code, :scenario_des_eng,
+                :scenario_des_nat_lan, :active_flag, :exclude_expl_flag,
+                :use_watchlist_flag, :violation_level, :degree_risk_flag,
+                :default_scenario_flag, :run_flag, :approval_flag,
+                :group_by_flag, :use_worldcheck_flag,
+                :created_by, :created_date, :updated_by, :updated_date,
+                :trans_withouttrans_flag, :category_code,
+                :active_threshold_curr_flag, :sce_type_code, :class_code)""",
         {
             "country_code": int(scenario.country_code),
             "inst_code": int(scenario.inst_code),
             "scenario_code": scenario.scenario_code,
             "scenario_des_eng": scenario.scenario_des_eng,
-            "scenario_des_nat_lan": scenario.scenario_des_nat_lan
-            or scenario.scenario_des_eng,
+            "scenario_des_nat_lan": scenario.scenario_des_nat_lan or scenario.scenario_des_eng,
             "active_flag": scenario.active_flag,
             "exclude_expl_flag": scenario.exclude_expl_flag,
             "use_watchlist_flag": scenario.use_watchlist_flag,
@@ -1374,37 +2228,29 @@ def _insert_scenario(scenario: QBScenario) -> None:
             "class_code": scenario.class_code,
         },
     )
-    logger.debug("[QB_WRITER] PIO_AML_SCENARIO inserted: %s", scenario.scenario_code)
+    logger.debug("[QB_WRITER] PIO_AML_SCENARIO staged: %s", scenario.scenario_code)
 
 
-def _insert_rule(rule: QBRule) -> None:
-    """INSERT a row into PIO_AML_RULES.
-
-    Inserts every column from the reference scenario_creation.md template.
-    RULE_DESC_ENG and RULE_DESC_ARB are both populated. PERIOD_TYPE is
-    a numeric code from PIO_PERIOD_TYPE, NOT 'D'/'M'/'Y'.
+def _insert_rule_cursor(cursor: Any, rule: QBRule) -> None:
+    """INSERT a row into PIO_AML_RULES using a shared cursor.
 
     Args:
+        cursor: Open Oracle cursor from atomic_connection.
         rule (QBRule): Rule definition data.
     """
-    from web.services.oracle import run_write
-
-    sql = """
-        INSERT INTO PIO_AML_RULES
-            (COUNTRY_CODE, INST_CODE, RULE_CODE, RULE_DESC_ENG, RULE_DESC_ARB,
-             ACTIVE_FLAG, PERIOD_TYPE, PERIOD_DAYS,
-             USE_SEQUENTIALLY_FLAG, SEQUENTIALLY_COUNT,
-             DEFAULT_RULE_FLAG, EXCLUDE_DAYS,
-             LTG_CODE, UPDATED_BY, UPDATED_DATE)
-        VALUES
-            (:country_code, :inst_code, :rule_code, :rule_desc_eng, :rule_desc_arb,
-             :active_flag, :period_type, :period_days,
-             :use_sequentially_flag, :sequentially_count,
-             :default_rule_flag, :exclude_days,
-             :ltg_code, :updated_by, :updated_date)
-    """
-    run_write(
-        sql,
+    cursor.execute(
+        """INSERT INTO PIO_AML_RULES
+               (COUNTRY_CODE, INST_CODE, RULE_CODE, RULE_DESC_ENG, RULE_DESC_ARB,
+                ACTIVE_FLAG, PERIOD_TYPE, PERIOD_DAYS,
+                USE_SEQUENTIALLY_FLAG, SEQUENTIALLY_COUNT,
+                DEFAULT_RULE_FLAG, EXCLUDE_DAYS,
+                LTG_CODE, UPDATED_BY, UPDATED_DATE)
+           VALUES
+               (:country_code, :inst_code, :rule_code, :rule_desc_eng, :rule_desc_arb,
+                :active_flag, :period_type, :period_days,
+                :use_sequentially_flag, :sequentially_count,
+                :default_rule_flag, :exclude_days,
+                :ltg_code, :updated_by, :updated_date)""",
         {
             "country_code": int(rule.country_code),
             "inst_code": int(rule.inst_code),
@@ -1423,32 +2269,25 @@ def _insert_rule(rule: QBRule) -> None:
             "updated_date": rule.updated_date,
         },
     )
-    logger.debug("[QB_WRITER] PIO_AML_RULES inserted: %s", rule.rule_code)
+    logger.debug("[QB_WRITER] PIO_AML_RULES staged: %s", rule.rule_code)
 
 
-def _insert_scenario_rule(sr: QBScenarioRule) -> None:
-    """INSERT a row into PIO_AML_SCENARIO_RULES.
-
-    Includes FREQUENCY_DAYS column. RULE_TYPE is a numeric code from
-    PIO_AML_RULE_TYPE lookup ('3' = standalone rule, no relationship).
+def _insert_scenario_rule_cursor(cursor: Any, sr: QBScenarioRule) -> None:
+    """INSERT a row into PIO_AML_SCENARIO_RULES using a shared cursor.
 
     Args:
+        cursor: Open Oracle cursor from atomic_connection.
         sr (QBScenarioRule): Scenario-rule linkage data.
     """
-    from web.services.oracle import run_write
-
-    sql = """
-        INSERT INTO PIO_AML_SCENARIO_RULES
-            (COUNTRY_CODE, INST_CODE, AML_RULE_CODE, AML_SCENARIO,
-             RULE_SEQ, RULE_TYPE, FREQUENCY_DAYS,
-             AMT_PERC, MARGIN_PERC, STOP_PERIOD)
-        VALUES
-            (:country_code, :inst_code, :aml_rule_code, :aml_scenario,
-             :rule_seq, :rule_type, :frequency_days,
-             :amt_perc, :margin_perc, :stop_period)
-    """
-    run_write(
-        sql,
+    cursor.execute(
+        """INSERT INTO PIO_AML_SCENARIO_RULES
+               (COUNTRY_CODE, INST_CODE, AML_RULE_CODE, AML_SCENARIO,
+                RULE_SEQ, RULE_TYPE, FREQUENCY_DAYS,
+                AMT_PERC, MARGIN_PERC, STOP_PERIOD)
+           VALUES
+               (:country_code, :inst_code, :aml_rule_code, :aml_scenario,
+                :rule_seq, :rule_type, :frequency_days,
+                :amt_perc, :margin_perc, :stop_period)""",
         {
             "country_code": int(sr.country_code),
             "inst_code": int(sr.inst_code),
@@ -1462,42 +2301,35 @@ def _insert_scenario_rule(sr: QBScenarioRule) -> None:
             "stop_period": sr.stop_period,
         },
     )
-    logger.debug("[QB_WRITER] PIO_AML_SCENARIO_RULES inserted.")
+    logger.debug("[QB_WRITER] PIO_AML_SCENARIO_RULES staged.")
 
 
-def _insert_rule_details(details: List[QBRuleDetail]) -> None:
-    """Batch INSERT rows into PIO_AML_RULES_DETAILS.
-
-    Inserts every column from the reference scenario_creation.md template.
-    PARAMETER_CODE must be a real code from PIO_AML_PARAMETERS.
-    USE_SD_FLAG, SD_PERIOD_TYPE, SAME_CUST_FLAG, FROM_PARAM_PERC
-    are all now included.
+def _insert_rule_details_cursor(cursor: Any, details: List[QBRuleDetail]) -> None:
+    """Batch INSERT rows into PIO_AML_RULES_DETAILS using a shared cursor.
 
     Args:
+        cursor: Open Oracle cursor from atomic_connection.
         details (List[QBRuleDetail]): List of condition rows to insert.
     """
-    from web.services.oracle import run_write_many
-
     if not details:
-        logger.debug("[QB_WRITER] No rule details to insert.")
+        logger.debug("[QB_WRITER] No rule details to stage.")
         return
 
-    sql = """
-        INSERT INTO PIO_AML_RULES_DETAILS
-            (COUNTRY_CODE, INST_CODE, PARAMETER_CODE, RULE_CODE,
-             RULE_SEQ, RULE_OPERATOR, COMPARISON_VALUE_FROM,
-             COMBINED_RULE, COMPARISON_VALUE_FROM_DES,
-             USE_SD_FLAG, SD_PERIOD_TYPE, SAME_CUST_FLAG,
-             FROM_PARAM_PERC,
-             CREATED_BY, CREATED_DATE, UPDATED_BY, UPDATED_DATE)
-        VALUES
-            (:country_code, :inst_code, :parameter_code, :rule_code,
-             :rule_seq, :rule_operator, :comparison_value_from,
-             :combined_rule, :comparison_value_from_des,
-             :use_sd_flag, :sd_period_type, :same_cust_flag,
-             :from_param_perc,
-             :created_by, :created_date, :updated_by, :updated_date)
-    """
+    sql = """INSERT INTO PIO_AML_RULES_DETAILS
+                 (COUNTRY_CODE, INST_CODE, PARAMETER_CODE, RULE_CODE,
+                  RULE_SEQ, RULE_OPERATOR, COMPARISON_VALUE_FROM,
+                  COMBINED_RULE, COMPARISON_VALUE_FROM_DES,
+                  USE_SD_FLAG, SD_PERIOD_TYPE, SAME_CUST_FLAG,
+                  FROM_PARAM_PERC,
+                  CREATED_BY, CREATED_DATE, UPDATED_BY, UPDATED_DATE)
+             VALUES
+                 (:country_code, :inst_code, :parameter_code, :rule_code,
+                  :rule_seq, :rule_operator, :comparison_value_from,
+                  :combined_rule, :comparison_value_from_des,
+                  :use_sd_flag, :sd_period_type, :same_cust_flag,
+                  :from_param_perc,
+                  :created_by, :created_date, :updated_by, :updated_date)"""
+
     params_list = [
         {
             "country_code": int(d.country_code),
@@ -1520,10 +2352,8 @@ def _insert_rule_details(details: List[QBRuleDetail]) -> None:
         }
         for d in details
     ]
-    run_write_many(sql, params_list)
-    logger.debug(
-        "[QB_WRITER] PIO_AML_RULES_DETAILS batch inserted: %d rows", len(details)
-    )
+    cursor.executemany(sql, params_list)
+    logger.debug("[QB_WRITER] PIO_AML_RULES_DETAILS staged: %d rows", len(details))
 
 
 # =============================================================================
@@ -1531,15 +2361,79 @@ def _insert_rule_details(details: List[QBRuleDetail]) -> None:
 # =============================================================================
 
 
+def _check_threshold_sensitivity(rule_code: str) -> Dict[str, Any]:
+    """Diagnose zero-alert scenarios by reporting ±20% threshold adjustments.
+
+    Reads numeric COMPARISON_VALUE_FROM values from PIO_AML_RULES_DETAILS and
+    calculates what a 20% loosening would look like. Does NOT modify any data —
+    purely advisory output for the failure menu.
+
+    Args:
+        rule_code (str): The rule code whose details to inspect.
+
+    Returns:
+        Dict[str, Any]: Sensitivity report with per-parameter adjustment suggestions.
+    """
+    from web.services.oracle import run_readonly
+
+    try:
+        cols, rows = run_readonly(
+            """SELECT PARAMETER_CODE, RULE_OPERATOR, COMPARISON_VALUE_FROM, RULE_SEQ
+               FROM PIO_AML_RULES_DETAILS
+               WHERE RULE_CODE = :rule_code
+               AND REGEXP_LIKE(COMPARISON_VALUE_FROM, '^[0-9.]+$')
+               ORDER BY RULE_SEQ""",
+            {"rule_code": rule_code},
+        )
+        adjustments = []
+        for row in rows:
+            row_d = dict(zip(cols, row))
+            try:
+                current = float(row_d["comparison_value_from"])
+                # For >= or > operators, loosening means reducing the threshold
+                # For <= or < operators, loosening means raising the threshold
+                op = row_d.get("rule_operator", ">=")
+                if op in (">=", ">"):
+                    looser = round(current * 0.8, 2)
+                    tighter = round(current * 1.2, 2)
+                else:
+                    looser = round(current * 1.2, 2)
+                    tighter = round(current * 0.8, 2)
+                adjustments.append({
+                    "parameter_code": row_d["parameter_code"],
+                    "operator": op,
+                    "current_value": current,
+                    "looser_20pct": looser,
+                    "tighter_20pct": tighter,
+                    "suggestion": f"Change threshold from {current} to {looser} to capture more events",
+                })
+            except (ValueError, TypeError):
+                pass
+
+        return {
+            "tested": len(adjustments) > 0,
+            "adjustments": adjustments,
+            "diagnosis": (
+                "Zero alerts detected. Loosening the thresholds below by ~20% may capture events."
+                if adjustments
+                else "No numeric thresholds found to adjust."
+            ),
+        }
+    except Exception as exc:
+        logger.warning("[VALIDATOR] Sensitivity check failed: %s", exc)
+        return {"tested": False, "adjustments": [], "diagnosis": f"Sensitivity check unavailable: {exc}"}
+
+
 def validator_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str, Any]:
     """Agentic self-validation — hunt the scenario's own output.
 
     After writing the scenario to Oracle:
     1. Runs FILL_PIO_AML_CUSTOMERS to trigger all scenarios
-    2. Queries PIO_AML_CUSTOMERS for alerts generated by our scenario
-    3. Sanity-checks the alert count against expected range
-    4. Pulls sample alerts for user review
-    5. Self-corrects up to MAX_VALIDATION_RETRIES if something is wrong
+    2. Queries PIO_AML_CUSTOMERS (header alerts) + PIO_AML_CUSTOMERS_DET (transactions)
+    3. Calculates alert_density_ratio (det rows / header rows)
+    4. Runs threshold sensitivity diagnostic when alert_count == 0
+    5. Verifies write integrity from state
+    6. Self-corrects up to MAX_VALIDATION_RETRIES if conditions not met
 
     Args:
         state (AMLScenarioState): Current agent state.
@@ -1550,6 +2444,7 @@ def validator_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str,
     """
     retry_count = state.get("validation_retry_count", 0)
     scenario_code = state.get("scenario_code", "")
+    rule_code = state.get("rule_code", "")
     intent_dict = state.get("enriched_intent") or {}
 
     if not state.get("scenario_write_success", False):
@@ -1567,8 +2462,9 @@ def validator_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str,
                 "suggested_fix": "Verify that all configuration parameters and database column mappings are correct.",
                 "retry_count": retry_count,
                 "confidence_score": 0.0,
+                "catalog_integrity": True,
             },
-            "next_action": "ERROR",
+            "next_action": "FAILURE",
             "error_log": state.get("error_log", []) + [diagnosis],
         }
 
@@ -1584,7 +2480,7 @@ def validator_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str,
 
     try:
         # Step 1: Run the QB engine to process all active scenarios
-        logger.info("[VALIDATOR] Calling FILL_PIO_AML_CUSTOMERS with parameters...")
+        logger.info("[VALIDATOR] Calling FILL_PIO_AML_CUSTOMERS...")
         with get_connection() as conn:
             cursor = conn.cursor()
             p_status = cursor.var(oracledb.NUMBER)
@@ -1604,72 +2500,112 @@ def validator_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str,
                     "p_status": p_status,
                 },
             )
-            logger.info(
-                "[VALIDATOR] Procedure completed. P_STATUS=%s", p_status.getvalue()
-            )
+            logger.info("[VALIDATOR] Procedure done. P_STATUS=%s", p_status.getvalue())
 
-        # Step 2: Count alerts for our scenario
-        cols, rows = run_readonly(
-            """
-            SELECT COUNT(*) AS alert_count
-            FROM PIO_AML_CUSTOMERS
-            WHERE AML_SCENARIO_CODE = :scenario_code
-            """,
+        # Step 2: Count header alerts (PIO_AML_CUSTOMERS)
+        _, rows = run_readonly(
+            "SELECT COUNT(*) FROM PIO_AML_CUSTOMERS WHERE AML_SCENARIO_CODE = :scenario_code",
             {"scenario_code": scenario_code},
         )
         alert_count = int(rows[0][0]) if rows else 0
-        logger.info("[VALIDATOR] Alert count for %s: %d", scenario_code, alert_count)
+        logger.info("[VALIDATOR] PIO_AML_CUSTOMERS count: %d", alert_count)
 
-        # Step 3: Sanity check
+        # Step 3: Count + sample transaction detail (PIO_AML_CUSTOMERS_DET)
+        _, det_count_rows = run_readonly(
+            "SELECT COUNT(*) FROM PIO_AML_CUSTOMERS_DET WHERE AML_SCENARIO_CODE = :scenario_code",
+            {"scenario_code": scenario_code},
+        )
+        det_count = int(det_count_rows[0][0]) if det_count_rows else 0
+        logger.info("[VALIDATOR] PIO_AML_CUSTOMERS_DET count: %d", det_count)
+
+        det_samples: List[Dict[str, Any]] = []
+        if det_count > 0:
+            with get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """SELECT * FROM PIO_AML_CUSTOMERS_DET
+                       WHERE AML_SCENARIO_CODE = :scenario_code
+                       AND ROWNUM <= 5""",
+                    {"scenario_code": scenario_code},
+                )
+                det_cols = [c[0].lower() for c in cursor.description]
+                det_samples = [dict(zip(det_cols, r)) for r in cursor.fetchall()]
+
+        # Step 4: Density ratio — how many detail rows per header alert
+        alert_density_ratio: Optional[float] = (
+            round(det_count / alert_count, 2) if alert_count > 0 else None
+        )
+        logger.info("[VALIDATOR] Alert density ratio: %s", alert_density_ratio)
+
+        # Step 5: Sanity check — both tables must have records for success
         intent = AMLIntent(**intent_dict)
-        diagnosis = None
-        suggested_fix = None
-        success = True
+        diagnosis: Optional[str] = None
+        suggested_fix: Optional[str] = None
+        threshold_sensitivity: Optional[Dict[str, Any]] = None
 
         if alert_count == 0:
-            success = False
+            threshold_sensitivity = _check_threshold_sensitivity(rule_code)
             diagnosis = (
-                "Zero alerts generated. The scenario conditions may be too restrictive, "
+                "Zero header alerts generated. The scenario conditions may be too restrictive, "
                 "the time window may be too narrow, or the parameter codes may need adjustment."
             )
             suggested_fix = (
                 "Try widening the threshold values or extending the time window. "
-                "Verify that PARAMETER_CODE values match pio_aml_parameters."
+                "Verify that PARAMETER_CODE values match PIO_AML_PARAMETERS."
             )
-
+        elif det_count == 0:
+            diagnosis = (
+                f"Header alerts found ({alert_count:,}) but PIO_AML_CUSTOMERS_DET has zero "
+                "transaction rows. The QB engine may not have populated detail records."
+            )
+            suggested_fix = "Check that FILL_PIO_AML_CUSTOMERS populates PIO_AML_CUSTOMERS_DET for this scenario type."
         elif (
             intent.expected_alert_range_max
             and alert_count > intent.expected_alert_range_max
         ):
-            success = False
             diagnosis = (
                 f"Alert volume ({alert_count:,}) exceeds expected maximum "
                 f"({intent.expected_alert_range_max:,}). Scenario may be too broad."
             )
             suggested_fix = "Tighten the threshold values or add exclusion criteria."
 
-        # Step 4: Pull sample alerts
+        # Step 6: Pull write_verification from state and check all_pass
+        write_verification_dict: Optional[Dict[str, Any]] = state.get("write_verification")
+        write_ok = (
+            write_verification_dict.get("all_pass", False)
+            if write_verification_dict
+            else True  # if no verification data, don't block (backward compat)
+        )
+
+        # Step 7: Catalog integrity from state
+        catalog_integrity: bool = state.get("catalog_integrity", True)
+
+        # Step 8: Pull header samples
         sample_alerts: List[AlertSample] = []
         if alert_count > 0:
             sample_cols, sample_rows = run_readonly(
-                """
-                SELECT *
-                FROM PIO_AML_CUSTOMERS
-                WHERE AML_SCENARIO_CODE = :scenario_code
-                AND ROWNUM <= 5
-                """,
+                """SELECT * FROM PIO_AML_CUSTOMERS
+                   WHERE AML_SCENARIO_CODE = :scenario_code
+                   AND ROWNUM <= 5""",
                 {"scenario_code": scenario_code},
             )
             for row in sample_rows:
                 row_dict = dict(zip(sample_cols, row))
-                customer_id = str(
-                    row_dict.get("cus_num", row_dict.get("customer_id", "—"))
-                )
-                sample_alerts.append(
-                    AlertSample(customer_id=customer_id, raw_data=row_dict)
-                )
+                customer_id = str(row_dict.get("cus_num", row_dict.get("customer_id", "—")))
+                sample_alerts.append(AlertSample(customer_id=customer_id, raw_data=row_dict))
 
-        # Step 5: Calculate confidence
+        # Step 9: Success gate — both tables ≥1 AND write integrity passes
+        success = alert_count >= 1 and det_count >= 1 and write_ok and diagnosis is None
+
+        # Step 10: Assemble WriteVerification for the result if available
+        from web.services.schemas import WriteVerification
+        write_integrity_obj: Optional[WriteVerification] = None
+        if write_verification_dict:
+            try:
+                write_integrity_obj = WriteVerification(**write_verification_dict)
+            except Exception:
+                pass
+
         confidence = 1.0 if success else max(0.0, 1.0 - (retry_count * 0.3))
 
         result = ValidationResult(
@@ -1681,6 +2617,12 @@ def validator_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str,
             suggested_fix=suggested_fix,
             retry_count=retry_count,
             confidence_score=confidence,
+            det_count=det_count,
+            det_samples=det_samples,
+            alert_density_ratio=alert_density_ratio,
+            write_integrity=write_integrity_obj,
+            catalog_integrity=catalog_integrity,
+            threshold_sensitivity=threshold_sensitivity,
         )
 
         if success:
@@ -1695,24 +2637,26 @@ def validator_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str,
             logger.warning("[VALIDATOR] Validation failed. Triggering self-correction.")
             return {
                 "validation_result": result.model_dump(mode="json"),
-                "next_action": "DECOMPOSE",  # loop back to decomposer
+                "next_action": "DECOMPOSE",
                 "validation_retry_count": retry_count + 1,
                 "error_log": state.get("error_log", [])
                 + [f"Validation attempt {retry_count + 1}: {diagnosis}"],
             }
 
-        # Max retries hit — surface to user
-        logger.error("[VALIDATOR] Max retries reached. Escalating to user.")
+        # Max retries hit — surface failure menu
+        logger.error("[VALIDATOR] Max retries reached. Routing to FAILURE.")
         return {
             "validation_result": result.model_dump(mode="json"),
-            "next_action": "FINALIZE",  # surface what we have with explanation
+            "next_action": "FAILURE",
             "validation_retry_count": retry_count + 1,
+            "error_log": state.get("error_log", [])
+            + [f"Max validation retries reached. Last diagnosis: {diagnosis}"],
         }
 
     except Exception as exc:
         logger.error("[VALIDATOR] Error during validation: %s", exc, exc_info=True)
         return {
-            "next_action": "ERROR",
+            "next_action": "FAILURE",
             "error_log": state.get("error_log", []) + [f"Validation error: {exc}"],
         }
 
@@ -1734,16 +2678,26 @@ def route_after_orchestrator(state: AMLScenarioState) -> str:
     action = state.get("next_action", "INTENT")
     route_map = {
         "INTENT": "intent_analyst",
-        "CLARIFY": "orchestrator",  # Orchestrator formats and returns clarification
+        "SQL_BRIDGE": "sql_bridge",      # post-approval routing
+        "DECOMPOSE": "decomposer",       # ADJUST threshold loop-back
+        "CLARIFY": "orchestrator",
         "WAIT_USER": END,
+        "WAIT_APPROVAL": END,            # pause — wait for user approval message
         "END": END,
         "ERROR": "orchestrator",
+        "FAILURE": "orchestrator",
+        "REDEFINE": "orchestrator",
+        "ADJUST": "decomposer",
+        "ESCALATE": "orchestrator",
     }
     return route_map.get(action, "intent_analyst")
 
 
 def route_after_intent(state: AMLScenarioState) -> str:
     """Route after Intent Analyst node.
+
+    Routes to planner on success (user must approve the plan before execution).
+    Routes to orchestrator on clarification requests or errors.
 
     Args:
         state (AMLScenarioState): Current state.
@@ -1756,7 +2710,25 @@ def route_after_intent(state: AMLScenarioState) -> str:
         return "orchestrator"
     if action == "ERROR":
         return "orchestrator"
-    return "sql_bridge"
+    return "planner"  # always plan first before sql_bridge
+
+
+def route_after_planner(state: AMLScenarioState) -> str:
+    """Route after the Planner node.
+
+    On success: returns END to pause and wait for user approval.
+    On error: routes to orchestrator for failure handling.
+
+    Args:
+        state (AMLScenarioState): Current state.
+
+    Returns:
+        str: END or 'orchestrator'.
+    """
+    action = state.get("next_action", "WAIT_APPROVAL")
+    if action == "ERROR":
+        return "orchestrator"
+    return END  # pause execution — wait for user's "proceed" message
 
 
 def route_after_sql_bridge(state: AMLScenarioState) -> str:
@@ -1840,6 +2812,7 @@ async def build_graph() -> Any:
     # Register nodes
     graph.add_node("orchestrator", orchestrator_node)
     graph.add_node("intent_analyst", intent_analyst_node)
+    graph.add_node("planner", planner_node)
     graph.add_node("sql_bridge", sql_bridge_node)
     graph.add_node("decomposer", decomposer_node)
     graph.add_node("qb_writer", qb_writer_node)
@@ -1851,6 +2824,7 @@ async def build_graph() -> Any:
     # Edges with conditional routing
     graph.add_conditional_edges("orchestrator", route_after_orchestrator)
     graph.add_conditional_edges("intent_analyst", route_after_intent)
+    graph.add_conditional_edges("planner", route_after_planner)
     graph.add_conditional_edges("sql_bridge", route_after_sql_bridge)
     graph.add_conditional_edges("decomposer", route_after_decomposer)
     graph.add_edge("qb_writer", "validator")
