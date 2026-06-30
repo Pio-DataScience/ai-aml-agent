@@ -204,6 +204,8 @@ def _build_state_context(state: AMLScenarioState, iteration: int) -> str:
 
     intent_name = enriched_intent.get("scenario_name", "Not captured yet")
     intent_type = enriched_intent.get("scenario_type", "")
+    clarification_needed = enriched_intent.get("clarification_needed", False)
+    clarification_questions = enriched_intent.get("clarification_questions", [])
 
     samples = validation_result.get("sample_alerts", [])
     sample_lines = ""
@@ -221,6 +223,7 @@ def _build_state_context(state: AMLScenarioState, iteration: int) -> str:
         f"| **Pipeline phase (prev)** | `{prev_action}` |\n"
         f"| **Iteration** | {iteration} / {settings.MAX_AGENT_ITERATIONS} |\n"
         f"| **Intent captured** | {intent_name} ({intent_type}) |\n"
+        f"| **Clarification needed** | {clarification_needed} |\n"
         f"| **Plan generated** | {plan_generated} |\n"
         f"| **Plan approved** | {plan_approved} |\n"
         f"| **Scenario code** | {scenario_code or 'Not assigned'} |\n"
@@ -247,7 +250,13 @@ def _build_state_context(state: AMLScenarioState, iteration: int) -> str:
     else:
         error_block += "- _No errors_\n"
 
-    return table + error_block + sample_lines
+    questions_block = ""
+    if clarification_questions:
+        questions_block = "\n\n**Clarification Questions Needed from User:**\n"
+        for q in clarification_questions:
+            questions_block += f"- {q}\n"
+
+    return table + error_block + questions_block + sample_lines
 
 
 def orchestrator_node(
