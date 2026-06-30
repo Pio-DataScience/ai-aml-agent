@@ -1231,6 +1231,10 @@ def _provision_catalog_entry(
         Optional[Tuple[str, str]]: (parameter_code, aggregation_code) on success,
             or None if provisioning fails (e.g., column not in ALL_TAB_COLUMNS).
     """
+    # Strip table alias prefix (e.g., 'T.DEB_CRE_IND' -> 'DEB_CRE_IND')
+    if "." in col_name:
+        col_name = col_name.split(".", 1)[1]
+
     from web.services.oracle import run_readonly, run_write, get_next_numeric_code
     now = datetime.utcnow()
 
