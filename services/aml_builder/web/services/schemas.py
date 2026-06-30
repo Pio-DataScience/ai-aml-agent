@@ -766,6 +766,8 @@ class ChatMessage(BaseModel):
 
     role: Literal["user", "assistant"] = Field(..., description="Message role.")
     content: str = Field(..., description="Message text content.")
+    plan_artifact: Optional[str] = Field(default=None, description="The markdown execution plan")
+    scenario_result: Optional[Dict[str, Any]] = Field(default=None, description="The scenario validation result")
 
 
 class ChatHistoryResponse(BaseModel):

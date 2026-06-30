@@ -213,13 +213,15 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
     LangGraph agent, and streams Server-Sent Events back to the client.
 
     SSE event types emitted:
-    - ``tool_call`` — when a node/tool is being executed
-    - ``thinking``  — intermediate processing status
-    - ``content``   — streaming text chunks
-    - ``final_answer`` — the complete final response
-    - ``scenario_result`` — structured scenario data (JSON)
-    - ``error``     — error details
-    - ``done``      — stream termination signal
+    - ``tool_call``        — when a node/tool is being executed
+    - ``thinking``         — intermediate processing status
+    - ``content``          — streaming text chunks
+    - ``final_answer``     — the complete final response
+    - ``scenario_result``  — structured scenario + validation data (JSON)
+    - ``plan_artifact``    — structured markdown execution plan (side panel)
+    - ``escalation_report``— technical failure report for implementation team
+    - ``error``            — error details
+    - ``done``             — stream termination signal
 
     Args:
         request (ChatRequest): The incoming chat request with messages and metadata.
@@ -259,22 +261,52 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
     graph = await get_graph()
     config = {"configurable": {"thread_id": thread_id}}
 
-    initial_state: AMLScenarioState = {
-        "messages": lc_messages,
-        "user_intent": request.messages[-1].content if request.messages else "",
-        "enriched_intent": None,
-        "raw_sql": None,
-        "sql_metadata": None,
-        "scenario_parameters": None,
-        "decomposition_confidence": 0.0,
-        "scenario_code": None,
-        "scenario_write_success": False,
-        "validation_result": None,
-        "validation_retry_count": 0,
-        "next_action": "INTENT",
-        "iteration_count": 0,
-        "error_log": [],
-    }
+    # Detect resume vs. first turn — avoid resetting plan/catalog state mid-flow
+    existing_state = await graph.aget_state(config)
+    is_resuming = bool(
+        existing_state
+        and existing_state.values
+        and existing_state.values.get("messages")
+    )
+
+    if is_resuming:
+        # Resume turn: only pass the new message + user_intent.
+        # LangGraph merges these into the existing checkpoint; all other state
+        # fields (plan_approved, plan_conditions, catalog_creations, etc.) remain.
+        initial_state: AMLScenarioState = {
+            "messages": lc_messages,
+            "user_intent": request.messages[-1].content if request.messages else "",
+        }
+        logger.info("[API] Resuming existing thread — partial state update.")
+    else:
+        # First turn: full initialization with all v2 state fields
+        initial_state = {
+            "messages": lc_messages,
+            "user_intent": request.messages[-1].content if request.messages else "",
+            "enriched_intent": None,
+            "raw_sql": None,
+            "sql_metadata": None,
+            "scenario_parameters": None,
+            "decomposition_confidence": 0.0,
+            "scenario_code": None,
+            "rule_code": None,
+            "scenario_write_success": False,
+            "validation_result": None,
+            "validation_retry_count": 0,
+            "next_action": "INTENT",
+            "iteration_count": 0,
+            "error_log": [],
+            # v2 fields
+            "plan_artifact": None,
+            "plan_conditions": None,
+            "plan_approved": False,
+            "catalog_creations": [],
+            "write_verification": None,
+            "escalation_report": None,
+            "failure_mode": None,
+            "catalog_integrity": True,
+        }
+        logger.info("[API] New thread — full state initialization.")
 
     async def event_generator() -> AsyncIterator[str]:
         """Async generator yielding SSE-formatted events.
@@ -287,25 +319,21 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
             return f"data: {event.model_dump_json()}\n\n"
 
         try:
-            # Signal start
             yield _sse(SSEEvent(type="thinking", status="Analyzing your request..."))
 
-            # Stream graph execution
             async for event in graph.astream(initial_state, config=config):
                 for node_name, node_output in event.items():
                     if not isinstance(node_output, dict):
                         continue
 
-                    # Emit node activity signal
                     yield _sse(SSEEvent(type="tool_call", tool=node_name))
 
-                    # Stream agent messages
+                    # Stream agent messages as chunked content
                     messages = node_output.get("messages", [])
                     for msg in messages:
                         if hasattr(msg, "content") and msg.content:
                             content = msg.content
                             if isinstance(content, str) and content.strip():
-                                # Stream in chunks for natural feel
                                 chunk_size = 50
                                 for i in range(0, len(content), chunk_size):
                                     yield _sse(SSEEvent(
@@ -313,25 +341,31 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                                         text=content[i:i + chunk_size],
                                     ))
 
-                    # Emit validation result as structured data
+                    # Plan artifact → side panel render
+                    plan_artifact = node_output.get("plan_artifact")
+                    if plan_artifact and isinstance(plan_artifact, str):
+                        yield _sse(SSEEvent(type="plan_artifact", text=plan_artifact))
+                        logger.info("[API] Emitted plan_artifact SSE (%d chars).", len(plan_artifact))
+
+                    # Escalation report → technical report panel
+                    escalation_report = node_output.get("escalation_report")
+                    if escalation_report and isinstance(escalation_report, str):
+                        yield _sse(SSEEvent(type="escalation_report", text=escalation_report))
+                        logger.info("[API] Emitted escalation_report SSE.")
+
+                    # Validation result → structured scenario result card
                     val_result = node_output.get("validation_result")
                     if val_result and isinstance(val_result, dict):
-                        yield _sse(SSEEvent(
-                            type="scenario_result",
-                            data=val_result,
-                        ))
+                        yield _sse(SSEEvent(type="scenario_result", data=val_result))
 
-            # Get final state for the complete answer
+            # Final answer from last AI message in checkpoint
             final_state = await graph.aget_state(config)
             if final_state and final_state.values:
                 final_msgs = final_state.values.get("messages", [])
                 if final_msgs:
                     last_msg = final_msgs[-1]
                     if hasattr(last_msg, "content") and last_msg.content:
-                        yield _sse(SSEEvent(
-                            type="final_answer",
-                            text=last_msg.content,
-                        ))
+                        yield _sse(SSEEvent(type="final_answer", text=last_msg.content))
 
         except Exception as exc:
             logger.error("[API] Stream error: %s", exc, exc_info=True)
@@ -345,7 +379,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",  # Disable Nginx buffering
+            "X-Accel-Buffering": "no",
             "Connection": "keep-alive",
         },
     )
@@ -390,7 +424,17 @@ async def get_chat_history(project_id: str, chat_id: str, user_id: str):
                     if any(kw in content.lower() for kw in ["calling tool", "executing"]):
                         continue
                     if len(content.strip()) > 10:
-                        chat_messages.append(ChatMessage(role="assistant", content=content))
+                        plan_art = None
+                        val_res = None
+                        if hasattr(msg, "additional_kwargs") and isinstance(msg.additional_kwargs, dict):
+                            plan_art = msg.additional_kwargs.get("plan_artifact")
+                            val_res = msg.additional_kwargs.get("validation_result")
+                        chat_messages.append(ChatMessage(
+                            role="assistant",
+                            content=content,
+                            plan_artifact=plan_art,
+                            scenario_result=val_res
+                        ))
                         
         logger.info("[HISTORY] Retrieved %d conversation-level messages.", len(chat_messages))
         return ChatHistoryResponse(

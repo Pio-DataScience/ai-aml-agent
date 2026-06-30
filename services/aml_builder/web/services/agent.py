@@ -327,7 +327,15 @@ def orchestrator_node(
     updates: Dict[str, Any] = {"iteration_count": iteration}
 
     if decision.message_to_user:
-        updates["messages"] = [AIMessage(content=decision.message_to_user)]
+        # Persist plan_artifact and validation_result inside message additional_kwargs for history reload
+        add_kwargs = {}
+        plan_art = state.get("plan_artifact")
+        val_res = state.get("validation_result")
+        if plan_art:
+            add_kwargs["plan_artifact"] = plan_art
+        if val_res:
+            add_kwargs["validation_result"] = val_res
+        updates["messages"] = [AIMessage(content=decision.message_to_user, additional_kwargs=add_kwargs)]
 
     action = decision.next_action
 
