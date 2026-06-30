@@ -318,6 +318,8 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
         def _sse(event: SSEEvent) -> str:
             return f"data: {event.model_dump_json()}\n\n"
 
+        has_yielded_content = False
+
         try:
             yield _sse(SSEEvent(type="thinking", status="Analyzing your request..."))
 
@@ -334,6 +336,9 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                         if hasattr(msg, "content") and msg.content:
                             content = msg.content
                             if isinstance(content, str) and content.strip():
+                                if has_yielded_content:
+                                    yield _sse(SSEEvent(type="content", text="\n\n"))
+                                has_yielded_content = True
                                 chunk_size = 50
                                 for i in range(0, len(content), chunk_size):
                                     yield _sse(SSEEvent(
