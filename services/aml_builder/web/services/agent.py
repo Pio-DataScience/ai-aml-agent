@@ -756,7 +756,10 @@ def sql_bridge_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str
                     try:
                         event = json.loads(raw)
                         event_type = event.get("type", "")
-                        if event_type in ("content", "final_answer"):
+                        if event_type == "content":
+                            collected_text.append(event.get("text", ""))
+                        elif event_type == "final_answer" and not collected_text:
+                            # Fallback if no streaming chunks were captured
                             collected_text.append(event.get("text", ""))
                     except json.JSONDecodeError:
                         continue
