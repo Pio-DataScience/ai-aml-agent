@@ -8,14 +8,16 @@ Exposes:
 Follows the same API contract as the existing PioTech AI services
 (AML reporting, DWH) for frontend compatibility.
 """
-
+import os
 import json
 import logging
 import uuid
+import sqlite3
+from datetime import datetime
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
+from typing import AsyncIterator, List, Optional
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import HumanMessage
@@ -23,10 +25,83 @@ from langchain_core.messages import HumanMessage
 from web.services.agent import AMLScenarioState, get_graph
 from web.services.logging_config import setup_logging
 from web.services.oracle import close_pool, init_pool
-from web.services.schemas import ChatRequest, SSEEvent
+from web.services.schemas import (
+    ChatRequest,
+    SSEEvent,
+    ChatHistoryResponse,
+    ChatListResponse,
+    RenameChatRequest,
+    DeleteChatResponse,
+    RenameChatResponse,
+    TogglePinResponse,
+    ChatMessage,
+    ChatSessionItem,
+)
 from web.services.settings import settings
 
 logger = logging.getLogger(__name__)
+
+
+def init_session_db():
+    """Create chat_sessions table in the SQLite checkpointer database if missing."""
+    checkpoint_path = settings.CHECKPOINT_DB_PATH
+    from pathlib import Path
+    Path(checkpoint_path).parent.mkdir(parents=True, exist_ok=True)
+    
+    conn = sqlite3.connect(checkpoint_path)
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS chat_sessions (
+                chat_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                project_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                is_pinned INTEGER DEFAULT 0,
+                is_deleted INTEGER DEFAULT 0
+            );
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_id ON chat_sessions(user_id);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_project ON chat_sessions(user_id, project_id);")
+        conn.commit()
+        logger.info("[DB] SQLite chat_sessions table verified/initialized.")
+    except Exception as e:
+        logger.error("[DB] Error initializing chat_sessions table: %s", e)
+    finally:
+        conn.close()
+
+
+def upsert_chat_session(chat_id: str, user_id: str, project_id: str, first_message_content: str):
+    """Insert or update a chat session in the sidebar metadata table."""
+    checkpoint_path = settings.CHECKPOINT_DB_PATH
+    conn = sqlite3.connect(checkpoint_path)
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT title, is_deleted FROM chat_sessions WHERE chat_id = ?", (chat_id,))
+        row = cursor.fetchone()
+        
+        now = datetime.utcnow().isoformat()
+        
+        if row:
+            cursor.execute("""
+                UPDATE chat_sessions 
+                SET updated_at = ?, is_deleted = 0
+                WHERE chat_id = ?
+            """, (now, chat_id))
+        else:
+            title = first_message_content[:50]
+            if not title:
+                title = "New Chat"
+            cursor.execute("""
+                INSERT INTO chat_sessions (chat_id, user_id, project_id, title, updated_at, is_pinned, is_deleted)
+                VALUES (?, ?, ?, ?, ?, 0, 0)
+            """, (chat_id, user_id, project_id, title, now))
+        conn.commit()
+    except Exception as e:
+        logger.error("[DB] Error upserting chat session %s: %s", chat_id, e)
+    finally:
+        conn.close()
 
 
 # =============================================================================
@@ -47,6 +122,9 @@ async def lifespan(app: FastAPI):
     # Startup
     setup_logging()
     logger.info("[STARTUP] AML Builder service starting. port=%d", settings.SERVICE_PORT)
+    
+    # Init sessions metadata table
+    init_session_db()
 
     # Initialize Oracle pool
     try:
@@ -153,9 +231,15 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
     user_id = metadata.get("user_id", "anonymous")
     chat_id = metadata.get("chat_id", uuid.uuid4().hex)
     project_id = metadata.get("project_id", "0")
+    if not project_id or project_id in ("0", "None"):
+        project_id = "no_project"
 
     # Build thread ID for LangGraph state isolation per conversation
     thread_id = f"{project_id}_{chat_id}_{user_id}"
+
+    # Upsert sidebar chat session metadata
+    first_msg = request.messages[0].content if request.messages else "New Chat"
+    upsert_chat_session(chat_id, user_id, project_id, first_msg)
 
     logger.info(
         "[API] /chat/stream — user=%s thread=%s messages=%d",
@@ -265,3 +349,218 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
             "Connection": "keep-alive",
         },
     )
+
+
+# =============================================================================
+# SESSION MANAGEMENT ENDPOINTS
+# =============================================================================
+
+
+@app.get("/chat/{project_id}/{chat_id}/{user_id}/history", response_model=ChatHistoryResponse, tags=["Session"])
+async def get_chat_history(project_id: str, chat_id: str, user_id: str):
+    """Retrieve chat history for a specific conversation."""
+    try:
+        normalized_project = project_id if project_id not in ("0", "None") else "no_project"
+        thread_id = f"{normalized_project}_{chat_id}_{user_id}"
+        logger.info("[HISTORY] Retrieving history for thread_id: %s", thread_id)
+        
+        checkpoint_path = settings.CHECKPOINT_DB_PATH
+        if not os.path.exists(checkpoint_path):
+            logger.warning("[HISTORY] Checkpoint database not found: %s", checkpoint_path)
+            return ChatHistoryResponse(user_id=user_id, project_id=project_id, chat_id=chat_id, messages=[])
+            
+        config = {"configurable": {"thread_id": thread_id}}
+        graph = await get_graph()
+        state = await graph.aget_state(config)
+        
+        chat_messages = []
+        if state and state.values:
+            messages_data = state.values.get("messages", [])
+            for msg in messages_data:
+                msg_class = msg.__class__.__name__
+                if msg_class == "HumanMessage":
+                    content = msg.content if hasattr(msg, "content") else str(msg)
+                    chat_messages.append(ChatMessage(role="user", content=content))
+                elif msg_class == "AIMessage":
+                    if hasattr(msg, "tool_calls") and msg.tool_calls:
+                        continue
+                    content = msg.content if hasattr(msg, "content") else ""
+                    if not content or not content.strip():
+                        continue
+                    if any(kw in content.lower() for kw in ["calling tool", "executing"]):
+                        continue
+                    if len(content.strip()) > 10:
+                        chat_messages.append(ChatMessage(role="assistant", content=content))
+                        
+        logger.info("[HISTORY] Retrieved %d conversation-level messages.", len(chat_messages))
+        return ChatHistoryResponse(
+            user_id=user_id,
+            project_id=project_id,
+            chat_id=chat_id,
+            messages=chat_messages,
+        )
+    except Exception as e:
+        logger.error("[HISTORY] Error retrieving history: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/chats/user/{user_id}/list", response_model=ChatListResponse, tags=["Session"])
+async def list_user_chats(user_id: str, project_id: Optional[str] = None):
+    """List all chat sessions for a user, optionally filtered by project."""
+    try:
+        checkpoint_path = settings.CHECKPOINT_DB_PATH
+        if not os.path.exists(checkpoint_path):
+            return ChatListResponse(chats=[])
+            
+        conn = sqlite3.connect(checkpoint_path)
+        try:
+            cursor = conn.cursor()
+            if project_id and project_id not in ("0", "None"):
+                cursor.execute("""
+                    SELECT chat_id, project_id, title, updated_at, is_pinned, is_deleted
+                    FROM chat_sessions
+                    WHERE user_id = ? AND project_id = ? AND is_deleted = 0
+                    ORDER BY is_pinned DESC, updated_at DESC
+                """, (user_id, project_id))
+            else:
+                cursor.execute("""
+                    SELECT chat_id, project_id, title, updated_at, is_pinned, is_deleted
+                    FROM chat_sessions
+                    WHERE user_id = ? AND is_deleted = 0
+                    ORDER BY is_pinned DESC, updated_at DESC
+                """, (user_id,))
+                
+            rows = cursor.fetchall()
+            chats = [
+                ChatSessionItem(
+                    chat_id=row[0],
+                    project_id=row[1],
+                    title=row[2],
+                    updated_at=row[3],
+                    is_pinned=bool(row[4]),
+                    is_deleted=bool(row[5]),
+                )
+                for row in rows
+            ]
+            return ChatListResponse(chats=chats)
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.error("[API] Error listing chats: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/chat/{project_id}/{chat_id}/{user_id}", response_model=DeleteChatResponse, tags=["Session"])
+async def delete_chat_session(project_id: str, chat_id: str, user_id: str):
+    """Soft delete a chat session for a user by setting is_deleted = 1."""
+    try:
+        normalized_project = project_id if project_id not in ("0", "None") else "no_project"
+        checkpoint_path = settings.CHECKPOINT_DB_PATH
+        if not os.path.exists(checkpoint_path):
+            raise HTTPException(status_code=404, detail="Database not found")
+            
+        conn = sqlite3.connect(checkpoint_path)
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT chat_id FROM chat_sessions WHERE chat_id = ? AND user_id = ? AND project_id = ?",
+                (chat_id, user_id, normalized_project)
+            )
+            if not cursor.fetchone():
+                raise HTTPException(status_code=404, detail="Chat session not found")
+                
+            cursor.execute(
+                "UPDATE chat_sessions SET is_deleted = 1 WHERE chat_id = ? AND user_id = ? AND project_id = ?",
+                (chat_id, user_id, normalized_project)
+            )
+            conn.commit()
+            return DeleteChatResponse(status="success", message="Chat session soft-deleted successfully", chat_id=chat_id)
+        finally:
+            conn.close()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("[API] Error soft-deleting chat: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/chat/{project_id}/{chat_id}/{user_id}/rename", response_model=RenameChatResponse, tags=["Session"])
+async def rename_chat_session(project_id: str, chat_id: str, user_id: str, request: RenameChatRequest):
+    """Rename a chat session by updating its title."""
+    try:
+        normalized_project = project_id if project_id not in ("0", "None") else "no_project"
+        checkpoint_path = settings.CHECKPOINT_DB_PATH
+        if not os.path.exists(checkpoint_path):
+            raise HTTPException(status_code=404, detail="Database not found")
+            
+        conn = sqlite3.connect(checkpoint_path)
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT chat_id FROM chat_sessions WHERE chat_id = ? AND user_id = ? AND project_id = ?",
+                (chat_id, user_id, normalized_project)
+            )
+            if not cursor.fetchone():
+                raise HTTPException(status_code=404, detail="Chat session not found")
+                
+            cursor.execute(
+                "UPDATE chat_sessions SET title = ? WHERE chat_id = ? AND user_id = ? AND project_id = ?",
+                (request.title, chat_id, user_id, normalized_project)
+            )
+            conn.commit()
+            return RenameChatResponse(
+                status="success",
+                message="Chat session renamed successfully",
+                chat_id=chat_id,
+                title=request.title
+            )
+        finally:
+            conn.close()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("[API] Error renaming chat: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/chat/{project_id}/{chat_id}/{user_id}/pin", response_model=TogglePinResponse, tags=["Session"])
+async def toggle_chat_pin(project_id: str, chat_id: str, user_id: str):
+    """Toggle the pin status of a chat session."""
+    try:
+        normalized_project = project_id if project_id not in ("0", "None") else "no_project"
+        checkpoint_path = settings.CHECKPOINT_DB_PATH
+        if not os.path.exists(checkpoint_path):
+            raise HTTPException(status_code=404, detail="Database not found")
+            
+        conn = sqlite3.connect(checkpoint_path)
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT is_pinned FROM chat_sessions WHERE chat_id = ? AND user_id = ? AND project_id = ?",
+                (chat_id, user_id, normalized_project)
+            )
+            row = cursor.fetchone()
+            if row is None:
+                raise HTTPException(status_code=404, detail="Chat session not found")
+                
+            current_pin = row[0]
+            new_pin = 1 - current_pin
+            
+            cursor.execute(
+                "UPDATE chat_sessions SET is_pinned = ? WHERE chat_id = ? AND user_id = ? AND project_id = ?",
+                (new_pin, chat_id, user_id, normalized_project)
+            )
+            conn.commit()
+            return TogglePinResponse(
+                status="success",
+                message="Chat session pin status toggled successfully",
+                chat_id=chat_id,
+                is_pinned=bool(new_pin)
+            )
+        finally:
+            conn.close()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("[API] Error pinning chat: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))

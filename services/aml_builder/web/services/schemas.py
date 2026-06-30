@@ -527,6 +527,111 @@ class ValidationResult(BaseModel):
         le=1.0,
         description="Overall quality score.",
     )
+    det_count: Optional[int] = Field(
+        default=None,
+        description="Number of transaction-level detail records in PIO_AML_CUSTOMERS_DET.",
+    )
+    det_samples: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Sample rows from PIO_AML_CUSTOMERS_DET (up to 5).",
+    )
+    alert_density_ratio: Optional[float] = Field(
+        default=None,
+        description="det_count / customer_count — flags overly broad scenarios.",
+    )
+    write_integrity: Optional["WriteVerification"] = Field(
+        default=None,
+        description="Post-write row count verification across all 4 Oracle tables.",
+    )
+    catalog_integrity: bool = Field(
+        default=True,
+        description="False if any auto-created catalog entries failed the join-path check.",
+    )
+    threshold_sensitivity: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Diagnostic: alert counts at loosened thresholds. Populated only when alert_count=0.",
+    )
+
+
+# =============================================================================
+# PLAN LAYER — Plan artifact, conditions, and catalog audit models
+# =============================================================================
+
+
+class PlanCondition(BaseModel):
+    """A single parsed condition extracted from the planner's output.
+
+    Used for pre-commit drift assertion against generated rule_details.
+
+    Args:
+        condition_id (str): Stable identifier — e.g. "filter_1", "aggregate_1".
+        field (str): Business field name (e.g. "transaction_amount").
+        operator (str): Comparison operator (">=", "IN", "BETWEEN", etc.).
+        value_from (str): Threshold value as string (preserves precision).
+        value_to (Optional[str]): Upper bound for BETWEEN operator only.
+        condition_type (str): "filter" | "aggregate" | "sd" | "segment".
+        description (str): Human-readable description for error messages.
+    """
+
+    condition_id: str = Field(..., description="Stable condition identifier.")
+    field: str = Field(..., description="Business field name.")
+    operator: str = Field(..., description="Comparison operator.")
+    value_from: str = Field(..., description="Threshold value as string.")
+    value_to: Optional[str] = Field(default=None, description="Upper bound for BETWEEN only.")
+    condition_type: Literal["filter", "aggregate", "sd", "segment"] = Field(
+        ..., description="Condition category."
+    )
+    description: str = Field(..., description="Human-readable description for error messages.")
+
+
+class CatalogCreation(BaseModel):
+    """Log entry for a single auto-provisioned AML catalog record.
+
+    Args:
+        entity_type (str): "TABLE" | "COLUMN" | "PARAMETER".
+        code (str): The new code assigned.
+        name (str): The physical name (table or column name).
+        business_name (str): LLM-inferred or derived business name.
+        aggregation_code (Optional[str]): Inferred aggregation code.
+        created_at (datetime): Timestamp of creation.
+    """
+
+    entity_type: Literal["TABLE", "COLUMN", "PARAMETER"] = Field(
+        ..., description="Catalog entity type."
+    )
+    code: str = Field(..., description="New code assigned (TABLE_CODE, COLUMN_CODE, or PARAMETER_CODE).")
+    name: str = Field(..., description="Physical table or column name.")
+    business_name: str = Field(..., description="Business name written to the catalog.")
+    aggregation_code: Optional[str] = Field(
+        default=None, description="AGGREGATION_CODE written to PIO_AML_PARAMETERS."
+    )
+    created_at: datetime = Field(
+        default_factory=datetime.utcnow, description="Timestamp of catalog entry creation."
+    )
+
+
+class WriteVerification(BaseModel):
+    """Row count verification for each Oracle table after atomic write.
+
+    Args:
+        scenario_rows (int): COUNT(*) from PIO_AML_SCENARIO for this scenario_code.
+        rule_rows (int): COUNT(*) from PIO_AML_RULES for this rule_code.
+        scenario_rule_rows (int): COUNT(*) from PIO_AML_SCENARIO_RULES.
+        rule_detail_rows (int): COUNT(*) from PIO_AML_RULES_DETAILS.
+        expected_detail_rows (int): Number of QBRuleDetail objects that were inserted.
+        all_pass (bool): True if all counts match expected values.
+        discrepancies (List[str]): Human-readable list of any count mismatches.
+    """
+
+    scenario_rows: int = Field(..., description="Row count in PIO_AML_SCENARIO.")
+    rule_rows: int = Field(..., description="Row count in PIO_AML_RULES.")
+    scenario_rule_rows: int = Field(..., description="Row count in PIO_AML_SCENARIO_RULES.")
+    rule_detail_rows: int = Field(..., description="Row count in PIO_AML_RULES_DETAILS.")
+    expected_detail_rows: int = Field(..., description="Expected PIO_AML_RULES_DETAILS row count.")
+    all_pass: bool = Field(..., description="True if all counts match expectations.")
+    discrepancies: List[str] = Field(
+        default_factory=list, description="List of count mismatch descriptions."
+    )
 
 
 # =============================================================================
@@ -580,9 +685,67 @@ class SSEEvent(BaseModel):
     """
 
     type: Literal[
-        "tool_call", "thinking", "content", "final_answer", "scenario_result", "error", "done"
+        "tool_call", "thinking", "content", "final_answer",
+        "scenario_result", "plan_artifact", "escalation_report", "error", "done"
     ] = Field(..., description="SSE event type.")
     text: Optional[str] = Field(default=None, description="Text payload.")
     tool: Optional[str] = Field(default=None, description="Tool name (tool_call events).")
     status: Optional[str] = Field(default=None, description="Status string (thinking events).")
     data: Optional[Any] = Field(default=None, description="Structured payload (scenario_result).")
+
+
+class ChatMessage(BaseModel):
+    """A single message in the conversation history."""
+
+    role: Literal["user", "assistant"] = Field(..., description="Message role.")
+    content: str = Field(..., description="Message text content.")
+
+
+class ChatHistoryResponse(BaseModel):
+    """Response model for loading chat history."""
+
+    user_id: str
+    project_id: str
+    chat_id: str
+    messages: List[ChatMessage]
+
+
+class ChatSessionItem(BaseModel):
+    """Individual chat session metadata for sidebar display."""
+
+    chat_id: str
+    project_id: str
+    title: str
+    updated_at: str
+    is_pinned: bool = False
+    is_deleted: bool = False
+
+
+class ChatListResponse(BaseModel):
+    """Response model for listing user's chat sessions."""
+
+    chats: List[ChatSessionItem]
+
+
+class RenameChatRequest(BaseModel):
+    title: str = Field(..., description="New title for the chat session")
+
+
+class DeleteChatResponse(BaseModel):
+    status: str
+    message: str
+    chat_id: str
+
+
+class RenameChatResponse(BaseModel):
+    status: str
+    message: str
+    chat_id: str
+    title: str
+
+
+class TogglePinResponse(BaseModel):
+    status: str
+    message: str
+    chat_id: str
+    is_pinned: bool
