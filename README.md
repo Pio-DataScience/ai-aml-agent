@@ -34,11 +34,13 @@ See [02_architecture.md](file:///c:/Users/abura/Development/AI_AML_AGENT/Docs/02
 ## Installation & Setup
 
 ### 1. Prerequisites
+
 - Python 3.10+
 - Access to an Oracle Database instance (defined in `.env`)
 - OpenAI API Key (or alternative configured LLM provider)
 
 ### 2. Install Dependencies
+
 Create a virtual environment and install the required packages:
 
 ```bash
@@ -56,6 +58,7 @@ pip install -r services/aml_builder/requirements.txt
 ```
 
 ### 3. Environment Configuration
+
 Copy `.env.example` to `.env` in the root of the project and configure the required settings:
 
 ```bash
@@ -63,6 +66,7 @@ cp .env.example .env
 ```
 
 Open `.env` and fill in:
+
 - `ORACLE_USER`
 - `ORACLE_PASSWORD`
 - `ORACLE_DSN`
@@ -73,25 +77,49 @@ Open `.env` and fill in:
 ## Running the Service
 
 ### On Windows (PowerShell)
+
 You can run the pre-configured script from the repository root:
-```powershell
+
+```Shell
 .\run_dev.ps1
 ```
 
 ### Manual Run (All Platforms)
+
 If you prefer running manual commands, make sure the python path is configured so that imports resolve correctly:
 
 **Windows (PowerShell):**
+
+Always export your environmental variables from `.env` to the terminal session before running uvicorn manually to ensure tracing (LangSmith) works:
+
 ```powershell
-$env:PYTHONPATH = "services/aml_builder"
+# 1. Load the env variables
+$env:LANGCHAIN_TRACING_V2="true"
+$env:LANGCHAIN_API_KEY="your-api-key"
+$env:LANGCHAIN_PROJECT="ai-aml-agent"
+$env:OPENAI_API_KEY="your-openai-key"
+$env:PYTHONPATH="services/aml_builder"
+
+# 2. Start uvicorn
 uvicorn web.api.main:app --reload --port 8005 --host 0.0.0.0
 ```
 
 **Linux / macOS / Git Bash:**
+
 ```bash
 export PYTHONPATH=services/aml_builder
 uvicorn web.api.main:app --reload --port 8005 --host 0.0.0.0
 ```
+
+---
+
+## Observability & LangSmith Tracing
+
+LangSmith tracing is fully integrated. If traces are not showing up in your project:
+
+1. Ensure `LANGCHAIN_TRACING_V2` is set to `"true"` and `LANGCHAIN_API_KEY` is valid.
+2. Confirm the shell process has loaded the variables (running `.\run_dev.ps1` automatically exports `.env` variables to your powershell session for you).
+3. If running manually, verify that variables were exported by executing `$env:LANGCHAIN_PROJECT` in PowerShell before starting uvicorn.
 
 ---
 
@@ -112,4 +140,5 @@ curl -N -X POST http://localhost:8005/chat/stream \
     "reasoning_mode": "instant"
   }'
 ```
+
 *(Use SSE client or set Response Type to Text in Postman to watch the stream of agent execution steps).*

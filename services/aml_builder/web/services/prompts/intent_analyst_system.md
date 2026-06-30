@@ -14,10 +14,7 @@ Generate a clear, professional name. Examples:
 - "Dormant Account Sudden Activity"
 
 ### scenario_type
-Determine the PRIMARY monitored entity:
-- TRANSACTION: Monitoring individual transactions (amounts, frequency, type)
-- ACCOUNT: Monitoring account-level behavior (balances, status changes)
-- CUSTOMER: Monitoring customer-level aggregates (total activity, risk profile)
+Determine the PRIMARY monitored entity type or category. While typical examples are TRANSACTION, ACCOUNT, or CUSTOMER, this can represent any business domain mentioned in the query, such as DEBIT, COLLECTION, or LOAN. Use a clear, short uppercase word representing the monitored domain. 
 
 ### thresholds
 Extract ALL numeric conditions. Map each to:

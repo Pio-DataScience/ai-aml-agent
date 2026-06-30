@@ -104,19 +104,55 @@ class Settings(BaseSettings):
     )
     AML_CREATED_BY: str = Field(
         default="999",
-        description="Value written to CREATED_BY on all agent-generated rows.",
+        description="Value written to CREATED_BY / UPDATED_BY on all agent-generated rows.",
     )
     AML_DEFAULT_ACTIVE_FLAG: str = Field(
-        default="Y",
-        description="Default active flag for new scenarios ('Y' = active).",
+        default="1",
+        description="Default active flag for scenarios/rules. '1' = active (Oracle standard).",
     )
     AML_DEFAULT_VIOLATION_LEVEL: str = Field(
-        default="M",
-        description="Default violation level: L=Low, M=Medium, H=High.",
+        default="1",
+        description="Default violation level written to PIO_AML_SCENARIO.VIOLATION_LEVEL.",
     )
     AML_DEFAULT_DEGREE_RISK_FLAG: str = Field(
-        default="M",
-        description="Default risk degree flag: L=Low, M=Medium, H=High.",
+        default="D",
+        description="Default risk degree written to PIO_AML_SCENARIO.DEGREE_RISK_FLAG.",
+    )
+    AML_RUN_FLAG: str = Field(
+        default="1",
+        description="RUN_FLAG for PIO_AML_SCENARIO. '1' = scenario is scheduled to run.",
+    )
+    AML_APPROVAL_FLAG: str = Field(
+        default="1",
+        description="APPROVAL_FLAG for PIO_AML_SCENARIO. '1' = approved.",
+    )
+    AML_GROUP_BY_FLAG: str = Field(
+        default="1",
+        description="GROUP_BY_FLAG for PIO_AML_SCENARIO. '1' = group alerts by customer.",
+    )
+    AML_CLASS_CODE: str = Field(
+        default="1",
+        description="CLASS_CODE for PIO_AML_SCENARIO. '1' = Individual customer class.",
+    )
+    AML_SCE_TYPE_CODE: str = Field(
+        default="1",
+        description="SCE_TYPE_CODE for PIO_AML_SCENARIO. '1' = standard transaction scenario.",
+    )
+    AML_CATEGORY_CODE: str = Field(
+        default="999",
+        description="CATEGORY_CODE for PIO_AML_SCENARIO. '999' = generic/uncategorised.",
+    )
+    AML_TRANS_WITHOUTTRANS_FLAG: str = Field(
+        default="1",
+        description="TRANS_WITHOUTTRANS_FLAG. '1' = include accounts with no transactions.",
+    )
+    AML_RULE_TYPE: str = Field(
+        default="3",
+        description=(
+            "RULE_TYPE for PIO_AML_SCENARIO_RULES. "
+            "'3' = standalone rule (no sequential/follow-by relationship). "
+            "See PIO_AML_RULE_TYPE lookup table."
+        ),
     )
 
     # ─── PioTech AI (SQL Bridge) ───────────────────────────────────────────────
@@ -187,24 +223,28 @@ class Settings(BaseSettings):
             )
         return normalized
 
-    @field_validator("AML_DEFAULT_VIOLATION_LEVEL", "AML_DEFAULT_DEGREE_RISK_FLAG")
+    @field_validator("AML_DEFAULT_DEGREE_RISK_FLAG")
     @classmethod
-    def validate_risk_level(cls, value: str) -> str:
-        """Ensure risk/violation level flags are valid.
+    def validate_degree_risk_flag(cls, value: str) -> str:
+        """Ensure the degree risk flag is a valid Oracle AML code.
+
+        The reference scenario uses 'D' (Low/Default risk degree).
+        Allowed values from PIO_AML_SCENARIO.DEGREE_RISK_FLAG domain.
 
         Args:
-            value (str): The configured risk level.
+            value (str): The configured degree risk flag.
 
         Returns:
-            str: Uppercased validated risk level.
+            str: Uppercased validated flag.
 
         Raises:
-            ValueError: If value is not L, M, or H.
+            ValueError: If value is not one of the known codes.
         """
         normalized = value.upper().strip()
-        if normalized not in {"L", "M", "H"}:
+        allowed = {"D", "L", "M", "H"}
+        if normalized not in allowed:
             raise ValueError(
-                f"Risk/violation level must be L, M, or H — got '{value}'."
+                f"AML_DEFAULT_DEGREE_RISK_FLAG must be one of {allowed} — got '{value}'."
             )
         return normalized
 

@@ -79,8 +79,8 @@ class AMLIntent(BaseModel):
     """
 
     scenario_name: str = Field(..., description="Descriptive name for this scenario.")
-    scenario_type: Literal["TRANSACTION", "ACCOUNT", "CUSTOMER"] = Field(
-        ..., description="Primary entity type this scenario monitors."
+    scenario_type: str = Field(
+        ..., description="Primary entity type or category this scenario monitors."
     )
     detection_logic: str = Field(
         ..., description="Plain English description of the detection logic."
@@ -177,99 +177,190 @@ class SQLMetadata(BaseModel):
 class QBScenario(BaseModel):
     """Data to INSERT into PIO_AML_SCENARIO.
 
+    All field defaults mirror the reference scenario_creation.md template,
+    verified against the live PIO_AML_SCENARIO schema.
+
     Args:
-        country_code (str): Country code (default from env: '400').
-        inst_code (str): Institution code (default from env: '1').
-        scenario_code (str): Unique identifier for this scenario.
-        scenario_des_eng (str): English description of the scenario.
-        active_flag (str): 'Y' = active, 'N' = inactive.
-        violation_level (str): L / M / H.
-        degree_risk_flag (str): L / M / H.
-        created_by (str): Author tag (default: 'AI_AGENT').
-        created_date (datetime): Timestamp of creation.
+        country_code (str): Country code (e.g. '400').
+        inst_code (str): Institution code (e.g. '1').
+        scenario_code (str): Unique numeric-string scenario identifier.
+        scenario_des_eng (str): English description.
+        scenario_des_nat_lan (str): Native language description (copied from ENG).
+        active_flag (str): '1' = active (NOT 'Y').
+        exclude_expl_flag (str): '0' = do not exclude explicit transactions.
+        use_watchlist_flag (str): '0' = no watchlist matching.
+        violation_level (str): '1' = Low severity.
+        degree_risk_flag (str): 'D' = Default/Low risk.
+        default_scenario_flag (str): '0' = not a default scenario.
+        run_flag (str): '1' = scheduled to run.
+        approval_flag (str): '1' = approved for production.
+        group_by_flag (str): '1' = group alerts by customer.
+        use_worldcheck_flag (str): '0' = no WorldCheck integration.
+        created_by (str): Numeric-string author ID.
+        created_date (datetime): Creation timestamp.
+        updated_by (str): Same as created_by.
+        updated_date (datetime): Same as created_date.
+        trans_withouttrans_flag (str): '1' = include accounts with no transactions.
+        category_code (str): '999' = generic category.
+        active_threshold_curr_flag (str): '0' = use base currency thresholds.
+        sce_type_code (str): '1' = standard transaction scenario type.
+        class_code (str): '1' = Individual customer class.
     """
 
     country_code: str = Field(..., description="Country code (PIO_AML_SCENARIO.COUNTRY_CODE).")
-    inst_code: str = Field(..., description="Institution code (PIO_AML_SCENARIO.INST_CODE).")
-    scenario_code: str = Field(..., description="Unique scenario identifier.")
+    inst_code: str = Field(..., description="Institution code.")
+    scenario_code: str = Field(..., description="Unique numeric-string scenario identifier.")
     scenario_des_eng: str = Field(..., description="English scenario description.")
-    active_flag: str = Field(default="Y", description="Active flag: Y or N.")
-    violation_level: str = Field(default="M", description="Violation severity: L, M, or H.")
-    degree_risk_flag: str = Field(default="M", description="Risk degree: L, M, or H.")
-    created_by: str = Field(default="AI_AGENT", description="Creator identifier.")
-    created_date: datetime = Field(
-        default_factory=datetime.utcnow,
-        description="Creation timestamp.",
+    scenario_des_nat_lan: str = Field(
+        default="",
+        description="Native language description — copied from scenario_des_eng if blank.",
     )
+    active_flag: str = Field(default="1", description="'1' = active.")
+    exclude_expl_flag: str = Field(default="0", description="'0' = include explicit transactions.")
+    use_watchlist_flag: str = Field(default="0", description="'0' = no watchlist matching.")
+    violation_level: str = Field(default="1", description="Violation severity code from PIO_AML_SCENARIO domain.")
+    degree_risk_flag: str = Field(default="D", description="Risk degree: D=Default, L=Low, M=Medium, H=High.")
+    default_scenario_flag: str = Field(default="0", description="'0' = not a system-default scenario.")
+    run_flag: str = Field(default="1", description="'1' = scenario is scheduled to run by the QB engine.")
+    approval_flag: str = Field(default="1", description="'1' = scenario has been approved for production.")
+    group_by_flag: str = Field(default="1", description="'1' = group resulting alerts by customer ID.")
+    use_worldcheck_flag: str = Field(default="0", description="'0' = no WorldCheck/external list integration.")
+    created_by: str = Field(default="999", description="Numeric-string creator ID.")
+    created_date: datetime = Field(default_factory=datetime.utcnow, description="Creation timestamp.")
+    updated_by: str = Field(default="999", description="Same as created_by on initial insert.")
+    updated_date: datetime = Field(default_factory=datetime.utcnow, description="Same as created_date on initial insert.")
+    trans_withouttrans_flag: str = Field(
+        default="1",
+        description="'1' = include accounts that have no transactions in the period.",
+    )
+    category_code: str = Field(default="999", description="Scenario category code. '999' = generic.")
+    active_threshold_curr_flag: str = Field(
+        default="0",
+        description="'0' = use base currency thresholds, not active currency.",
+    )
+    sce_type_code: str = Field(default="1", description="Scenario type code. '1' = standard transaction scenario.")
+    class_code: str = Field(default="1", description="Customer class code. '1' = Individual.")
 
 
 class QBRule(BaseModel):
     """Data to INSERT into PIO_AML_RULES.
 
+    All field defaults mirror the reference scenario_creation.md template,
+    verified against the live PIO_AML_RULES schema.
+
+    PERIOD_TYPE is a numeric code from PIO_PERIOD_TYPE lookup table:
+        '0' = Last n Days, '2' = Weekly, '3' = Monthly, '4' = Quarterly,
+        '5' = Half Year, '6' = Yearly.
+
     Args:
         country_code (str): Country code.
         inst_code (str): Institution code.
         rule_code (str): Unique rule identifier.
-        rule_des_eng (str): English description of this rule.
-        active_flag (str): Y or N.
-        period_type (str): D=Days, M=Months, Y=Years.
-        period_days (int): Numeric length of the detection window.
-        ltg_code (Optional[str]): Transaction type group code (future use).
-        created_by (str): Creator identifier.
+        rule_desc_eng (str): English description of this rule.
+        rule_desc_arb (str): Arabic/native description (copied from ENG if blank).
+        active_flag (str): '1' = active.
+        period_type (str): Numeric code from PIO_PERIOD_TYPE. '0' = Last n Days.
+        period_days (int): Number of days for the detection window.
+        use_sequentially_flag (str): '0' = conditions evaluated together, not sequentially.
+        sequentially_count (int): 0 when use_sequentially_flag='0'.
+        default_rule_flag (str): '0' = not a system-default rule.
+        exclude_days (int): Days to exclude from the period (usually 0).
+        ltg_code (Optional[str]): Transaction type group code (optional).
+        created_by (str): Numeric-string creator ID.
         created_date (datetime): Creation timestamp.
+        updated_by (str): Same as created_by.
+        updated_date (datetime): Same as created_date.
     """
 
-    country_code: str = Field(..., description="Country code (PIO_AML_RULES.COUNTRY_CODE).")
+    country_code: str = Field(..., description="Country code.")
     inst_code: str = Field(..., description="Institution code.")
     rule_code: str = Field(..., description="Unique rule identifier.")
-    rule_des_eng: str = Field(..., description="English rule description.")
-    active_flag: str = Field(default="Y", description="Active flag.")
-    period_type: Literal["D", "M", "Y"] = Field(
-        default="D",
-        description="Period unit: D=Days, M=Months, Y=Years.",
+    rule_desc_eng: str = Field(..., description="English rule description (PIO_AML_RULES.RULE_DESC_ENG).")
+    rule_desc_arb: str = Field(
+        default="",
+        description="Arabic/native rule description. Copied from rule_desc_eng if blank.",
     )
-    period_days: int = Field(default=30, description="Length of the detection window.")
+    active_flag: str = Field(default="1", description="'1' = rule is active.")
+    period_type: str = Field(
+        default="0",
+        description=(
+            "Detection window type from PIO_PERIOD_TYPE lookup. "
+            "'0'=Last n Days, '2'=Weekly, '3'=Monthly, '4'=Quarterly, "
+            "'5'=Half Year, '6'=Yearly."
+        ),
+    )
+    period_days: int = Field(default=30, description="Length of the detection window in days.")
+    use_sequentially_flag: str = Field(
+        default="0",
+        description="'0' = evaluate all conditions together (not in sequence).",
+    )
+    sequentially_count: int = Field(
+        default=0,
+        description="Sequence count, used only when use_sequentially_flag='1'.",
+    )
+    default_rule_flag: str = Field(default="0", description="'0' = not a system-default rule.")
+    exclude_days: int = Field(default=0, description="Number of days to exclude from the detection period.")
     ltg_code: Optional[str] = Field(
         default=None,
         description="Transaction type group code (PIO_LTG_DEFINITION). Optional.",
     )
-    created_by: str = Field(default="AI_AGENT", description="Creator identifier.")
-    created_date: datetime = Field(default_factory=datetime.utcnow)
+    created_by: str = Field(default="999", description="Numeric-string creator ID.")
+    created_date: datetime = Field(default_factory=datetime.utcnow, description="Creation timestamp.")
+    updated_by: str = Field(default="999", description="Same as created_by on initial insert.")
+    updated_date: datetime = Field(default_factory=datetime.utcnow, description="Same as created_date.")
 
 
 class QBRuleDetail(BaseModel):
     """Data to INSERT into PIO_AML_RULES_DETAILS.
 
-    One row per condition (WHERE clause predicate / HAVING predicate).
+    One row per condition. PARAMETER_CODE must match a real code in
+    PIO_AML_PARAMETERS — this is the key lookup the QB engine uses to
+    build its dynamic detection SQL.
+
+    Key parameter codes (from live PIO_AML_PARAMETERS catalog):
+        '1'  = Transaction Type (EXPL_CODE) — use with IN operator.
+        '2'  = Number of Transactions — use with >= for count thresholds.
+        '5'  = Transaction Amount — use with >= for single-amount thresholds.
+        '6'  = Summation of Transactions — use with >= for SUM thresholds.
+        '7'  = Customer Class — use with IN.
+        '104'= Individual/Corporate Indicator — use with =.
 
     Args:
         country_code (str): Country code.
         inst_code (str): Institution code.
-        parameter_code (str): The AML parameter/field code from pio_aml_parameters.
+        parameter_code (str): Real PIO_AML_PARAMETERS.PARAMETER_CODE.
         rule_code (str): FK to PIO_AML_RULES.RULE_CODE.
-        rule_seq (int): Sequence number within the rule (1, 2, 3...).
-        rule_operator (str): Operator code: GT, LT, GE, LE, EQ, BTW, IN, GRP, HAV_CNT.
+        rule_seq (str): Sequence number as string ('1', '2', '3'...).
+        rule_operator (str): Operator exactly as stored in Oracle: 'IN', '>=', '>', '=', etc.
         comparison_value_from (Optional[str]): Primary/lower bound value.
         comparison_value_to (Optional[str]): Upper bound (BETWEEN only).
         comparison_value_from_des (Optional[str]): Human-readable description.
-        combined_rule (Optional[str]): AND/OR connector with next condition.
+        combined_rule (Optional[str]): 'AND' or 'OR' connector to next condition. '-' for last.
         scenario_code (str): FK to PIO_AML_SCENARIO.SCENARIO_CODE.
+        use_sd_flag (str): '0' = do not use standard deviation comparison.
+        sd_period_type (str): '0' = no SD period type.
+        same_cust_flag (str): '0' = do not restrict to same customer.
+        from_param_perc (Optional[int]): Percentage of the FROM parameter (100 for SUM rows).
+        created_by (str): Numeric-string creator ID.
+        created_date (datetime): Creation timestamp.
+        updated_by (str): '0' on initial insert (reference convention).
+        updated_date (datetime): Same as created_date.
     """
 
     country_code: str = Field(..., description="Country code.")
     inst_code: str = Field(..., description="Institution code.")
     parameter_code: str = Field(
-        ..., description="AML parameter code (from pio_aml_parameters)."
+        ..., description="Real AML parameter code from PIO_AML_PARAMETERS.PARAMETER_CODE."
     )
     rule_code: str = Field(..., description="FK to PIO_AML_RULES.RULE_CODE.")
-    rule_seq: int = Field(..., description="Condition sequence number within the rule.")
+    rule_seq: str = Field(..., description="Condition sequence number as string ('1', '2', ...).")
     rule_operator: str = Field(
         ...,
-        description="Operator: GT, LT, GE, LE, EQ, BTW, IN, GRP, HAV_CNT.",
+        description="Oracle operator string: 'IN', '>=', '>', '<=', '<', '=', 'BETWEEN'.",
     )
     comparison_value_from: Optional[str] = Field(
         default=None,
-        description="Primary threshold value (stored as string for Oracle compatibility).",
+        description="Primary threshold value. For IN: Oracle-quoted list e.g. \"'CHW','CAA'\".",
     )
     comparison_value_to: Optional[str] = Field(
         default=None,
@@ -277,52 +368,67 @@ class QBRuleDetail(BaseModel):
     )
     comparison_value_from_des: Optional[str] = Field(
         default=None,
-        description="Human-readable description of the value.",
+        description="Human-readable comma-separated description of the values.",
     )
     combined_rule: Optional[str] = Field(
         default="AND",
-        description="Logical connector to next condition: AND or OR.",
+        description="Logical connector to next condition: 'AND', 'OR', or '-' for last row.",
     )
-    scenario_code: str = Field(
-        ..., description="FK to PIO_AML_SCENARIO.SCENARIO_CODE."
+    scenario_code: str = Field(..., description="FK to PIO_AML_SCENARIO.SCENARIO_CODE.")
+    use_sd_flag: str = Field(default="0", description="'0' = no standard deviation comparison.")
+    sd_period_type: str = Field(default="0", description="'0' = no SD period type.")
+    same_cust_flag: str = Field(default="0", description="'0' = not restricted to same customer.")
+    from_param_perc: Optional[int] = Field(
+        default=None,
+        description="Percentage of FROM parameter. Set to 100 for SUM aggregation rows (PARAMETER_CODE='6').",
     )
+    created_by: str = Field(default="0", description="Creator ID. Reference convention uses 0 for details rows.")
+    created_date: datetime = Field(default_factory=datetime.utcnow, description="Creation timestamp.")
+    updated_by: str = Field(default="0", description="'0' on initial insert (reference convention).")
+    updated_date: datetime = Field(default_factory=datetime.utcnow, description="Same as created_date.")
 
 
 class QBScenarioRule(BaseModel):
     """Data to INSERT into PIO_AML_SCENARIO_RULES.
 
-    Links a scenario to its rules.
+    Links a scenario to its rule(s). RULE_TYPE must be a code from the
+    PIO_AML_RULE_TYPE lookup table (filtered by COUNTRY_CODE).
+
+    Key RULE_TYPE codes (from live PIO_AML_RULE_TYPE for country_code=400):
+        '3' = '-' (standalone single rule, no relationship to other rules)
+        '1' = FOLLOW BY
+        '2' = WITH
+        '24'= UNION
 
     Args:
         country_code (str): Country code.
         inst_code (str): Institution code.
         aml_rule_code (str): FK to PIO_AML_RULES.RULE_CODE.
         aml_scenario (str): FK to PIO_AML_SCENARIO.SCENARIO_CODE.
-        rule_seq (int): Rule sequence within the scenario.
-        rule_type (str): Type code for this rule (domain-specific).
-        amt_perc (Optional[float]): Amount percentage threshold (domain use).
-        margin_perc (Optional[float]): Margin percentage (domain use).
-        stop_period (Optional[int]): Cooldown period after alert triggers.
+        rule_seq (str): Rule sequence within the scenario ('1', '2', ...).
+        rule_type (str): Code from PIO_AML_RULE_TYPE. '3' = standalone.
+        frequency_days (int): Days between re-alerts. 0 = no cooldown.
+        amt_perc (float): Amount percentage threshold (domain use, usually 0).
+        margin_perc (float): Margin percentage (domain use, usually 0).
+        stop_period (int): Cooldown period in days after alert triggers (usually 0).
     """
 
     country_code: str = Field(..., description="Country code.")
     inst_code: str = Field(..., description="Institution code.")
-    aml_rule_code: str = Field(..., description="FK to PIO_AML_RULES.")
-    aml_scenario: str = Field(..., description="FK to PIO_AML_SCENARIO.")
-    rule_seq: int = Field(default=1, description="Rule sequence in scenario.")
+    aml_rule_code: str = Field(..., description="FK to PIO_AML_RULES.RULE_CODE.")
+    aml_scenario: str = Field(..., description="FK to PIO_AML_SCENARIO.SCENARIO_CODE.")
+    rule_seq: str = Field(default="1", description="Rule sequence as string ('1', '2', ...).")
     rule_type: str = Field(
-        default="T",
-        description="Rule type code (domain-specific, default 'T' for Transaction).",
+        default="3",
+        description=(
+            "Rule type from PIO_AML_RULE_TYPE. "
+            "'3' = standalone (no relationship). See lookup table for other values."
+        ),
     )
-    amt_perc: Optional[float] = Field(
-        default=None, description="Amount percentage threshold."
-    )
-    margin_perc: Optional[float] = Field(
-        default=None, description="Margin percentage."
-    )
-    stop_period: Optional[int] = Field(
-        default=None, description="Alert cooldown period in days."
-    )
+    frequency_days: int = Field(default=0, description="Days between re-alerts for this rule. 0 = no cooldown.")
+    amt_perc: float = Field(default=0.0, description="Amount percentage threshold.")
+    margin_perc: float = Field(default=0.0, description="Margin percentage.")
+    stop_period: int = Field(default=0, description="Alert cooldown period in days.")
 
 
 class ScenarioParameters(BaseModel):

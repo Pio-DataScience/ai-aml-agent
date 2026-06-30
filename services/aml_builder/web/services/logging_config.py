@@ -38,6 +38,9 @@ def get_logging_config() -> Dict[str, Any]:
         }
         formatter_class = None  # handled by () above
 
+    import os
+    os.makedirs("logs", exist_ok=True)
+
     config: Dict[str, Any] = {
         "version": 1,
         "disable_existing_loggers": False,
@@ -50,10 +53,19 @@ def get_logging_config() -> Dict[str, Any]:
                 "stream": "ext://sys.stdout",
                 "formatter": "default",
                 "level": log_level,
+            },
+            "file": {
+                "class": "logging.handlers.RotatingFileHandler",
+                "filename": "logs/app.log",
+                "maxBytes": 10485760,  # 10MB
+                "backupCount": 5,
+                "formatter": "default",
+                "level": log_level,
+                "encoding": "utf-8",
             }
         },
         "root": {
-            "handlers": ["console"],
+            "handlers": ["console", "file"],
             "level": log_level,
         },
         "loggers": {

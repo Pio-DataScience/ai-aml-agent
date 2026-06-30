@@ -21,6 +21,17 @@ if (-not (Test-Path $envFile)) {
     exit 1
 }
 
+# Export environment variables from .env to the PowerShell session
+Get-Content $envFile | ForEach-Object {
+    $line = $_.Trim()
+    if ($line -and -not $line.StartsWith("#") -and $line -like "*=*") {
+        $key, $value = $line.Split("=", 2)
+        $key = $key.Trim()
+        $value = $value.Trim().Trim('"').Trim("'")
+        [System.Environment]::SetEnvironmentVariable($key, $value)
+    }
+}
+
 Write-Host "  PYTHONPATH = $env:PYTHONPATH" -ForegroundColor Gray
 Write-Host "  Endpoint  = http://127.0.0.1:8005/chat/stream" -ForegroundColor Gray
 Write-Host "  Docs      = http://127.0.0.1:8005/docs" -ForegroundColor Gray

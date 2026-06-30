@@ -238,7 +238,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                         ))
 
             # Get final state for the complete answer
-            final_state = graph.get_state(config)
+            final_state = await graph.aget_state(config)
             if final_state and final_state.values:
                 final_msgs = final_state.values.get("messages", [])
                 if final_msgs:

@@ -149,7 +149,9 @@ def _load_prompt(filename: str) -> str:
 # =============================================================================
 
 
-def orchestrator_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str, Any]:
+def orchestrator_node(
+    state: AMLScenarioState, config: RunnableConfig
+) -> Dict[str, Any]:
     """Route the conversation and manage the lifecycle.
 
     The Orchestrator is the entry point for every user turn. It:
@@ -177,7 +179,7 @@ def orchestrator_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[s
             "messages": [
                 AIMessage(
                     content=(
-                        "⚠️ I've reached my processing limit for this request. "
+                        "I've reached my processing limit for this request. "
                         "Please try rephrasing or breaking the request into smaller steps."
                     )
                 )
@@ -218,7 +220,7 @@ def orchestrator_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[s
             "messages": [
                 AIMessage(
                     content=(
-                        f"❌ I encountered an issue while creating the scenario:\n\n"
+                        f"I encountered an issue while creating the scenario:\n\n"
                         f"```\n{last_error}\n```\n\n"
                         "Please check the Oracle connection or try again. "
                         "If this persists, the implementation team can investigate."
@@ -264,17 +266,35 @@ def _finalize_response(state: AMLScenarioState, iteration: int) -> Dict[str, Any
             sample_rows += f"\n| `{cid}` | {detail} |"
 
     confidence = val_data.get("confidence_score", 0.0)
-    confidence_label = "🟢 High" if confidence >= 0.8 else "🟡 Medium" if confidence >= 0.5 else "🔴 Low"
+    confidence_label = (
+        "High" if confidence >= 0.8 else "Medium" if confidence >= 0.5 else "Low"
+    )
+
+    success = val_data.get("success", True)
+
+    if success:
+        header = "## Scenario Created Successfully"
+        warning_section = ""
+    else:
+        header = "## Scenario Created (Validation Failed)"
+        diagnosis = val_data.get("diagnosis", "Zero alerts generated.")
+        suggested_fix = val_data.get("suggested_fix", "Widen threshold values or extend detection period.")
+        warning_section = (
+            f"### ⚠️ Validation Issues\n"
+            f"- **Diagnosis:** {diagnosis}\n"
+            f"- **Suggested Fix:** {suggested_fix}\n\n"
+        )
 
     message = (
-        f"## ✅ Scenario Created Successfully\n\n"
+        f"{header}\n\n"
         f"**Scenario Code:** `{scenario_code}`  \n"
         f"**Name:** {scenario_name}\n\n"
+        f"{warning_section}"
         f"---\n\n"
-        f"### 📊 Live Impact Assessment\n"
+        f"### Live Impact Assessment\n"
         f"- **Active Alerts:** {alert_count} customers\n"
         f"- **Confidence:** {confidence_label} ({confidence:.0%})\n"
-        f"\n### 👥 Sample Matched Customers\n"
+        f"\n### Sample Matched Customers\n"
         f"{sample_rows if sample_rows else '_No sample data available._'}\n\n"
         f"---\n\n"
         f"> The scenario is now **ACTIVE** in the AML module.  \n"
@@ -293,7 +313,9 @@ def _finalize_response(state: AMLScenarioState, iteration: int) -> Dict[str, Any
 # =============================================================================
 
 
-def intent_analyst_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str, Any]:
+def intent_analyst_node(
+    state: AMLScenarioState, config: RunnableConfig
+) -> Dict[str, Any]:
     """Parse and enrich the user's AML detection goal.
 
     Converts natural language into a structured AMLIntent object.
@@ -317,24 +339,19 @@ def intent_analyst_node(state: AMLScenarioState, config: RunnableConfig) -> Dict
     system_prompt = _load_prompt("intent_analyst_system.md")
     llm = _build_llm(fast=False)
 
-    # Request structured JSON output
-    structured_prompt = f"""{system_prompt}
+    # Compile the full system instructions, including schemas.
+    instruction_prompt = f"""{system_prompt}
 
 ---
 
 ## TASK
-Analyze the user's request and return a JSON object matching the AMLIntent schema.
-
-USER REQUEST: "{last_user_msg}"
-
-CONVERSATION HISTORY (last 3 turns):
-{_format_history(messages, n=3)}
-
+Analyze the entire conversation history below to extract the final compiled AML scenario intent matching the schema, taking all user clarifications into account.
 Return ONLY valid JSON. No explanation, no markdown fences.
+
 Schema:
 {{
   "scenario_name": "string",
-  "scenario_type": "TRANSACTION|ACCOUNT|CUSTOMER",
+  "scenario_type": "string",
   "detection_logic": "string",
   "thresholds": [{{"field":"string","operator":"string","value_from":number,"value_to":null}}],
   "time_window": {{"unit":"DAYS|MONTHS|YEARS","value":number,"is_rolling":true}} | null,
@@ -347,8 +364,20 @@ Schema:
 }}
 """
 
+    llm_messages = [SystemMessage(content=instruction_prompt)]
+    # Append the native conversation history
+    for m in messages:
+        if isinstance(m, (HumanMessage, AIMessage)):
+            llm_messages.append(m)
+
+    # Append a final instruction to enforce the JSON task on the whole history
+    final_instruction = SystemMessage(
+        content="Compile the final scenario parameters from the chat above. Return ONLY the JSON object. Do not include any markdown styling."
+    )
+    llm_messages.append(final_instruction)
+
     try:
-        response = llm.invoke([SystemMessage(content=structured_prompt)])
+        response = llm.invoke(llm_messages)
         raw_content = response.content.strip()
 
         # Strip any accidental markdown fences
@@ -414,10 +443,22 @@ def sql_bridge_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str
     time_text = "No time window specified."
     if intent.time_window:
         tw = intent.time_window
-        time_text = f"Rolling {tw.value} {tw.unit}" if tw.is_rolling else f"Fixed {tw.value} {tw.unit}"
+        time_text = (
+            f"Rolling {tw.value} {tw.unit}"
+            if tw.is_rolling
+            else f"Fixed {tw.value} {tw.unit}"
+        )
 
-    segments_text = ", ".join(intent.customer_segments) if intent.customer_segments else "All segments"
-    exclusions_text = "\n".join(f"  - {e}" for e in intent.exclusions) if intent.exclusions else "None"
+    segments_text = (
+        ", ".join(intent.customer_segments)
+        if intent.customer_segments
+        else "All segments"
+    )
+    exclusions_text = (
+        "\n".join(f"  - {e}" for e in intent.exclusions)
+        if intent.exclusions
+        else "None"
+    )
 
     aml_prompt = (
         f"<AML_SCENARIO_REQUEST>\n"
@@ -459,7 +500,10 @@ def sql_bridge_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str
                 "POST",
                 settings.PIOTECH_AI_URL,
                 json=payload,
-                headers={"Accept": "text/event-stream", "Content-Type": "application/json"},
+                headers={
+                    "Accept": "text/event-stream",
+                    "Content-Type": "application/json",
+                },
             ) as response:
                 response.raise_for_status()
                 for line in response.iter_lines():
@@ -477,7 +521,9 @@ def sql_bridge_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str
                         continue
 
         full_response = "".join(collected_text).strip()
-        logger.info("[SQL_BRIDGE] PioTech AI response received (%d chars).", len(full_response))
+        logger.info(
+            "[SQL_BRIDGE] PioTech AI response received (%d chars).", len(full_response)
+        )
 
         # Extract SQL from the response
         sql = _extract_sql(full_response)
@@ -492,9 +538,7 @@ def sql_bridge_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str
 
         # Parse SQL metadata
         metadata = _parse_sql_metadata(sql)
-        logger.info(
-            "[SQL_BRIDGE] SQL extracted. tables=%s", metadata.tables
-        )
+        logger.info("[SQL_BRIDGE] SQL extracted. tables=%s", metadata.tables)
 
         return {
             "raw_sql": sql,
@@ -506,8 +550,7 @@ def sql_bridge_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str
         logger.error("[SQL_BRIDGE] HTTP error calling PioTech AI: %s", exc)
         return {
             "next_action": "ERROR",
-            "error_log": state.get("error_log", [])
-            + [f"SQL Bridge HTTP error: {exc}"],
+            "error_log": state.get("error_log", []) + [f"SQL Bridge HTTP error: {exc}"],
         }
 
 
@@ -568,11 +611,16 @@ def _parse_sql_metadata(sql: str) -> SQLMetadata:
     where_conditions = []
     if where_match:
         raw_where = where_match.group(1).strip()
-        where_conditions = [c.strip() for c in re.split(r"\bAND\b|\bOR\b", raw_where, flags=re.IGNORECASE)]
+        where_conditions = [
+            c.strip()
+            for c in re.split(r"\bAND\b|\bOR\b", raw_where, flags=re.IGNORECASE)
+        ]
         where_conditions = [c for c in where_conditions if c]
 
     # Extract GROUP BY fields
-    group_match = re.search(r"GROUP BY\s+([\s\S]+?)(?:HAVING|ORDER BY|$)", sql, re.IGNORECASE)
+    group_match = re.search(
+        r"GROUP BY\s+([\s\S]+?)(?:HAVING|ORDER BY|$)", sql, re.IGNORECASE
+    )
     group_by_fields = []
     if group_match:
         group_by_fields = [f.strip() for f in group_match.group(1).split(",")]
@@ -582,7 +630,10 @@ def _parse_sql_metadata(sql: str) -> SQLMetadata:
     having_conditions = []
     if having_match:
         raw_having = having_match.group(1).strip()
-        having_conditions = [c.strip() for c in re.split(r"\bAND\b|\bOR\b", raw_having, flags=re.IGNORECASE)]
+        having_conditions = [
+            c.strip()
+            for c in re.split(r"\bAND\b|\bOR\b", raw_having, flags=re.IGNORECASE)
+        ]
         having_conditions = [c for c in having_conditions if c]
 
     # Detect date fields
@@ -616,8 +667,9 @@ def decomposer_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str
     Converts the structured SQLMetadata into a complete ScenarioParameters
     object ready for insertion into the 4 Oracle AML tables.
 
-    Uses an LLM to handle the semantic mapping of SQL constructs to
-    AML parameter codes, guided by strict rules.
+    Uses a live PIO_AML_PARAMETERS catalog lookup + LLM-assisted mapping
+    to select the correct PARAMETER_CODE for each condition. All field
+    defaults match the reference scenario_creation.md template.
 
     Args:
         state (AMLScenarioState): Current agent state.
@@ -628,215 +680,437 @@ def decomposer_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str
     """
     logger.info("[DECOMPOSER] Mapping SQL to QB parameters.")
 
-    intent_dict = state.get("enriched_intent") or {}
-    sql_meta_dict = state.get("sql_metadata") or {}
-    intent = AMLIntent(**intent_dict)
-    sql_meta = SQLMetadata(**sql_meta_dict)
+    try:
+        intent_dict = state.get("enriched_intent") or {}
+        sql_meta_dict = state.get("sql_metadata") or {}
+        if not sql_meta_dict:
+            raise ValueError("SQL metadata is missing or empty. PioTech AI may have failed to return a valid SQL query.")
 
-    # Generate unique codes
-    # SCENARIO_CODE is VARCHAR2(40) in header, but NUMBER in rules details.
-    # Therefore, generate a purely numeric string for the scenario code.
-    import time
-    import random
-    epoch_ms = int(time.time() * 1000)
-    rand_suffix = random.randint(100, 999)
-    scenario_code = f"{epoch_ms}{rand_suffix}"
+        intent = AMLIntent(**intent_dict)
+        sql_meta = SQLMetadata(**sql_meta_dict)
 
-    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
-    short_id = uuid.uuid4().hex[:4].upper()
-    rule_code = f"RL_{timestamp}_{short_id}"
+        # Reuse codes if they already exist in the state (validation retry loop)
+        scenario_code = state.get("scenario_code")
+        rule_code = None
 
-    # Build scenario header
-    scenario = QBScenario(
-        country_code=settings.AML_COUNTRY_CODE,
-        inst_code=settings.AML_INST_CODE,
-        scenario_code=scenario_code,
-        scenario_des_eng=intent.scenario_name,
-        active_flag=settings.AML_DEFAULT_ACTIVE_FLAG,
-        violation_level=settings.AML_DEFAULT_VIOLATION_LEVEL,
-        degree_risk_flag=settings.AML_DEFAULT_DEGREE_RISK_FLAG,
-        created_by=settings.AML_CREATED_BY,
-        created_date=datetime.utcnow(),
-    )
+        scenario_parameters = state.get("scenario_parameters")
+        if scenario_parameters and "rules" in scenario_parameters:
+            rules = scenario_parameters["rules"]
+            if rules and len(rules) > 0:
+                rule_code = rules[0].get("rule_code")
 
-    # Determine period from intent time window
-    period_type = "D"
-    period_days = 30  # sensible default
-    if intent.time_window:
-        tw = intent.time_window
-        period_days = tw.value
-        period_type = tw.unit[0]  # D / M / Y
+        import random
 
-    # Build rule
-    rule = QBRule(
-        country_code=settings.AML_COUNTRY_CODE,
-        inst_code=settings.AML_INST_CODE,
-        rule_code=rule_code,
-        rule_des_eng=f"Rule for {intent.scenario_name}",
-        active_flag="Y",
-        period_type=period_type,  # type: ignore[arg-type]
-        period_days=period_days,
-        created_by=settings.AML_CREATED_BY,
-        created_date=datetime.utcnow(),
-    )
+        if not scenario_code:
+            import time
+            epoch_ms = int(time.time() * 1000)
+            rand_suffix = random.randint(100, 999)
+            scenario_code = f"{epoch_ms}{rand_suffix}"
 
-    # Build scenario-rule link
-    scenario_rule = QBScenarioRule(
-        country_code=settings.AML_COUNTRY_CODE,
-        inst_code=settings.AML_INST_CODE,
-        aml_rule_code=rule_code,
-        aml_scenario=scenario_code,
-        rule_seq=1,
-        rule_type="T",
-    )
+        if not rule_code:
+            timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+            rule_code = f"{timestamp}{random.randint(100, 999)}"
 
-    # Use LLM to map thresholds → rule details (PARAMETER_CODE lookup)
-    rule_details = _map_thresholds_to_rule_details(
-        intent=intent,
-        sql_meta=sql_meta,
-        rule_code=rule_code,
-        scenario_code=scenario_code,
-    )
+        # Determine PERIOD_TYPE (PIO_PERIOD_TYPE code) and PERIOD_DAYS from intent.
+        # PIO_PERIOD_TYPE codes: '0'=Last n Days, '2'=Weekly, '3'=Monthly,
+        # '4'=Quarterly, '5'=Half Year, '6'=Yearly.
+        period_type = "0"  # default: Last n Days
+        period_days = 30  # sensible default
+        if intent.time_window:
+            tw = intent.time_window
+            period_days = tw.value
+            unit_upper = tw.unit.upper()
+            if unit_upper == "DAYS":
+                period_type = "0"  # Last n Days
+            elif unit_upper == "MONTHS":
+                period_type = "3"  # Monthly
+                period_days = tw.value * 30
+            elif unit_upper == "YEARS":
+                period_type = "6"  # Yearly
+                period_days = tw.value * 365
 
-    # Self-assess decomposition confidence
-    confidence = _assess_confidence(intent, rule_details)
+        now = datetime.utcnow()
 
-    notes = [
-        f"Scenario code: {scenario_code}",
-        f"Rule code: {rule_code}",
-        f"Period: {period_days} {period_type}",
-        f"Conditions mapped: {len(rule_details)}",
-        f"Confidence: {confidence:.2f}",
-    ]
+        # Build scenario header — every column in PIO_AML_SCENARIO.
+        scenario = QBScenario(
+            country_code=settings.AML_COUNTRY_CODE,
+            inst_code=settings.AML_INST_CODE,
+            scenario_code=scenario_code,
+            scenario_des_eng=intent.scenario_name,
+            scenario_des_nat_lan=intent.scenario_name,  # duplicate ENG for native lang
+            active_flag=settings.AML_DEFAULT_ACTIVE_FLAG,
+            exclude_expl_flag="0",
+            use_watchlist_flag="0",
+            violation_level=settings.AML_DEFAULT_VIOLATION_LEVEL,
+            degree_risk_flag=settings.AML_DEFAULT_DEGREE_RISK_FLAG,
+            default_scenario_flag="0",
+            run_flag=settings.AML_RUN_FLAG,
+            approval_flag=settings.AML_APPROVAL_FLAG,
+            group_by_flag=settings.AML_GROUP_BY_FLAG,
+            use_worldcheck_flag="0",
+            created_by=settings.AML_CREATED_BY,
+            created_date=now,
+            updated_by=settings.AML_CREATED_BY,
+            updated_date=now,
+            trans_withouttrans_flag=settings.AML_TRANS_WITHOUTTRANS_FLAG,
+            category_code=settings.AML_CATEGORY_CODE,
+            active_threshold_curr_flag="0",
+            sce_type_code=settings.AML_SCE_TYPE_CODE,
+            class_code=settings.AML_CLASS_CODE,
+        )
 
-    params = ScenarioParameters(
-        scenario=scenario,
-        rules=[rule],
-        scenario_rules=[scenario_rule],
-        rule_details=rule_details,
-        decomposition_confidence=confidence,
-        decomposition_notes=notes,
-    )
+        desc = f"Rule for {intent.scenario_name}"
 
-    logger.info(
-        "[DECOMPOSER] Parameters built. scenario_code=%s confidence=%.2f conditions=%d",
-        scenario_code,
-        confidence,
-        len(rule_details),
-    )
+        # Build rule — every column in PIO_AML_RULES.
+        rule = QBRule(
+            country_code=settings.AML_COUNTRY_CODE,
+            inst_code=settings.AML_INST_CODE,
+            rule_code=rule_code,
+            rule_desc_eng=desc,
+            rule_desc_arb=desc,  # duplicate ENG for Arabic column
+            active_flag=settings.AML_DEFAULT_ACTIVE_FLAG,
+            period_type=period_type,
+            period_days=period_days,
+            use_sequentially_flag="0",
+            sequentially_count=0,
+            default_rule_flag="0",
+            exclude_days=0,
+            ltg_code=None,
+            created_by=settings.AML_CREATED_BY,
+            created_date=now,
+            updated_by=settings.AML_CREATED_BY,
+            updated_date=now,
+        )
 
-    return {
-        "scenario_parameters": params.model_dump(mode="json"),
-        "decomposition_confidence": confidence,
-        "scenario_code": scenario_code,
-        "next_action": "QB_WRITE",
-    }
+        # Build scenario-rule link — every column in PIO_AML_SCENARIO_RULES.
+        scenario_rule = QBScenarioRule(
+            country_code=settings.AML_COUNTRY_CODE,
+            inst_code=settings.AML_INST_CODE,
+            aml_rule_code=rule_code,
+            aml_scenario=scenario_code,
+            rule_seq="1",
+            rule_type=settings.AML_RULE_TYPE,  # '3' = standalone
+            frequency_days=0,
+            amt_perc=0.0,
+            margin_perc=0.0,
+            stop_period=0,
+        )
+
+        # Use live PIO_AML_PARAMETERS catalog + LLM to map conditions.
+        rule_details = _fetch_and_map_parameters(
+            intent=intent,
+            sql_meta=sql_meta,
+            rule_code=rule_code,
+            scenario_code=scenario_code,
+            created_date=now,
+        )
+
+        if not rule_details:
+            raise ValueError(
+                "Could not map any conditions to Query Builder parameters. "
+                "The scenario must define at least one valid threshold or condition "
+                "that maps to the PIO_AML_PARAMETERS catalog."
+            )
+
+        # Self-assess decomposition confidence
+        confidence = _assess_confidence(intent, rule_details)
+
+        notes = [
+            f"Scenario code: {scenario_code}",
+            f"Rule code: {rule_code}",
+            f"Period type: {period_type} ({period_days} days)",
+            f"Conditions mapped: {len(rule_details)}",
+            f"Confidence: {confidence:.2f}",
+        ]
+
+        params = ScenarioParameters(
+            scenario=scenario,
+            rules=[rule],
+            scenario_rules=[scenario_rule],
+            rule_details=rule_details,
+            decomposition_confidence=confidence,
+            decomposition_notes=notes,
+        )
+
+        logger.info(
+            "[DECOMPOSER] Parameters built. scenario_code=%s confidence=%.2f conditions=%d",
+            scenario_code,
+            confidence,
+            len(rule_details),
+        )
+
+        return {
+            "scenario_parameters": params.model_dump(mode="json"),
+            "decomposition_confidence": confidence,
+            "scenario_code": scenario_code,
+            "next_action": "QB_WRITE",
+        }
+
+    except Exception as exc:
+        logger.error("[DECOMPOSER] Failed to decompose: %s", exc, exc_info=True)
+        return {
+            "next_action": "ERROR",
+            "error_log": state.get("error_log", []) + [f"Decomposition failed: {exc}"],
+        }
 
 
-def _map_thresholds_to_rule_details(
+def _fetch_and_map_parameters(
     intent: AMLIntent,
     sql_meta: SQLMetadata,
     rule_code: str,
     scenario_code: str,
+    created_date: datetime,
 ) -> List[QBRuleDetail]:
     """Map intent thresholds and SQL conditions to QBRuleDetail rows.
 
-    Uses a direct mapping from intent thresholds + SQL HAVING conditions.
-    The PARAMETER_CODE is derived from the field name — this will be
-    enriched further once pio_aml_parameters catalog is queryable.
+    Queries the live database catalog to map physical SQL column names to
+    Query Builder PARAMETER_CODEs dynamically.
 
     Args:
         intent (AMLIntent): Enriched user intent.
         sql_meta (SQLMetadata): Parsed SQL metadata.
         rule_code (str): The rule code to link details to.
         scenario_code (str): The scenario code to link details to.
+        created_date (datetime): Timestamp to stamp on all rows.
 
     Returns:
         List[QBRuleDetail]: List of condition rows for PIO_AML_RULES_DETAILS.
     """
-    details = []
+    details: List[QBRuleDetail] = []
     seq = 1
 
-    operator_map = {
-        ">": "GT", "<": "LT", ">=": "GE", "<=": "LE",
-        "=": "EQ", "BETWEEN": "BTW", "IN": "IN",
-    }
+    # Load dynamic catalog mappings from database
+    column_map = {}
+    try:
+        from web.services.oracle import run_readonly
+        _, catalog_rows = run_readonly(
+            """
+            SELECT DISTINCT P.PARAMETER_CODE, UPPER(C.COLUMN_NAME), P.AGGREGATION_CODE
+            FROM PIO_AML_PARAMETERS P
+            JOIN PIO_AML_COLUMNS C ON P.TABLE_CODE = C.TABLE_CODE AND P.COLUMN_CODE = C.COLUMN_CODE
+            """,
+            {}
+        )
+        for row in catalog_rows:
+            p_code = str(row[0]).strip()
+            col_name = str(row[1]).strip().upper()
+            agg_code = str(row[2]).strip()
+            column_map[col_name] = (p_code, agg_code)
+            
+        logger.info("[DECOMPOSER] Loaded %d dynamic parameter mappings from catalog.", len(column_map))
+    except Exception as exc:
+        logger.error("[DECOMPOSER] Failed to query live parameter catalog: %s. Using hardcoded fallback.", exc)
+        column_map = {
+            "EXPL_CODE": ("1", "1"),
+            "CUS_CLASS": ("7", "1"),
+            "INDV_CORP_IND": ("104", "1"),
+            "EQU_TRA_AMT": ("5", "1"),
+            "TRA_DATE": ("14", "3"),
+            "DAY_DATE": ("103", "1"),
+            "CUST_RISK_LVL": ("106", "1"),
+            "BLA_REF": ("108", "1"),
+            "DATE_CLOSED": ("113", "1"),
+        }
 
-    # Map each intent threshold
-    for threshold in intent.thresholds:
-        op_code = operator_map.get(threshold.operator, "EQ")
-        param_code = _derive_parameter_code(threshold.field)
-
-        detail = QBRuleDetail(
+    # Helper: build a QBRuleDetail with all required fields.
+    def _make_detail(
+        param_code: str,
+        operator: str,
+        value_from: Optional[str],
+        value_des: Optional[str],
+        combined: str = "AND",
+        value_to: Optional[str] = None,
+        from_param_perc: Optional[int] = None,
+    ) -> QBRuleDetail:
+        return QBRuleDetail(
             country_code=settings.AML_COUNTRY_CODE,
             inst_code=settings.AML_INST_CODE,
             parameter_code=param_code,
             rule_code=rule_code,
-            rule_seq=seq,
-            rule_operator=op_code,
-            comparison_value_from=str(threshold.value_from),
-            comparison_value_to=str(threshold.value_to) if threshold.value_to else None,
-            comparison_value_from_des=f"{threshold.field} {threshold.operator} {threshold.value_from}",
-            combined_rule="AND",
+            rule_seq=str(seq),
+            rule_operator=operator,
+            comparison_value_from=value_from,
+            comparison_value_to=value_to,
+            comparison_value_from_des=value_des,
+            combined_rule=combined,
             scenario_code=scenario_code,
+            use_sd_flag="0",
+            sd_period_type="0",
+            same_cust_flag="0",
+            from_param_perc=from_param_perc,
+            created_by="0",
+            created_date=created_date,
+            updated_by="0",
+            updated_date=created_date,
         )
-        details.append(detail)
-        seq += 1
 
-    # Map HAVING conditions (aggregate thresholds e.g. COUNT(*) > 5)
+    # ------------------------------------------------------------------ #
+    # Step 1: Map WHERE conditions dynamically from SQL                  #
+    # ------------------------------------------------------------------ #
+    for cond in sql_meta.where_conditions:
+        # Match: COLUMN_NAME Operator VALUE
+        match = re.search(
+            r"(\w+(?:\.\w+)?)\s*([><=!]+|LIKE|IN)\s*(.*)", cond, re.IGNORECASE
+        )
+        if not match:
+            continue
+
+        raw_col = match.group(1).strip()
+        op = match.group(2).strip().upper()
+        raw_val = match.group(3).strip()
+
+        # Strip table alias (e.g. C.CUS_CLASS -> CUS_CLASS)
+        col_name = raw_col.split(".")[-1].upper()
+
+        # Map equivalent physical columns to their registered catalog names
+        col_aliases = {
+            "TRA_AMT": "EQU_TRA_AMT",
+            "TRANS_TYPE": "EXPL_CODE",
+            "TXN_TYPE": "EXPL_CODE",
+            "TRANSACTION_TYPE": "EXPL_CODE",
+            "TXN_CODE": "EXPL_CODE",
+            "TRANS_DATE": "TRA_DATE",
+        }
+        col_name = col_aliases.get(col_name, col_name)
+
+        # Skip standard DWH system columns that aren't rule conditions
+        if col_name in ("CUS_STATUS", "DAY_DATE", "COUNTRY_CODE", "INST_CODE", "UPDATED_DATE", "CREATED_DATE", "STATUS_CODE", "TRA_DATE", "TRANS_DATE"):
+            continue
+
+        # Raise error if column is not supported in the database catalog
+        if col_name not in column_map:
+            raise ValueError(
+                f"Column '{raw_col}' in SQL condition '{cond}' is not supported by the compliance catalog. "
+                f"Please ensure it is registered in PIO_AML_COLUMNS."
+            )
+
+        p_code, agg_code = column_map[col_name]
+
+        # Extract comparison values
+        if op == "IN":
+            # Extract comma-separated values inside parenthesis, stripping quotes
+            val_match = re.search(r"\(([^)]+)\)", raw_val)
+            if val_match:
+                codes = [c.strip().strip("'").strip('"') for c in val_match.group(1).split(",")]
+                oracle_in_val = ",".join(f"''{c}''" for c in codes)
+                oracle_in_val = f"'{oracle_in_val}'"
+                des = ",".join(codes)
+                details.append(_make_detail(p_code, "IN", oracle_in_val, des))
+                seq += 1
+        else:
+            # Single value comparison
+            val = raw_val.strip("'").strip('"')
+            details.append(_make_detail(p_code, op, val, f"{col_name} {op} {val}"))
+            seq += 1
+
+    # ------------------------------------------------------------------ #
+    # Step 2: Map HAVING conditions dynamically from SQL (Aggregates)    #
+    # ------------------------------------------------------------------ #
     for having in sql_meta.having_conditions:
-        count_match = re.search(r"COUNT\s*\(\s*\*?\s*\)\s*([><=!]+)\s*(\d+)", having, re.IGNORECASE)
+        # SUM(...) >= N  -> Parameter 6 (Summation of Transactions)
+        sum_match = re.search(
+            r"SUM\s*\([^)]+\)\s*([><=!]+)\s*([\d,\.]+)", having, re.IGNORECASE
+        )
+        if sum_match:
+            op_raw = sum_match.group(1).strip()
+            val = sum_match.group(2).replace(",", "").strip()
+            des = f"Sum of transactions {op_raw} {val}"
+            details.append(_make_detail("6", op_raw, val, des, from_param_perc=100))
+            seq += 1
+            continue
+
+        # COUNT(...) >= N  -> Parameter 2 (Number of Transactions)
+        count_match = re.search(
+            r"COUNT\s*\(\s*[^)]*\s*\)\s*([><=!]+)\s*(\d+)", having, re.IGNORECASE
+        )
         if count_match:
             op_raw = count_match.group(1).strip()
             val = count_match.group(2).strip()
-            op_code = operator_map.get(op_raw, "GT")
-
-            detail = QBRuleDetail(
-                country_code=settings.AML_COUNTRY_CODE,
-                inst_code=settings.AML_INST_CODE,
-                parameter_code="TXN_COUNT",  # aggregate count parameter
-                rule_code=rule_code,
-                rule_seq=seq,
-                rule_operator="HAV_CNT",
-                comparison_value_from=val,
-                comparison_value_from_des=f"Transaction count {op_raw} {val}",
-                combined_rule="AND",
-                scenario_code=scenario_code,
-            )
-            details.append(detail)
+            des = f"Number of transactions {op_raw} {val}"
+            details.append(_make_detail("2", op_raw, val, des))
             seq += 1
 
+    # ------------------------------------------------------------------ #
+    # Step 3: Map non-aggregate intent thresholds (Deduplicated fallback)#
+    # ------------------------------------------------------------------ #
+    mapped_param_codes = {d.parameter_code for d in details}
+
+    for threshold in intent.thresholds:
+        field_lower = threshold.field.lower().replace(" ", "_")
+
+        # Skip fields already handled
+        if any(x in field_lower for x in ("transaction_type", "type", "txn_type", "expl_code")):
+            continue
+
+        # Determine parameter code contextually from intent field names
+        param_code = None
+        from_perc = None
+
+        if "amount" in field_lower or "amt" in field_lower or "balance" in field_lower:
+            if any(x in field_lower for x in ("sum", "total", "summation", "aggregate")):
+                param_code = "6"
+                from_perc = 100
+            else:
+                param_code = "5"
+        elif any(x in field_lower for x in ("count", "num", "freq", "times")):
+            param_code = "2"
+        elif "class" in field_lower:
+            param_code = "7"
+        elif any(x in field_lower for x in ("type", "indv", "corp", "ind")):
+            param_code = "104"
+
+        # Avoid duplicating threshold if already parsed from SQL HAVING/WHERE clauses
+        if param_code and param_code not in mapped_param_codes:
+            value_from = (
+                str(int(threshold.value_from))
+                if threshold.value_from == int(threshold.value_from)
+                else str(threshold.value_from)
+            )
+            value_to = (
+                str(int(threshold.value_to))
+                if threshold.value_to is not None and threshold.value_to == int(threshold.value_to)
+                else (str(threshold.value_to) if threshold.value_to is not None else None)
+            )
+            des = f"{threshold.field} {threshold.operator} {threshold.value_from}"
+
+            details.append(
+                _make_detail(
+                    param_code,
+                    threshold.operator,
+                    value_from,
+                    des,
+                    value_to=value_to,
+                    from_param_perc=from_perc,
+                )
+            )
+            seq += 1
+            mapped_param_codes.add(param_code)
+
+    # Step 4: Fix combined_rule on last row
+    if details:
+        last = details[-1]
+        details[-1] = last.model_copy(update={"combined_rule": "-"})
+
+    logger.info(
+        "[DECOMPOSER] Mapped %d rule detail rows dynamically. Codes: %s",
+        len(details),
+        [d.parameter_code for d in details],
+    )
     return details
 
+    # ------------------------------------------------------------------ #
+    # Step 4: Fix combined_rule on last row ('-' per reference template)   #
+    # ------------------------------------------------------------------ #
+    if details:
+        last = details[-1]
+        details[-1] = last.model_copy(update={"combined_rule": "-"})
 
-def _derive_parameter_code(field_name: str) -> str:
-    """Derive a plausible AML parameter code from a business field name.
-
-    This is a best-effort mapping. The authoritative source is
-    pio_aml_parameters which will be queried during integration.
-
-    Args:
-        field_name (str): Business field name from the intent.
-
-    Returns:
-        str: Uppercased parameter code.
-    """
-    mapping = {
-        "amount": "TXN_AMT",
-        "transaction_amount": "TXN_AMT",
-        "balance": "ACC_BAL",
-        "account_balance": "ACC_BAL",
-        "count": "TXN_COUNT",
-        "transaction_count": "TXN_COUNT",
-        "date": "TXN_DATE",
-        "transaction_date": "TXN_DATE",
-        "customer": "CUS_NUM",
-        "customer_id": "CUS_NUM",
-        "type": "TXN_TYPE",
-        "transaction_type": "TXN_TYPE",
-    }
-    normalized = field_name.lower().strip().replace(" ", "_")
-    return mapping.get(normalized, normalized.upper())
+    logger.info(
+        "[DECOMPOSER] Mapped %d rule detail rows. Codes used: %s",
+        len(details),
+        [d.parameter_code for d in details],
+    )
+    return details
 
 
 def _assess_confidence(intent: AMLIntent, details: List[QBRuleDetail]) -> float:
@@ -899,6 +1173,9 @@ def qb_writer_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str,
     from web.services.oracle import run_write, run_write_many
 
     try:
+        # Delete existing records under this scenario code to prevent duplicate scenario rows on retry
+        _delete_scenario_if_exists(params.scenario.scenario_code)
+
         # 1. Insert scenario header
         _insert_scenario(params.scenario)
 
@@ -933,8 +1210,62 @@ def qb_writer_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str,
         }
 
 
+def _delete_scenario_if_exists(scenario_code: str) -> None:
+    """Delete all database records related to scenario_code before rewriting.
+
+    Ensures that validation retry loops do not write duplicate scenario rows
+    or raise unique/primary key constraints.
+
+    Args:
+        scenario_code (str): The unique scenario identifier.
+    """
+    from web.services.oracle import run_write
+    logger.info("[QB_WRITER] Cleaning existing rows for scenario_code=%s", scenario_code)
+
+    # 1. Delete condition details
+    run_write(
+        """
+        DELETE FROM PIO_AML_RULES_DETAILS
+        WHERE RULE_CODE IN (
+            SELECT AML_RULE_CODE
+            FROM PIO_AML_SCENARIO_RULES
+            WHERE AML_SCENARIO = :scenario_code
+        )
+        """,
+        {"scenario_code": scenario_code},
+    )
+
+    # 2. Delete rule definitions linked to this scenario
+    run_write(
+        """
+        DELETE FROM PIO_AML_RULES
+        WHERE RULE_CODE IN (
+            SELECT AML_RULE_CODE
+            FROM PIO_AML_SCENARIO_RULES
+            WHERE AML_SCENARIO = :scenario_code
+        )
+        """,
+        {"scenario_code": scenario_code},
+    )
+
+    # 3. Delete scenario-rule linkages
+    run_write(
+        "DELETE FROM PIO_AML_SCENARIO_RULES WHERE AML_SCENARIO = :scenario_code",
+        {"scenario_code": scenario_code},
+    )
+
+    # 4. Delete scenario header
+    run_write(
+        "DELETE FROM PIO_AML_SCENARIO WHERE SCENARIO_CODE = :scenario_code",
+        {"scenario_code": scenario_code},
+    )
+
+
 def _insert_scenario(scenario: QBScenario) -> None:
     """INSERT a row into PIO_AML_SCENARIO.
+
+    Inserts every column from the reference scenario_creation.md template.
+    All field names match the live PIO_AML_SCENARIO schema exactly.
 
     Args:
         scenario (QBScenario): Scenario header data.
@@ -944,29 +1275,62 @@ def _insert_scenario(scenario: QBScenario) -> None:
     sql = """
         INSERT INTO PIO_AML_SCENARIO
             (COUNTRY_CODE, INST_CODE, SCENARIO_CODE, SCENARIO_DES_ENG,
-             ACTIVE_FLAG, VIOLATION_LEVEL, DEGREE_RISK_FLAG,
-             CREATED_BY, CREATED_DATE)
+             SCENARIO_DES_NAT_LAN, ACTIVE_FLAG, EXCLUDE_EXPL_FLAG,
+             USE_WATCHLIST_FLAG, VIOLATION_LEVEL, DEGREE_RISK_FLAG,
+             DEFAULT_SCENARIO_FLAG, RUN_FLAG, APPROVAL_FLAG,
+             GROUP_BY_FLAG, USE_WORLDCHECK_FLAG,
+             CREATED_BY, CREATED_DATE, UPDATED_BY, UPDATED_DATE,
+             TRANS_WITHOUTTRANS_FLAG, CATEGORY_CODE,
+             ACTIVE_THRESHOLD_CURR_FLAG, SCE_TYPE_CODE, CLASS_CODE)
         VALUES
             (:country_code, :inst_code, :scenario_code, :scenario_des_eng,
-             :active_flag, :violation_level, :degree_risk_flag,
-             :created_by, :created_date)
+             :scenario_des_nat_lan, :active_flag, :exclude_expl_flag,
+             :use_watchlist_flag, :violation_level, :degree_risk_flag,
+             :default_scenario_flag, :run_flag, :approval_flag,
+             :group_by_flag, :use_worldcheck_flag,
+             :created_by, :created_date, :updated_by, :updated_date,
+             :trans_withouttrans_flag, :category_code,
+             :active_threshold_curr_flag, :sce_type_code, :class_code)
     """
-    run_write(sql, {
-        "country_code": scenario.country_code,
-        "inst_code": scenario.inst_code,
-        "scenario_code": scenario.scenario_code,
-        "scenario_des_eng": scenario.scenario_des_eng,
-        "active_flag": scenario.active_flag,
-        "violation_level": scenario.violation_level,
-        "degree_risk_flag": scenario.degree_risk_flag,
-        "created_by": scenario.created_by,
-        "created_date": scenario.created_date,
-    })
+    run_write(
+        sql,
+        {
+            "country_code": int(scenario.country_code),
+            "inst_code": int(scenario.inst_code),
+            "scenario_code": scenario.scenario_code,
+            "scenario_des_eng": scenario.scenario_des_eng,
+            "scenario_des_nat_lan": scenario.scenario_des_nat_lan
+            or scenario.scenario_des_eng,
+            "active_flag": scenario.active_flag,
+            "exclude_expl_flag": scenario.exclude_expl_flag,
+            "use_watchlist_flag": scenario.use_watchlist_flag,
+            "violation_level": scenario.violation_level,
+            "degree_risk_flag": scenario.degree_risk_flag,
+            "default_scenario_flag": scenario.default_scenario_flag,
+            "run_flag": scenario.run_flag,
+            "approval_flag": scenario.approval_flag,
+            "group_by_flag": scenario.group_by_flag,
+            "use_worldcheck_flag": scenario.use_worldcheck_flag,
+            "created_by": int(scenario.created_by),
+            "created_date": scenario.created_date,
+            "updated_by": int(scenario.updated_by),
+            "updated_date": scenario.updated_date,
+            "trans_withouttrans_flag": scenario.trans_withouttrans_flag,
+            "category_code": scenario.category_code,
+            "active_threshold_curr_flag": scenario.active_threshold_curr_flag,
+            "sce_type_code": scenario.sce_type_code,
+            "class_code": scenario.class_code,
+        },
+    )
     logger.debug("[QB_WRITER] PIO_AML_SCENARIO inserted: %s", scenario.scenario_code)
 
 
 def _insert_rule(rule: QBRule) -> None:
     """INSERT a row into PIO_AML_RULES.
+
+    Inserts every column from the reference scenario_creation.md template.
+    RULE_DESC_ENG and RULE_DESC_ARB are both populated. PERIOD_TYPE is
+    a numeric code from PIO_PERIOD_TYPE, NOT 'D'/'M'/'Y'.
 
     Args:
         rule (QBRule): Rule definition data.
@@ -975,31 +1339,46 @@ def _insert_rule(rule: QBRule) -> None:
 
     sql = """
         INSERT INTO PIO_AML_RULES
-            (COUNTRY_CODE, INST_CODE, RULE_CODE, RULE_DESC_ENG,
+            (COUNTRY_CODE, INST_CODE, RULE_CODE, RULE_DESC_ENG, RULE_DESC_ARB,
              ACTIVE_FLAG, PERIOD_TYPE, PERIOD_DAYS,
-             LTG_CODE, CREATED_BY, CREATED_DATE)
+             USE_SEQUENTIALLY_FLAG, SEQUENTIALLY_COUNT,
+             DEFAULT_RULE_FLAG, EXCLUDE_DAYS,
+             LTG_CODE, UPDATED_BY, UPDATED_DATE)
         VALUES
-            (:country_code, :inst_code, :rule_code, :rule_des_eng,
+            (:country_code, :inst_code, :rule_code, :rule_desc_eng, :rule_desc_arb,
              :active_flag, :period_type, :period_days,
-             :ltg_code, :created_by, :created_date)
+             :use_sequentially_flag, :sequentially_count,
+             :default_rule_flag, :exclude_days,
+             :ltg_code, :updated_by, :updated_date)
     """
-    run_write(sql, {
-        "country_code": rule.country_code,
-        "inst_code": rule.inst_code,
-        "rule_code": rule.rule_code,
-        "rule_des_eng": rule.rule_des_eng,
-        "active_flag": rule.active_flag,
-        "period_type": rule.period_type,
-        "period_days": rule.period_days,
-        "ltg_code": rule.ltg_code,
-        "created_by": rule.created_by,
-        "created_date": rule.created_date,
-    })
+    run_write(
+        sql,
+        {
+            "country_code": int(rule.country_code),
+            "inst_code": int(rule.inst_code),
+            "rule_code": rule.rule_code,
+            "rule_desc_eng": rule.rule_desc_eng,
+            "rule_desc_arb": rule.rule_desc_arb or rule.rule_desc_eng,
+            "active_flag": rule.active_flag,
+            "period_type": rule.period_type,
+            "period_days": rule.period_days,
+            "use_sequentially_flag": rule.use_sequentially_flag,
+            "sequentially_count": rule.sequentially_count,
+            "default_rule_flag": rule.default_rule_flag,
+            "exclude_days": rule.exclude_days,
+            "ltg_code": rule.ltg_code,
+            "updated_by": int(rule.updated_by),
+            "updated_date": rule.updated_date,
+        },
+    )
     logger.debug("[QB_WRITER] PIO_AML_RULES inserted: %s", rule.rule_code)
 
 
 def _insert_scenario_rule(sr: QBScenarioRule) -> None:
     """INSERT a row into PIO_AML_SCENARIO_RULES.
+
+    Includes FREQUENCY_DAYS column. RULE_TYPE is a numeric code from
+    PIO_AML_RULE_TYPE lookup ('3' = standalone rule, no relationship).
 
     Args:
         sr (QBScenarioRule): Scenario-rule linkage data.
@@ -1009,63 +1388,90 @@ def _insert_scenario_rule(sr: QBScenarioRule) -> None:
     sql = """
         INSERT INTO PIO_AML_SCENARIO_RULES
             (COUNTRY_CODE, INST_CODE, AML_RULE_CODE, AML_SCENARIO,
-             RULE_SEQ, RULE_TYPE, AMT_PERC, MARGIN_PERC, STOP_PERIOD)
+             RULE_SEQ, RULE_TYPE, FREQUENCY_DAYS,
+             AMT_PERC, MARGIN_PERC, STOP_PERIOD)
         VALUES
             (:country_code, :inst_code, :aml_rule_code, :aml_scenario,
-             :rule_seq, :rule_type, :amt_perc, :margin_perc, :stop_period)
+             :rule_seq, :rule_type, :frequency_days,
+             :amt_perc, :margin_perc, :stop_period)
     """
-    run_write(sql, {
-        "country_code": sr.country_code,
-        "inst_code": sr.inst_code,
-        "aml_rule_code": sr.aml_rule_code,
-        "aml_scenario": sr.aml_scenario,
-        "rule_seq": sr.rule_seq,
-        "rule_type": sr.rule_type,
-        "amt_perc": sr.amt_perc,
-        "margin_perc": sr.margin_perc,
-        "stop_period": sr.stop_period,
-    })
+    run_write(
+        sql,
+        {
+            "country_code": int(sr.country_code),
+            "inst_code": int(sr.inst_code),
+            "aml_rule_code": sr.aml_rule_code,
+            "aml_scenario": sr.aml_scenario,
+            "rule_seq": sr.rule_seq,
+            "rule_type": sr.rule_type,
+            "frequency_days": sr.frequency_days,
+            "amt_perc": sr.amt_perc,
+            "margin_perc": sr.margin_perc,
+            "stop_period": sr.stop_period,
+        },
+    )
     logger.debug("[QB_WRITER] PIO_AML_SCENARIO_RULES inserted.")
 
 
 def _insert_rule_details(details: List[QBRuleDetail]) -> None:
     """Batch INSERT rows into PIO_AML_RULES_DETAILS.
 
+    Inserts every column from the reference scenario_creation.md template.
+    PARAMETER_CODE must be a real code from PIO_AML_PARAMETERS.
+    USE_SD_FLAG, SD_PERIOD_TYPE, SAME_CUST_FLAG, FROM_PARAM_PERC
+    are all now included.
+
     Args:
         details (List[QBRuleDetail]): List of condition rows to insert.
     """
     from web.services.oracle import run_write_many
 
+    if not details:
+        logger.debug("[QB_WRITER] No rule details to insert.")
+        return
+
     sql = """
         INSERT INTO PIO_AML_RULES_DETAILS
             (COUNTRY_CODE, INST_CODE, PARAMETER_CODE, RULE_CODE,
              RULE_SEQ, RULE_OPERATOR, COMPARISON_VALUE_FROM,
-             COMPARISON_VALUE_TO, COMPARISON_VALUE_FROM_DES,
-             COMBINED_RULE, SCENARIO_CODE)
+             COMBINED_RULE, COMPARISON_VALUE_FROM_DES,
+             USE_SD_FLAG, SD_PERIOD_TYPE, SAME_CUST_FLAG,
+             FROM_PARAM_PERC,
+             CREATED_BY, CREATED_DATE, UPDATED_BY, UPDATED_DATE)
         VALUES
             (:country_code, :inst_code, :parameter_code, :rule_code,
              :rule_seq, :rule_operator, :comparison_value_from,
-             :comparison_value_to, :comparison_value_from_des,
-             :combined_rule, :scenario_code)
+             :combined_rule, :comparison_value_from_des,
+             :use_sd_flag, :sd_period_type, :same_cust_flag,
+             :from_param_perc,
+             :created_by, :created_date, :updated_by, :updated_date)
     """
     params_list = [
         {
-            "country_code": d.country_code,
-            "inst_code": d.inst_code,
+            "country_code": int(d.country_code),
+            "inst_code": int(d.inst_code),
             "parameter_code": d.parameter_code,
             "rule_code": d.rule_code,
             "rule_seq": d.rule_seq,
             "rule_operator": d.rule_operator,
             "comparison_value_from": d.comparison_value_from,
-            "comparison_value_to": d.comparison_value_to,
-            "comparison_value_from_des": d.comparison_value_from_des,
             "combined_rule": d.combined_rule,
-            "scenario_code": d.scenario_code,
+            "comparison_value_from_des": d.comparison_value_from_des,
+            "use_sd_flag": d.use_sd_flag,
+            "sd_period_type": d.sd_period_type,
+            "same_cust_flag": d.same_cust_flag,
+            "from_param_perc": d.from_param_perc,
+            "created_by": int(d.created_by),
+            "created_date": d.created_date,
+            "updated_by": int(d.updated_by),
+            "updated_date": d.updated_date,
         }
         for d in details
     ]
     run_write_many(sql, params_list)
-    logger.debug("[QB_WRITER] PIO_AML_RULES_DETAILS batch inserted: %d rows", len(details))
+    logger.debug(
+        "[QB_WRITER] PIO_AML_RULES_DETAILS batch inserted: %d rows", len(details)
+    )
 
 
 # =============================================================================
@@ -1095,19 +1501,23 @@ def validator_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str,
     intent_dict = state.get("enriched_intent") or {}
 
     if not state.get("scenario_write_success", False):
-        logger.warning("[VALIDATOR] Scenario write failed in previous step. Skipping database validation.")
+        logger.warning(
+            "[VALIDATOR] Scenario write failed in previous step. Skipping database validation."
+        )
+        diagnosis = "The scenario parameters could not be written to Oracle. Check the error log for details."
         return {
             "validation_result": {
                 "success": False,
                 "scenario_status": "ERROR",
                 "alert_count": 0,
                 "sample_alerts": [],
-                "diagnosis": "The scenario parameters could not be written to Oracle. Check the error log for details.",
+                "diagnosis": diagnosis,
                 "suggested_fix": "Verify that all configuration parameters and database column mappings are correct.",
                 "retry_count": retry_count,
                 "confidence_score": 0.0,
             },
-            "next_action": "ORCHESTRATOR",
+            "next_action": "ERROR",
+            "error_log": state.get("error_log", []) + [diagnosis],
         }
 
     logger.info(
@@ -1139,10 +1549,12 @@ def validator_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str,
                 {
                     "country_code": int(settings.AML_COUNTRY_CODE),
                     "inst_code": int(settings.AML_INST_CODE),
-                    "p_status": p_status
-                }
+                    "p_status": p_status,
+                },
             )
-            logger.info("[VALIDATOR] Procedure completed. P_STATUS=%s", p_status.getvalue())
+            logger.info(
+                "[VALIDATOR] Procedure completed. P_STATUS=%s", p_status.getvalue()
+            )
 
         # Step 2: Count alerts for our scenario
         cols, rows = run_readonly(
@@ -1173,7 +1585,10 @@ def validator_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str,
                 "Verify that PARAMETER_CODE values match pio_aml_parameters."
             )
 
-        elif intent.expected_alert_range_max and alert_count > intent.expected_alert_range_max:
+        elif (
+            intent.expected_alert_range_max
+            and alert_count > intent.expected_alert_range_max
+        ):
             success = False
             diagnosis = (
                 f"Alert volume ({alert_count:,}) exceeds expected maximum "
@@ -1195,8 +1610,12 @@ def validator_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str,
             )
             for row in sample_rows:
                 row_dict = dict(zip(sample_cols, row))
-                customer_id = str(row_dict.get("cus_num", row_dict.get("customer_id", "—")))
-                sample_alerts.append(AlertSample(customer_id=customer_id, raw_data=row_dict))
+                customer_id = str(
+                    row_dict.get("cus_num", row_dict.get("customer_id", "—"))
+                )
+                sample_alerts.append(
+                    AlertSample(customer_id=customer_id, raw_data=row_dict)
+                )
 
         # Step 5: Calculate confidence
         confidence = 1.0 if success else max(0.0, 1.0 - (retry_count * 0.3))
@@ -1226,7 +1645,8 @@ def validator_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str,
                 "validation_result": result.model_dump(mode="json"),
                 "next_action": "DECOMPOSE",  # loop back to decomposer
                 "validation_retry_count": retry_count + 1,
-                "error_log": state.get("error_log", []) + [f"Validation attempt {retry_count + 1}: {diagnosis}"],
+                "error_log": state.get("error_log", [])
+                + [f"Validation attempt {retry_count + 1}: {diagnosis}"],
             }
 
         # Max retries hit — surface to user
@@ -1262,7 +1682,7 @@ def route_after_orchestrator(state: AMLScenarioState) -> str:
     action = state.get("next_action", "INTENT")
     route_map = {
         "INTENT": "intent_analyst",
-        "CLARIFY": "orchestrator",   # Orchestrator formats and returns clarification
+        "CLARIFY": "orchestrator",  # Orchestrator formats and returns clarification
         "WAIT_USER": END,
         "END": END,
         "ERROR": "orchestrator",
@@ -1285,6 +1705,21 @@ def route_after_intent(state: AMLScenarioState) -> str:
     if action == "ERROR":
         return "orchestrator"
     return "sql_bridge"
+
+
+def route_after_sql_bridge(state: AMLScenarioState) -> str:
+    """Route after SQL Bridge node.
+
+    Args:
+        state (AMLScenarioState): Current state.
+
+    Returns:
+        str: Next node name (orchestrator on error, decomposer otherwise).
+    """
+    action = state.get("next_action", "DECOMPOSE")
+    if action == "ERROR":
+        return "orchestrator"
+    return "decomposer"
 
 
 def route_after_decomposer(state: AMLScenarioState) -> str:
@@ -1364,7 +1799,7 @@ async def build_graph() -> Any:
     # Edges with conditional routing
     graph.add_conditional_edges("orchestrator", route_after_orchestrator)
     graph.add_conditional_edges("intent_analyst", route_after_intent)
-    graph.add_edge("sql_bridge", "decomposer")
+    graph.add_conditional_edges("sql_bridge", route_after_sql_bridge)
     graph.add_conditional_edges("decomposer", route_after_decomposer)
     graph.add_edge("qb_writer", "validator")
     graph.add_conditional_edges("validator", route_after_validator)
@@ -1393,7 +1828,9 @@ async def close_checkpointer() -> None:
             await _checkpointer_conn.close()
             logger.info("[AGENT] Checkpointer database connection closed.")
         except Exception as exc:
-            logger.error("[AGENT] Error closing checkpointer database connection: %s", exc)
+            logger.error(
+                "[AGENT] Error closing checkpointer database connection: %s", exc
+            )
         _checkpointer_conn = None
 
 

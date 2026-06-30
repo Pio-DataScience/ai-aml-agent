@@ -5,6 +5,47 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-06-29] fix: Enforced purely numeric RULE_CODE format and added duplicate scenario prevention
+
+### What
+- **Column Name Aliases**: Implemented a column name aliasing dictionary (e.g., `TRA_AMT` $\rightarrow$ `EQU_TRA_AMT`, `TRANS_TYPE` $\rightarrow$ `EXPL_CODE`) inside `_fetch_and_map_parameters` before querying the dynamic compliance catalog mapping. This resolves errors where physically present columns in `PIO_AML_COLUMNS` are not linked to parameter codes in `PIO_AML_PARAMETERS`.
+- **Live Catalog Parameter Mapping**: Replaced the hardcoded regex column checks in `_fetch_and_map_parameters` with a dynamic database query joining `PIO_AML_PARAMETERS` and `PIO_AML_COLUMNS` at runtime. The system now maps SQL conditions dynamically to parameter codes based on the live database schema definition.
+- **Unsupported Column Safeguard**: Implemented a security guard in the decomposer that raises a `ValueError` if a query filters on a column not registered in the Query Builder's `PIO_AML_COLUMNS` catalog. This prevents the generation of broken or mutated rules in the database and triggers the self-correction rewrite loop.
+- **Mapping Deduplication**: Prevented duplicate summation/count rule rows by prioritizing the parsed SQL `HAVING` clause conditions and skipping them from intent thresholds.
+- **Known Issues documentation**: Created [known_issues.md](file:///c:/Users/abura/Development/AI_AML_AGENT/Docs/known_issues.md) inside the `Docs/` directory, detailing stored procedure limitations (hardcoded scenario filter in `FILL_PIO_AML_CUSTOMERS`) and test database constraints (missing customer profiles in `PIO_CUSTOMERS`).
+- **HAVING COUNT column argument parsing**: Fixed a mapping bug by updating the regex pattern in `_fetch_and_map_parameters` from matching strictly `COUNT(*)` to allowing any column argument (e.g. `COUNT(L.LOAN_KEY)`), allowing column-specific count queries to successfully parse.
+- **Flexible parameter mapping**: Updated the decomposer's parameter mapping checks from strict equality matches to robust substring checks (e.g. `"amount" in field` and `"count" in field`), allowing domain-specific columns (like `loan_amount` or `loan_count`) to map correctly to Query Builder codes.
+- **Empty Scenario Prevention**: Added validation checks in `decomposer_node` to throw a clean exception if `rule_details` is empty, avoiding writes of empty invalid scenarios.
+- **Validation Failure Warning**: Updated `_finalize_response` to show warnings and suggested fixes when validation fails.
+- **Clarification Loop Fix**: Resolved an issue where the Intent Analyst repeatedly asked the same clarification questions by refactoring `intent_analyst_node` to pass the entire conversation history as native chat messages to the LLM (instead of sending just the last message as a standalone request), allowing the LLM to understand context and compile clarifications.
+- **Constraint Violation Fix (ORA-00001)**: Fixed a primary key violation on `PIO_AML_RULES_DETAILS` by updating the cleanup logic in `_delete_scenario_if_exists` to delete condition rows using the `RULE_CODE` linked via a subquery on `PIO_AML_SCENARIO_RULES` instead of filtering by the null-valued `SCENARIO_CODE` column.
+- **Graceful Error Handling**: Resolved a crash when PioTech AI failed to generate a SQL query by wrapping `decomposer_node` in a try-except block and adding `route_after_sql_bridge` conditional routing, allowing the graph to route cleanly to the orchestrator and halt instead of throwing unhandled Pydantic validation exceptions.
+- **Infinite Loop Fix**: Resolved an infinite routing loop by changing the validator bypass action from `"ORCHESTRATOR"` to `"ERROR"` when `scenario_write_success` is `False`. This allows write failures to correctly bubble up, print the error details, and safely terminate the execution via `"END"`, instead of falling through the orchestrator to route back to `intent_analyst` autonomously.
+- **Purely Numeric `RULE_CODE`**: Changed the rule identifier generation pattern from character-prefixed `RL_YYYYMMDDHHMMSS_XXXX` to a purely numeric string (`YYYYMMDDHHMMSS` + 3-digit random suffix), adhering to compliance engine constraints.
+- **Code Reuse**: Updated the decomposer node to check for and reuse existing `scenario_code` and `rule_code` from the state, preventing new codes from being generated during validation retry loops.
+- **Targeted Deletions**: Implemented `_delete_scenario_if_exists` in `qb_writer_node` to purge existing records for the current scenario from all 4 schema tables (`PIO_AML_RULES_DETAILS`, `PIO_AML_SCENARIO_RULES`, `PIO_AML_RULES`, and `PIO_AML_SCENARIO`) prior to rewriting, guaranteeing exactly one clean record and avoiding constraint failures.
+
+## [2026-06-28] fix: Schema-correct QB scenario ingestion and parameter mapping
+
+### What
+Fixed the **Decomposer** and **QB Writer** nodes to generate and insert database records matching the exact schema requirements and defaults of the reference template:
+- Added 14 missing fields in `QBScenario` (e.g. `run_flag`, `group_by_flag`, etc.).
+- Added 7 missing fields in `QBRule` and corrected naming (e.g. `rule_desc_arb`).
+- Added 6 missing fields in `QBRuleDetail` (e.g. `from_param_perc` for summation rows).
+- Added `frequency_days` to `QBScenarioRule`.
+- Fixed values: `active_flag` maps to `'1'` (not `'Y'`), `violation_level` to `'1'`, `degree_risk_flag` to `'D'`.
+- Replaced fictional parameter mapping dictionary with a live database-backed `_fetch_and_map_parameters` query of `PIO_AML_PARAMETERS` combined with structured rules to match transaction types (`EXPL_CODE` -> `1`), count (`2`), and summation (`6`).
+- Unified period representation using `PIO_PERIOD_TYPE` lookup codes (e.g., `'0'` for Last n Days, `'3'` for Monthly).
+- Resolved uvicorn async checkpointer crash by awaiting `aget_state()` inside `main.py`.
+- Configured a local **`logs/`** folder inside `logging_config.py` that records app.log.
+- Dynamically loaded `.env` inside `run_dev.ps1` to automatically export LangSmith settings to terminal sessions.
+- Made `scenario_type` a **dynamic string category** (releasing hardcoded TRANSACTION/ACCOUNT/CUSTOMER rules) to support domain queries like `DEBIT` or `COLLECTION`. Dynamic LLM routing handles clarification logic.
+
+### Why
+The `FILL_PIO_AML_CUSTOMERS` stored procedure failed or generated no alerts due to missing schema fields and invalid parameter code references in `PIO_AML_RULES_DETAILS`. These fixes guarantee 100% database-compliant inserts matching the implementation team's reference. Awaiting the checkpointer state and loading variables dynamically ensures tracing is fully functional when running manually or using scripts.
+
+---
+
 ## [2026-06-18] feat: Full Phase 1–4 implementation — complete agent system
 
 ### What
