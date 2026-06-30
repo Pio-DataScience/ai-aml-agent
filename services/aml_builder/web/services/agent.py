@@ -1447,6 +1447,10 @@ def _fetch_and_map_parameters(
             p_code = str(row[0]).strip()
             col_name_upper = str(row[1]).strip().upper()
             agg_code = str(row[2]).strip() if row[2] else "1"
+            # Prevent overwriting transaction amount mapping (Param 5)
+            # with count (Param 2) or sum (Param 6) which also reference EQU_TRA_AMT.
+            if col_name_upper == "EQU_TRA_AMT" and p_code in ("2", "6"):
+                continue
             column_map[col_name_upper] = (p_code, agg_code)
 
         logger.info("[DECOMPOSER] Loaded %d dynamic parameter mappings from catalog.", len(column_map))
