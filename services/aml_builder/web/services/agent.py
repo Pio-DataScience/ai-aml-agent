@@ -198,6 +198,52 @@ def orchestrator_node(
     iteration = state.get("iteration_count", 0) + 1
     next_action = state.get("next_action") or "INTENT"
 
+    # ── Handle resume from WAIT_USER_INTENT ──────────────────────────────────
+    if next_action == "WAIT_USER_INTENT":
+        logger.info("[ORCHESTRATOR] Resuming from greeting pause. Routing to INTENT.")
+        next_action = "INTENT"
+
+    # ── Initial Greeting / Simple Chat check ──────────────────────────────────
+    if next_action == "INTENT" and state.get("enriched_intent") is None:
+        last_user = next(
+            (m.content for m in reversed(messages_list) if isinstance(m, HumanMessage)), ""
+        ).strip()
+        
+        # Fast LLM check to see if the user is greeting/chatting vs describing an actual scenario
+        llm = _build_llm(fast=True)
+        check_prompt = (
+            f"You are an AI assistant helping a bank compliance manager build AML scenarios.\n"
+            f"User message: \"{last_user}\"\n\n"
+            f"Determine if the user is describing/proposing a scenario they want to build (e.g. they specify transaction amounts, frequencies, customer categories, periods, etc.) OR if they are just saying hello/greeting/asking how to start.\n\n"
+            f"Select exactly one option:\n"
+            f"- 'SCENARIO'\n"
+            f"- 'GREET'\n\n"
+            f"Return ONLY the word SCENARIO or GREET. No other text."
+        )
+        try:
+            resp = llm.invoke([HumanMessage(content=check_prompt)])
+            init_decision = resp.content.strip().upper()
+        except Exception as e:
+            logger.warning("[ORCHESTRATOR] Initial message classification failed: %s. Defaulting to SCENARIO.", e)
+            init_decision = "SCENARIO"
+
+        if "GREET" in init_decision:
+            logger.info("[ORCHESTRATOR] User is greeting. Pausing to show warm welcome message.")
+            welcome_msg = (
+                "Hello! I am your **PioTech AML Scenario Builder Assistant**.\n\n"
+                "I can help you convert your natural language compliance requirements into "
+                "live, validated detection scenarios in the PioTech Oracle Query Builder engine.\n\n"
+                "To get started, please describe the scenario logic you would like to build today. For example:\n"
+                "- *'Flag any customer who withdraws more than JD 10,000 in cash within 3 days.'*\n"
+                "- *'Identify retail customers whose inbound transfers exceed their average by 10% standard deviation.'*\n\n"
+                "What scenario would you like to build?"
+            )
+            return {
+                "messages": [AIMessage(content=welcome_msg)],
+                "next_action": "WAIT_USER_INTENT",
+                "iteration_count": 0,  # Reset iteration count for the actual scenario creation run
+            }
+
     # ── Approval gate ─────────────────────────────────────────────────────────
     if next_action == "WAIT_APPROVAL" and not state.get("plan_approved", False):
         last_user = next(
@@ -2682,6 +2728,7 @@ def route_after_orchestrator(state: AMLScenarioState) -> str:
         "DECOMPOSE": "decomposer",       # ADJUST threshold loop-back
         "CLARIFY": "orchestrator",
         "WAIT_USER": END,
+        "WAIT_USER_INTENT": END,         # pause — wait for user to enter scenario details
         "WAIT_APPROVAL": END,            # pause — wait for user approval message
         "END": END,
         "ERROR": "orchestrator",
