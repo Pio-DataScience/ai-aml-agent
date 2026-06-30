@@ -348,6 +348,29 @@ def orchestrator_node(
 
     action = decision.next_action
 
+    # ── Safety Guard: Ensure no transition to SQL_BRIDGE unless explicitly approved ──
+    if action == "SQL_BRIDGE" and not state.get("plan_approved", False):
+        last_user_msg = next(
+            (m.content for m in reversed(history) if isinstance(m, HumanMessage)), ""
+        ).lower().strip()
+        APPROVAL_KEYWORDS = {"proceed", "yes", "approve", "go ahead", "confirm", "start", "execute", "ok", "okay"}
+        if not any(kw in last_user_msg for kw in APPROVAL_KEYWORDS):
+            logger.warning("[ORCHESTRATOR] LLM tried to bypass plan approval. Forcing WAIT_APPROVAL.")
+            action = "WAIT_APPROVAL"
+            msg = (
+                "I have generated the scenario execution plan in the side panel. "
+                "Please review the details and reply **proceed** when you are ready to create it, "
+                "or let me know if you would like to adjust anything."
+            )
+            add_kwargs = {}
+            plan_art = state.get("plan_artifact")
+            val_res = state.get("validation_result")
+            if plan_art:
+                add_kwargs["plan_artifact"] = plan_art
+            if val_res:
+                add_kwargs["validation_result"] = val_res
+            updates["messages"] = [AIMessage(content=msg, additional_kwargs=add_kwargs)]
+
     # ── Mechanical side effects based on LLM decision ─────────────────────────
 
     if action == "REDEFINE" or decision.clear_scenario_state:
