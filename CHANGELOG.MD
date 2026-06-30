@@ -5,6 +5,12 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-06-30] feat: Added statistical standard deviation (STDDEV) parameter mapping support
+
+### What
+- **Standard Deviation (STDDEV) Parsing**: Added support to parse and map Oracle `STDDEV` or `STDDEV_SAMP` functions in SQL aggregate HAVING conditions. The decomposer now extracts standard deviation percentage multipliers (e.g. `0.1 * STDDEV(...)` $\rightarrow$ `from_param_perc = 10`) and dynamically activates the compliance engine's `USE_SD_FLAG = '1'` and `SD_PERIOD_TYPE = '1'` (1-year history) metadata flags.
+- **Intent SD Detection**: Integrated standard deviation keyword detection inside intent thresholds to capture statistical constraints directly from structured user requests.
+
 ## [2026-06-29] fix: Enforced purely numeric RULE_CODE format and added duplicate scenario prevention
 
 ### What

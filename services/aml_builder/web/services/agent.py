@@ -921,6 +921,8 @@ def _fetch_and_map_parameters(
         combined: str = "AND",
         value_to: Optional[str] = None,
         from_param_perc: Optional[int] = None,
+        use_sd_flag: str = "0",
+        sd_period_type: str = "0",
     ) -> QBRuleDetail:
         return QBRuleDetail(
             country_code=settings.AML_COUNTRY_CODE,
@@ -934,8 +936,8 @@ def _fetch_and_map_parameters(
             comparison_value_from_des=value_des,
             combined_rule=combined,
             scenario_code=scenario_code,
-            use_sd_flag="0",
-            sd_period_type="0",
+            use_sd_flag=use_sd_flag,
+            sd_period_type=sd_period_type,
             same_cust_flag="0",
             from_param_perc=from_param_perc,
             created_by="0",
@@ -1007,6 +1009,40 @@ def _fetch_and_map_parameters(
     # Step 2: Map HAVING conditions dynamically from SQL (Aggregates)    #
     # ------------------------------------------------------------------ #
     for having in sql_meta.having_conditions:
+        # Check for Standard Deviation first in aggregate functions
+        # e.g., SUM(TRA_AMT) > AVG(TRA_AMT) + 0.1 * STDDEV(TRA_AMT)
+        if "STDDEV" in having.upper() or "STDDEV_SAMP" in having.upper():
+            # Parse multiplier of STDDEV, e.g. 0.1 * STDDEV or STDDEV * 0.1
+            mult_match = re.search(r"([\d\.]+)\s*\*\s*STDDEV", having, re.IGNORECASE)
+            if not mult_match:
+                mult_match = re.search(r"STDDEV\s*\([^)]+\)\s*\*\s*([\d\.]+)", having, re.IGNORECASE)
+
+            mult = float(mult_match.group(1)) if mult_match else 1.0
+            from_perc = int(mult * 100)
+
+            # Map operator
+            op_raw = ">="
+            for op in (">=", "<=", ">", "<", "="):
+                if op in having:
+                    op_raw = op
+                    break
+
+            des = f"Standard Deviation threshold multiplier: {from_perc}%"
+            # Parameter 6 is summation, map standard deviation constraint to summation code
+            details.append(
+                _make_detail(
+                    param_code="6",
+                    operator=op_raw,
+                    value_from="0",  # Engine evaluates dynamically when USE_SD_FLAG=1
+                    value_des=des,
+                    from_param_perc=from_perc,
+                    use_sd_flag="1",
+                    sd_period_type="1",  # Default 1 year history
+                )
+            )
+            seq += 1
+            continue
+
         # SUM(...) >= N  -> Parameter 6 (Summation of Transactions)
         sum_match = re.search(
             r"SUM\s*\([^)]+\)\s*([><=!]+)\s*([\d,\.]+)", having, re.IGNORECASE
@@ -1042,14 +1078,28 @@ def _fetch_and_map_parameters(
         if any(x in field_lower for x in ("transaction_type", "type", "txn_type", "expl_code")):
             continue
 
+        # Check for Standard Deviation in intent field names
+        is_sd = any(x in field_lower for x in ("standard_deviation", "sd", "stddev", "انحراف"))
+
         # Determine parameter code contextually from intent field names
         param_code = None
         from_perc = None
+        use_sd = "0"
+        sd_period = "0"
 
-        if "amount" in field_lower or "amt" in field_lower or "balance" in field_lower:
-            if any(x in field_lower for x in ("sum", "total", "summation", "aggregate")):
+        if "amount" in field_lower or "amt" in field_lower or "balance" in field_lower or is_sd:
+            if any(x in field_lower for x in ("sum", "total", "summation", "aggregate")) or is_sd:
                 param_code = "6"
-                from_perc = 100
+                if is_sd:
+                    # e.g., "10%" standard deviation -> from_perc = 10
+                    try:
+                        from_perc = int(threshold.value_from)
+                    except Exception:
+                        from_perc = 10
+                    use_sd = "1"
+                    sd_period = "1"
+                else:
+                    from_perc = 100
             else:
                 param_code = "5"
         elif any(x in field_lower for x in ("count", "num", "freq", "times")):
@@ -1063,8 +1113,8 @@ def _fetch_and_map_parameters(
         if param_code and param_code not in mapped_param_codes:
             value_from = (
                 str(int(threshold.value_from))
-                if threshold.value_from == int(threshold.value_from)
-                else str(threshold.value_from)
+                if not is_sd and threshold.value_from == int(threshold.value_from)
+                else ("0" if is_sd else str(threshold.value_from))
             )
             value_to = (
                 str(int(threshold.value_to))
@@ -1081,6 +1131,8 @@ def _fetch_and_map_parameters(
                     des,
                     value_to=value_to,
                     from_param_perc=from_perc,
+                    use_sd_flag=use_sd,
+                    sd_period_type=sd_period,
                 )
             )
             seq += 1
