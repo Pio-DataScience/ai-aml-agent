@@ -33,6 +33,7 @@ from web.services.schemas import (
     AMLIntent,
     AlertSample,
     CatalogCreation,
+    OrchestratorDecision,
     PlanCondition,
     QBRule,
     QBRuleDetail,
@@ -171,18 +172,93 @@ def _load_prompt(filename: str) -> str:
 # =============================================================================
 
 
+def _build_state_context(state: AMLScenarioState, iteration: int) -> str:
+    """Serialise current pipeline state into a readable table for the orchestrator LLM.
+
+    Args:
+        state (AMLScenarioState): Current agent state.
+        iteration (int): Current iteration number (already incremented).
+
+    Returns:
+        str: Markdown table + error log block.
+    """
+    prev_action = state.get("next_action") or "INTENT"
+    enriched_intent = state.get("enriched_intent") or {}
+    plan_generated = bool(state.get("plan_artifact"))
+    plan_approved = state.get("plan_approved", False)
+    scenario_code = state.get("scenario_code")
+    error_log = state.get("error_log", [])
+    failure_mode = state.get("failure_mode")
+    validation_result = state.get("validation_result") or {}
+    write_verification = state.get("write_verification") or {}
+    catalog_creations = state.get("catalog_creations") or []
+
+    val_success = validation_result.get("success")
+    alert_count = validation_result.get("alert_count")
+    det_count = validation_result.get("det_count")
+    density = validation_result.get("alert_density_ratio")
+    confidence = validation_result.get("confidence_score")
+    diagnosis = validation_result.get("diagnosis")
+    threshold_sensitivity = validation_result.get("threshold_sensitivity") or {}
+    write_ok = write_verification.get("all_pass")
+
+    intent_name = enriched_intent.get("scenario_name", "Not captured yet")
+    intent_type = enriched_intent.get("scenario_type", "")
+
+    samples = validation_result.get("sample_alerts", [])
+    sample_lines = ""
+    if samples:
+        sample_lines = "\n\n**Sample Customers (validation output):**\n| Customer ID | Details |\n|---|---|\n"
+        for s in samples[:4]:
+            cid = s.get("customer_id", "—")
+            raw = s.get("raw_data", {})
+            detail = ", ".join(f"{k}: {v}" for k, v in list(raw.items())[:3])
+            sample_lines += f"| `{cid}` | {detail} |\n"
+
+    table = (
+        f"| Field | Value |\n"
+        f"|---|---|\n"
+        f"| **Pipeline phase (prev)** | `{prev_action}` |\n"
+        f"| **Iteration** | {iteration} / {settings.MAX_AGENT_ITERATIONS} |\n"
+        f"| **Intent captured** | {intent_name} ({intent_type}) |\n"
+        f"| **Plan generated** | {plan_generated} |\n"
+        f"| **Plan approved** | {plan_approved} |\n"
+        f"| **Scenario code** | {scenario_code or 'Not assigned'} |\n"
+        f"| **Write success** | {state.get('scenario_write_success', False)} |\n"
+        f"| **Write integrity (all 4 tables)** | {write_ok} |\n"
+        f"| **Validation success** | {val_success} |\n"
+        f"| **Header alert count** | {alert_count} |\n"
+        f"| **Transaction detail count** | {det_count} |\n"
+        f"| **Alert density ratio** | {density} |\n"
+        f"| **Confidence score** | {confidence} |\n"
+        f"| **Failure mode** | {failure_mode or 'None'} |\n"
+        f"| **Catalog auto-provisions** | {len(catalog_creations)} new entries |\n"
+    )
+    if diagnosis:
+        table += f"| **Validation diagnosis** | {diagnosis} |\n"
+    if threshold_sensitivity.get("tested"):
+        table += f"| **Threshold sensitivity** | {threshold_sensitivity.get('diagnosis', 'Available')} |\n"
+
+    error_block = f"\n**Error log ({len(error_log)} entries):**\n"
+    if error_log:
+        for err in error_log[-3:]:
+            short = err[:250] + "…" if len(err) > 250 else err
+            error_block += f"- {short}\n"
+    else:
+        error_block += "- _No errors_\n"
+
+    return table + error_block + sample_lines
+
+
 def orchestrator_node(
     state: AMLScenarioState, config: RunnableConfig
 ) -> Dict[str, Any]:
-    """Route the conversation and manage the full AML scenario lifecycle.
+    """Fully agentic orchestrator — LLM decides every routing and communication action.
 
-    Entry point for every user turn. Handles:
-    - Plan approval gate (WAIT_APPROVAL)
-    - Structured failure menu with 3 user paths (FAILURE / WAIT_USER)
-    - User choice routing: REDEFINE → intent_analyst, ADJUST → decomposer, ESCALATE → report
-    - Final response formatting (FINALIZE)
-    - Clarification requests (CLARIFY)
-    - Hard iteration cap enforcement
+    Builds a rich state context, passes the full conversation history and system
+    state to the LLM, and interprets its structured OrchestratorDecision output.
+    Python only executes mechanical side effects (field clearing, report generation).
+    Zero hardcoded routing logic or message templates.
 
     Args:
         state (AMLScenarioState): Current agent state.
@@ -191,376 +267,116 @@ def orchestrator_node(
     Returns:
         Dict[str, Any]: State updates including next_action routing signal.
     """
-    logger.info("[ORCHESTRATOR] Iteration %d  next_action=%s",
-                state.get("iteration_count", 0), state.get("next_action", "INTENT"))
-
-    messages_list = state.get("messages", [])
     iteration = state.get("iteration_count", 0) + 1
-    next_action = state.get("next_action") or "INTENT"
+    logger.info(
+        "[ORCHESTRATOR] Iteration %d  prev_action=%s",
+        iteration, state.get("next_action", "INTENT"),
+    )
 
-    # ── Handle resume from WAIT_USER_INTENT ──────────────────────────────────
-    if next_action == "WAIT_USER_INTENT":
-        logger.info("[ORCHESTRATOR] Resuming from greeting pause. Routing to INTENT.")
-        next_action = "INTENT"
-
-    # ── Initial Greeting / Simple Chat check ──────────────────────────────────
-    if next_action == "INTENT" and state.get("enriched_intent") is None:
-        last_user = next(
-            (m.content for m in reversed(messages_list) if isinstance(m, HumanMessage)), ""
-        ).strip()
-        
-        # Fast LLM check to see if the user is greeting/chatting vs describing an actual scenario
-        llm = _build_llm(fast=True)
-        check_prompt = (
-            f"You are an AI assistant helping a bank compliance manager build AML scenarios.\n"
-            f"User message: \"{last_user}\"\n\n"
-            f"Determine if the user is describing/proposing a scenario they want to build (e.g. they specify transaction amounts, frequencies, customer categories, periods, etc.) OR if they are just saying hello/greeting/asking how to start.\n\n"
-            f"Select exactly one option:\n"
-            f"- 'SCENARIO'\n"
-            f"- 'GREET'\n\n"
-            f"Return ONLY the word SCENARIO or GREET. No other text."
-        )
-        try:
-            resp = llm.invoke([HumanMessage(content=check_prompt)])
-            init_decision = resp.content.strip().upper()
-        except Exception as e:
-            logger.warning("[ORCHESTRATOR] Initial message classification failed: %s. Defaulting to SCENARIO.", e)
-            init_decision = "SCENARIO"
-
-        if "GREET" in init_decision:
-            logger.info("[ORCHESTRATOR] User is greeting. Pausing to show warm welcome message.")
-            welcome_msg = (
-                "Hello! I am your **PioTech AML Scenario Builder Assistant**.\n\n"
-                "I can help you convert your natural language compliance requirements into "
-                "live, validated detection scenarios in the PioTech Oracle Query Builder engine.\n\n"
-                "To get started, please describe the scenario logic you would like to build today. For example:\n"
-                "- *'Flag any customer who withdraws more than JD 10,000 in cash within 3 days.'*\n"
-                "- *'Identify retail customers whose inbound transfers exceed their average by 10% standard deviation.'*\n\n"
-                "What scenario would you like to build?"
-            )
-            return {
-                "messages": [AIMessage(content=welcome_msg)],
-                "next_action": "WAIT_USER_INTENT",
-                "iteration_count": 0,  # Reset iteration count for the actual scenario creation run
-            }
-
-    # ── Approval gate ─────────────────────────────────────────────────────────
-    if next_action == "WAIT_APPROVAL" and not state.get("plan_approved", False):
-        last_user = next(
-            (m.content for m in reversed(messages_list) if isinstance(m, HumanMessage)), ""
-        ).strip()
-
-        # Dynamic LLM classification to distinguish approval vs adjustment vs general chat/questions
-        llm = _build_llm(fast=True)
-        classify_prompt = (
-            f"You are an orchestrator classifier in an AML builder assistant.\n"
-            f"The assistant has presented a scenario execution plan to the user and is waiting for approval.\n"
-            f"Approved meanings: user wants to proceed, build it, execute it, write it, confirm, yes, go ahead, start, run.\n"
-            f"Adjustment meanings: user wants to change, modify, edit, adjust, or rejects/refuses/says no.\n"
-            f"Chat/Question meanings: user is greeting (hi, hello), asking how it works, asking why something was done, or asking a general question.\n\n"
-            f"User message: \"{last_user}\"\n\n"
-            f"Classify the user message into exactly one of these categories:\n"
-            f"- 'APPROVE'\n"
-            f"- 'ADJUST'\n"
-            f"- 'CHAT'\n\n"
-            f"Return ONLY the category name (APPROVE, ADJUST, or CHAT). Do not return any other text."
-        )
-        try:
-            resp = llm.invoke([HumanMessage(content=classify_prompt)])
-            decision = resp.content.strip().upper()
-        except Exception as e:
-            logger.warning("[ORCHESTRATOR] Fast LLM classification failed: %s. Falling back to keyword check.", e)
-            decision = "CHAT"
-            APPROVAL_KEYWORDS = {"proceed", "yes", "approve", "go ahead", "confirm", "start", "execute"}
-            if any(kw in last_user.lower() for kw in APPROVAL_KEYWORDS):
-                decision = "APPROVE"
-            elif any(kw in last_user.lower() for kw in {"change", "modify", "adjust", "edit", "no"}):
-                decision = "ADJUST"
-
-        logger.info("[ORCHESTRATOR] Classification decision for user message: %s", decision)
-
-        if decision == "APPROVE":
-            logger.info("[ORCHESTRATOR] Plan approved by user. Routing to SQL_BRIDGE.")
-            return {
-                "plan_approved": True,
-                "next_action": "SQL_BRIDGE",
-                "iteration_count": iteration,
-            }
-        
-        if decision == "ADJUST":
-            logger.info("[ORCHESTRATOR] User requested plan adjustments. Routing back to INTENT for refinement.")
-            return {
-                "next_action": "INTENT",
-                "iteration_count": iteration,
-            }
-
-        # User is just chatting or asking a question/clarification about the plan
-        logger.info("[ORCHESTRATOR] User is asking a question or chatting. Generating conversational reply.")
-        system_prompt = _load_prompt("orchestrator_system.md")
-        chat_llm = _build_llm(fast=False)
-        
-        # Build prompt to answer user contextually without losing the plan state
-        chat_messages = [
-            SystemMessage(content=(
-                f"{system_prompt}\n\n"
-                f"You have already presented the scenario execution plan to the user.\n"
-                f"The user has asked a question or made a comment instead of saying 'proceed'.\n"
-                f"Your task: Respond to the user's question or comment professionally as an AML regulator/advisor.\n"
-                f"At the end of your response, politely remind them that their scenario plan is ready in the side panel, and they can reply 'proceed' to create it or tell you if they want to adjust any details."
-            ))
-        ]
-        # Append history (limited to avoid too much noise, e.g. last 10 messages)
-        chat_messages.extend(messages_list[-10:])
-        
-        try:
-            response = chat_llm.invoke(chat_messages)
-            reply = response.content
-        except Exception as exc:
-            logger.error("[ORCHESTRATOR] Orchestrator chat LLM failed: %s", exc)
-            reply = (
-                "I have your scenario plan ready in the side panel. "
-                "Please review it and reply **proceed** when you're ready to create it, "
-                "or let me know if you'd like to adjust anything."
-            )
-
-        return {
-            "messages": [AIMessage(content=reply)],
-            "next_action": "WAIT_APPROVAL",
-            "iteration_count": iteration,
-        }
-
-    # ── Guard: enforce hard iteration cap ────────────────────────────────────
+    # Hard safety cap — only non-LLM logic in this node
     if iteration > settings.MAX_AGENT_ITERATIONS:
         logger.error("[ORCHESTRATOR] Max iterations reached. Halting.")
         return {
             "messages": [AIMessage(content=(
-                "I've reached my processing limit for this request. "
-                "Please try rephrasing or breaking the request into smaller steps."
+                "I've reached the processing limit for this session. "
+                "Please start a new conversation to continue."
             ))],
             "next_action": "END",
             "iteration_count": iteration,
         }
 
-    # ── Validation succeeded → format final answer ────────────────────────────
-    if next_action == "FINALIZE":
-        return _finalize_response(state, iteration)
+    # Build state context for the LLM
+    state_context = _build_state_context(state, iteration)
 
-    # ── Terminal failure → present structured 3-option menu ───────────────────
-    if next_action in ("FAILURE", "ERROR"):
-        error_log = state.get("error_log", [])
-        last_error = error_log[-1] if error_log else "An unspecified error occurred."
-        logger.error("[ORCHESTRATOR] Failure state reached: %s", last_error)
-        return {
-            "messages": [AIMessage(content=_format_failure_menu(last_error))],
-            "next_action": "WAIT_USER",
-            "iteration_count": iteration,
-        }
+    # Build message list: system prompt + conversation history + state injection
+    system_prompt = _load_prompt("orchestrator_system.md")
+    history = list(state.get("messages", []))
 
-    # ── Waiting for user to choose a failure path ─────────────────────────────
-    if next_action == "WAIT_USER":
-        last_user = next(
-            (m.content for m in reversed(messages_list) if isinstance(m, HumanMessage)), ""
-        ).lower().strip()
-
-        if any(k in last_user for k in ("1", "redefine", "re-define", "rephrase", "different", "new scenario")):
-            logger.info("[ORCHESTRATOR] User chose REDEFINE — clearing intent state.")
-            return {
-                "messages": [AIMessage(content=(
-                    "Understood. Please describe the new scenario you'd like to create "
-                    "and I'll start fresh."
-                ))],
-                "enriched_intent": None,
-                "raw_sql": None,
-                "sql_metadata": None,
-                "scenario_parameters": None,
-                "scenario_code": None,
-                "plan_artifact": None,
-                "plan_conditions": None,
-                "plan_approved": False,
-                "catalog_creations": [],
-                "write_verification": None,
-                "error_log": [],
-                "failure_mode": "REDEFINE",
-                "next_action": "WAIT_USER",
-                "iteration_count": iteration,
-            }
-
-        if any(k in last_user for k in ("2", "adjust", "threshold", "change", "modify", "tweak")):
-            logger.info("[ORCHESTRATOR] User chose ADJUST — waiting for new threshold values.")
-            return {
-                "messages": [AIMessage(content=(
-                    "Of course. Please specify which threshold or value you'd like to adjust "
-                    "and what it should be changed to (e.g. 'change the minimum amount from 5000 to 3000')."
-                ))],
-                "failure_mode": "ADJUST",
-                "next_action": "WAIT_USER",
-                "iteration_count": iteration,
-            }
-
-        if any(k in last_user for k in ("3", "escalat", "ticket", "team", "report", "implementation")):
-            logger.info("[ORCHESTRATOR] User chose ESCALATE — generating technical report.")
-            report = _generate_escalation_report(state)
-            return {
-                "messages": [AIMessage(content=(
-                    "I've generated a full technical escalation report. "
-                    "Please forward it to your implementation team for investigation."
-                ))],
-                "escalation_report": report,
-                "failure_mode": "ESCALATE",
-                "next_action": "ESCALATE",
-                "iteration_count": iteration,
-            }
-
-        # User is in ADJUST mode and is now providing new threshold values
-        if state.get("failure_mode") == "ADJUST" and last_user:
-            logger.info("[ORCHESTRATOR] User provided adjusted thresholds — routing to DECOMPOSE.")
-            return {
-                "user_intent": last_user,
-                "next_action": "DECOMPOSE",
-                "iteration_count": iteration,
-            }
-
-        # No recognisable choice yet — re-present the menu
-        if state.get("failure_mode") == "REDEFINE" and last_user:
-            # User has now provided a new scenario description — continue normally
-            return {
-                "user_intent": last_user,
-                "next_action": "INTENT",
-                "iteration_count": iteration,
-            }
-
-        error_log = state.get("error_log", [])
-        last_error = error_log[-1] if error_log else "An unspecified error occurred."
-        return {
-            "messages": [AIMessage(content=_format_failure_menu(last_error))],
-            "next_action": "WAIT_USER",
-            "iteration_count": iteration,
-        }
-
-    # ── Escalation complete → end ─────────────────────────────────────────────
-    if next_action == "ESCALATE":
-        return {
-            "next_action": "END",
-            "iteration_count": iteration,
-        }
-
-    # ── Clarification needed ──────────────────────────────────────────────────
-    if next_action == "CLARIFY":
-        intent_data = state.get("enriched_intent") or {}
-        questions = intent_data.get("clarification_questions", [])
-        if questions:
-            numbered = "\n".join(f"{i+1}. {q}" for i, q in enumerate(questions))
-            msg = (
-                "To build this scenario correctly, I need a few clarifications:\n\n"
-                f"{numbered}\n\n"
-                "Please provide these details and I'll proceed immediately."
-            )
-        else:
-            msg = "Could you provide more details about the scenario you'd like to create?"
-
-        return {
-            "messages": [AIMessage(content=msg)],
-            "next_action": "WAIT_USER",
-            "iteration_count": iteration,
-        }
-
-    # ── Default: route to intent analyst for new user input ───────────────────
-    return {
-        "next_action": "INTENT",
-        "iteration_count": iteration,
-    }
-
-
-def _finalize_response(state: AMLScenarioState, iteration: int) -> Dict[str, Any]:
-    """Build the final user-facing success message with scenario results.
-
-    Args:
-        state (AMLScenarioState): Current agent state.
-        iteration (int): Current iteration count.
-
-    Returns:
-        Dict[str, Any]: State update with final AIMessage and END signal.
-    """
-    val_data = state.get("validation_result") or {}
-    intent_data = state.get("enriched_intent") or {}
-    scenario_code = state.get("scenario_code", "N/A")
-    alert_count = val_data.get("alert_count", 0)
-    samples = val_data.get("sample_alerts", [])
-    scenario_name = intent_data.get("scenario_name", "AML Scenario")
-
-    # Build sample table
-    sample_rows = ""
-    if samples:
-        sample_rows = "\n| Customer ID | Details |\n|-------------|---------|"
-        for s in samples[:5]:
-            cid = s.get("customer_id", "—")
-            raw = s.get("raw_data", {})
-            detail = ", ".join(f"{k}: {v}" for k, v in list(raw.items())[:3])
-            sample_rows += f"\n| `{cid}` | {detail} |"
-
-    confidence = val_data.get("confidence_score", 0.0)
-    confidence_label = (
-        "High" if confidence >= 0.8 else "Medium" if confidence >= 0.5 else "Low"
+    messages_for_llm = (
+        [SystemMessage(content=system_prompt)]
+        + history[-14:]
+        + [HumanMessage(content=(
+            f"## CURRENT SYSTEM STATE\n\n{state_context}\n\n"
+            f"## YOUR TASK\n\n"
+            f"Read the conversation history and the system state above, "
+            f"then produce your orchestration decision."
+        ))]
     )
 
-    success = val_data.get("success", True)
+    # Call LLM with structured output
+    llm = _build_llm(fast=False).with_structured_output(OrchestratorDecision)
 
-    if success:
-        header = "## Scenario Created Successfully"
-        warning_section = ""
+    try:
+        decision: OrchestratorDecision = llm.invoke(messages_for_llm)
+    except Exception as exc:
+        logger.error("[ORCHESTRATOR] LLM decision call failed: %s", exc, exc_info=True)
+        return {
+            "messages": [AIMessage(content=(
+                "I'm experiencing a technical issue. Please try again in a moment."
+            ))],
+            "next_action": "WAIT_USER",
+            "iteration_count": iteration,
+        }
+
+    logger.info(
+        "[ORCHESTRATOR] Decision → next_action=%s  message=%s",
+        decision.next_action,
+        "yes" if decision.message_to_user else "none (silent routing)",
+    )
+
+    updates: Dict[str, Any] = {"iteration_count": iteration}
+
+    if decision.message_to_user:
+        updates["messages"] = [AIMessage(content=decision.message_to_user)]
+
+    action = decision.next_action
+
+    # ── Mechanical side effects based on LLM decision ─────────────────────────
+
+    if action == "REDEFINE" or decision.clear_scenario_state:
+        # Wipe all scenario-specific fields; wait for user to describe new scenario
+        updates.update({
+            "enriched_intent": None,
+            "raw_sql": None,
+            "sql_metadata": None,
+            "scenario_parameters": None,
+            "scenario_code": None,
+            "rule_code": None,
+            "plan_artifact": None,
+            "plan_conditions": None,
+            "plan_approved": False,
+            "catalog_creations": [],
+            "write_verification": None,
+            "validation_result": None,
+            "validation_retry_count": 0,
+            "scenario_write_success": False,
+            "error_log": [],
+            "failure_mode": None,
+            "next_action": "WAIT_USER",
+        })
+
+    elif action == "SQL_BRIDGE":
+        updates["plan_approved"] = True
+        updates["next_action"] = "SQL_BRIDGE"
+
+    elif action == "ADJUST":
+        updates["failure_mode"] = "ADJUST"
+        updates["next_action"] = "WAIT_USER"
+
+    elif action == "ESCALATE":
+        report = _generate_escalation_report(state)
+        updates["escalation_report"] = report
+        updates["failure_mode"] = "ESCALATE"
+        updates["next_action"] = "END"
+
+    elif action in ("FINALIZE", "END"):
+        updates["next_action"] = "END"
+
     else:
-        header = "## Scenario Created (Validation Failed)"
-        diagnosis = val_data.get("diagnosis", "Zero alerts generated.")
-        suggested_fix = val_data.get("suggested_fix", "Widen threshold values or extend detection period.")
-        warning_section = (
-            f"### ⚠️ Validation Issues\n"
-            f"- **Diagnosis:** {diagnosis}\n"
-            f"- **Suggested Fix:** {suggested_fix}\n\n"
-        )
+        # INTENT, WAIT_USER, WAIT_APPROVAL, DECOMPOSE — pass through directly
+        updates["next_action"] = action
 
-    message = (
-        f"{header}\n\n"
-        f"**Scenario Code:** `{scenario_code}`  \n"
-        f"**Name:** {scenario_name}\n\n"
-        f"{warning_section}"
-        f"---\n\n"
-        f"### Live Impact Assessment\n"
-        f"- **Active Alerts:** {alert_count} customers\n"
-        f"- **Confidence:** {confidence_label} ({confidence:.0%})\n"
-        f"\n### Sample Matched Customers\n"
-        f"{sample_rows if sample_rows else '_No sample data available._'}\n\n"
-        f"---\n\n"
-        f"> The scenario is now **ACTIVE** in the AML module.  \n"
-        f"> Would you like to adjust thresholds, view the full alert list, or create another scenario?"
-    )
-
-    return {
-        "messages": [AIMessage(content=message)],
-        "next_action": "END",
-        "iteration_count": iteration,
-    }
-
-
-def _format_failure_menu(error_detail: str) -> str:
-    """Build the structured failure menu presented to the user on any terminal error.
-
-    Args:
-        error_detail (str): The last error message from the error_log.
-
-    Returns:
-        str: Formatted markdown failure menu with 3 actionable paths.
-    """
-    return (
-        f"## Scenario Creation Failed\n\n"
-        f"**What went wrong:**\n"
-        f"```\n{error_detail}\n```\n\n"
-        f"---\n\n"
-        f"**Your options:**\n\n"
-        f"1. **Redefine** — Describe your scenario differently and I'll start fresh.\n"
-        f"2. **Adjust thresholds** — Tell me which values to change and what to change them to.\n"
-        f"3. **Escalate** — I'll generate a full technical report for your implementation team.\n\n"
-        f"_Reply with the number (1, 2, or 3) or describe your choice._"
-    )
+    return updates
 
 
 def _generate_escalation_report(state: AMLScenarioState) -> str:
@@ -2657,6 +2473,8 @@ def validator_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str,
         result = ValidationResult(
             success=success,
             scenario_status="ACTIVE" if success else "REVIEW_NEEDED",
+            scenario_code=scenario_code,
+            scenario_name=intent.scenario_name,
             alert_count=alert_count,
             sample_alerts=sample_alerts,
             diagnosis=diagnosis,
@@ -2713,7 +2531,11 @@ def validator_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str,
 
 
 def route_after_orchestrator(state: AMLScenarioState) -> str:
-    """Determine which node the orchestrator routes to.
+    """Route after the agentic orchestrator.
+
+    The orchestrator resolves all internal states (REDEFINE, ADJUST, ESCALATE,
+    FINALIZE, FAILURE, ERROR, CLARIFY) before returning, so this function only
+    needs to handle the six clean output actions the orchestrator can produce.
 
     Args:
         state (AMLScenarioState): Current state.
@@ -2724,20 +2546,13 @@ def route_after_orchestrator(state: AMLScenarioState) -> str:
     action = state.get("next_action", "INTENT")
     route_map = {
         "INTENT": "intent_analyst",
-        "SQL_BRIDGE": "sql_bridge",      # post-approval routing
-        "DECOMPOSE": "decomposer",       # ADJUST threshold loop-back
-        "CLARIFY": "orchestrator",
+        "SQL_BRIDGE": "sql_bridge",
+        "DECOMPOSE": "decomposer",
         "WAIT_USER": END,
-        "WAIT_USER_INTENT": END,         # pause — wait for user to enter scenario details
-        "WAIT_APPROVAL": END,            # pause — wait for user approval message
+        "WAIT_APPROVAL": END,
         "END": END,
-        "ERROR": "orchestrator",
-        "FAILURE": "orchestrator",
-        "REDEFINE": "orchestrator",
-        "ADJUST": "decomposer",
-        "ESCALATE": "orchestrator",
     }
-    return route_map.get(action, "intent_analyst")
+    return route_map.get(action, END)
 
 
 def route_after_intent(state: AMLScenarioState) -> str:
@@ -2775,7 +2590,7 @@ def route_after_planner(state: AMLScenarioState) -> str:
     action = state.get("next_action", "WAIT_APPROVAL")
     if action == "ERROR":
         return "orchestrator"
-    return END  # pause execution — wait for user's "proceed" message
+    return "orchestrator"  # Route back to orchestrator to explain the generated plan
 
 
 def route_after_sql_bridge(state: AMLScenarioState) -> str:
@@ -2785,10 +2600,10 @@ def route_after_sql_bridge(state: AMLScenarioState) -> str:
         state (AMLScenarioState): Current state.
 
     Returns:
-        str: Next node name (orchestrator on error, decomposer otherwise).
+        str: Next node name — orchestrator on any failure, decomposer otherwise.
     """
     action = state.get("next_action", "DECOMPOSE")
-    if action == "ERROR":
+    if action in ("ERROR", "FAILURE"):
         return "orchestrator"
     return "decomposer"
 
@@ -2800,10 +2615,10 @@ def route_after_decomposer(state: AMLScenarioState) -> str:
         state (AMLScenarioState): Current state.
 
     Returns:
-        str: Next node name.
+        str: Next node name — orchestrator on any failure, qb_writer otherwise.
     """
     action = state.get("next_action", "QB_WRITE")
-    if action == "ERROR":
+    if action in ("ERROR", "FAILURE"):
         return "orchestrator"
     return "qb_writer"
 
@@ -2811,18 +2626,19 @@ def route_after_decomposer(state: AMLScenarioState) -> str:
 def route_after_validator(state: AMLScenarioState) -> str:
     """Route after Validator node.
 
+    DECOMPOSE → retry loop back to decomposer.
+    Everything else (FINALIZE, FAILURE, ERROR) → orchestrator to handle.
+
     Args:
         state (AMLScenarioState): Current state.
 
     Returns:
-        str: Next node name — either decomposer (retry) or orchestrator (finalize).
+        str: Next node name.
     """
     action = state.get("next_action", "FINALIZE")
     if action == "DECOMPOSE":
         return "decomposer"
-    if action == "ERROR":
-        return "orchestrator"
-    return "orchestrator"  # FINALIZE → orchestrator formats final message
+    return "orchestrator"
 
 
 # =============================================================================

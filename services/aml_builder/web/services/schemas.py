@@ -503,6 +503,14 @@ class ValidationResult(BaseModel):
         default="UNKNOWN",
         description="Status of the scenario in Oracle.",
     )
+    scenario_code: Optional[str] = Field(
+        default=None,
+        description="The unique scenario code generated for this run.",
+    )
+    scenario_name: Optional[str] = Field(
+        default=None,
+        description="The name of the scenario.",
+    )
     alert_count: Optional[int] = Field(
         default=None, description="Number of alerts produced by this scenario."
     )
@@ -692,6 +700,65 @@ class SSEEvent(BaseModel):
     tool: Optional[str] = Field(default=None, description="Tool name (tool_call events).")
     status: Optional[str] = Field(default=None, description="Status string (thinking events).")
     data: Optional[Any] = Field(default=None, description="Structured payload (scenario_result).")
+
+
+class OrchestratorDecision(BaseModel):
+    """Structured output from the agentic orchestrator LLM.
+
+    The LLM produces this on every orchestrator invocation. Python then
+    executes any mechanical side effects (field clearing, report generation)
+    based on `next_action` — no routing logic lives in Python.
+
+    Args:
+        next_action: Pipeline routing signal. One of the defined Literal values.
+        message_to_user: What the orchestrator says to the user right now.
+            Null for silent routing steps (e.g. INTENT, SQL_BRIDGE).
+            Required for WAIT_USER, WAIT_APPROVAL, REDEFINE, ADJUST, ESCALATE, FINALIZE.
+        clear_scenario_state: True ONLY when next_action is REDEFINE.
+            Instructs Python to wipe all scenario-specific fields for a fresh start.
+    """
+
+    next_action: Literal[
+        "INTENT",
+        "SQL_BRIDGE",
+        "WAIT_APPROVAL",
+        "DECOMPOSE",
+        "WAIT_USER",
+        "REDEFINE",
+        "ADJUST",
+        "ESCALATE",
+        "FINALIZE",
+        "END",
+    ] = Field(
+        ...,
+        description=(
+            "INTENT: route silently to intent analyst (user described a scenario). "
+            "SQL_BRIDGE: user approved plan — execute it. "
+            "WAIT_APPROVAL: plan shown, user is chatting — answer and remind. "
+            "DECOMPOSE: user gave new threshold values — re-decompose silently. "
+            "WAIT_USER: pause for user input (greeting, clarification, failure menu). "
+            "REDEFINE: user wants a completely fresh start — clear all state. "
+            "ADJUST: user wants threshold change but hasn't given values yet. "
+            "ESCALATE: generate technical escalation report. "
+            "FINALIZE: write full success summary to user. "
+            "END: conversation is complete."
+        ),
+    )
+    message_to_user: Optional[str] = Field(
+        default=None,
+        description=(
+            "The message to deliver to the user. Write in the user's detected language. "
+            "Null for silent routing (INTENT, SQL_BRIDGE). "
+            "Required for WAIT_USER, WAIT_APPROVAL, REDEFINE, ADJUST, ESCALATE, FINALIZE."
+        ),
+    )
+    clear_scenario_state: bool = Field(
+        default=False,
+        description=(
+            "Set True ONLY when next_action=REDEFINE. "
+            "Instructs the system to clear all scenario-specific state fields."
+        ),
+    )
 
 
 class ChatMessage(BaseModel):
