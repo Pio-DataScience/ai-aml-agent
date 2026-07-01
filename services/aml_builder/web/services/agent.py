@@ -434,6 +434,9 @@ def _generate_escalation_report(state: AMLScenarioState) -> str:
         or "_None — all parameters were pre-existing in the catalog._"
     )
 
+    raw_sql = state.get("raw_sql")
+    sql_text = f"```sql\n{raw_sql}\n```" if raw_sql else "_No SQL query was generated._"
+
     return (
         f"# AML Scenario Escalation Report\n\n"
         f"**Generated:** {now}  \n"
@@ -442,6 +445,9 @@ def _generate_escalation_report(state: AMLScenarioState) -> str:
         f"---\n\n"
         f"## Intent Submitted\n\n"
         f"```json\n{json.dumps(intent_dict, indent=2, default=str)}\n```\n\n"
+        f"---\n\n"
+        f"## Generated SQL Query\n\n"
+        f"{sql_text}\n\n"
         f"---\n\n"
         f"## Error Log (Chronological)\n\n"
         f"{errors_text}\n\n"
