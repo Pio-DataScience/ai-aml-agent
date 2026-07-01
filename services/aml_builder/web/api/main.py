@@ -431,14 +431,17 @@ async def get_chat_history(project_id: str, chat_id: str, user_id: str):
                     if len(content.strip()) > 10:
                         plan_art = None
                         val_res = None
+                        esc_rep = None
                         if hasattr(msg, "additional_kwargs") and isinstance(msg.additional_kwargs, dict):
                             plan_art = msg.additional_kwargs.get("plan_artifact")
                             val_res = msg.additional_kwargs.get("validation_result")
+                            esc_rep = msg.additional_kwargs.get("escalation_report")
                         chat_messages.append(ChatMessage(
                             role="assistant",
                             content=content,
                             plan_artifact=plan_art,
-                            scenario_result=val_res
+                            scenario_result=val_res,
+                            escalation_report=esc_rep
                         ))
                         
         logger.info("[HISTORY] Retrieved %d conversation-level messages.", len(chat_messages))

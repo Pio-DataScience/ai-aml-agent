@@ -391,6 +391,11 @@ def orchestrator_node(
         updates["escalation_report"] = report
         updates["failure_mode"] = "ESCALATE"
         updates["next_action"] = "END"
+        # Inject the generated report into the AIMessage's additional_kwargs for history retrieval
+        if "messages" in updates and updates["messages"]:
+            msg = updates["messages"][0]
+            if isinstance(msg, AIMessage):
+                msg.additional_kwargs["escalation_report"] = report
 
     elif action in ("FINALIZE", "END"):
         updates["next_action"] = "END"
