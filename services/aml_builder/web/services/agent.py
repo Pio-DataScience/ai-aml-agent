@@ -468,16 +468,11 @@ def _generate_escalation_report(state: AMLScenarioState) -> str:
         f"_Please reference Scenario Code `{scenario_code}` in all correspondence._"
     )
 
-    # Persist the escalation report to disk for future training / fine-tuning
+    # Persist the escalation report dynamically using the SOLID DatePartitionedFilePersister
     try:
-        import os
-        os.makedirs("./artifacts/escalations", exist_ok=True)
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-        safe_code = str(scenario_code).replace("/", "_").replace("\\", "_").strip()
-        filename = f"./artifacts/escalations/{safe_code}_{timestamp}.md"
-        with open(filename, "w", encoding="utf-8") as f:
-            f.write(report_content)
-        logger.info("[CATALOG] Escalation report persistently saved to %s", filename)
+        from web.services.persister import DatePartitionedFilePersister
+        persister = DatePartitionedFilePersister()
+        persister.persist(scenario_code, report_content)
     except Exception as exc:
         logger.error("[CATALOG] Failed to persistently save escalation report: %s", exc)
 
