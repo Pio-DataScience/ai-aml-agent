@@ -437,7 +437,7 @@ def _generate_escalation_report(state: AMLScenarioState) -> str:
     raw_sql = state.get("raw_sql")
     sql_text = f"```sql\n{raw_sql}\n```" if raw_sql else "_No SQL query was generated._"
 
-    return (
+    report_content = (
         f"# AML Scenario Escalation Report\n\n"
         f"**Generated:** {now}  \n"
         f"**Scenario Code:** `{scenario_code}`  \n"
@@ -467,6 +467,21 @@ def _generate_escalation_report(state: AMLScenarioState) -> str:
         f"_This report was generated automatically by the AML Builder agent._  \n"
         f"_Please reference Scenario Code `{scenario_code}` in all correspondence._"
     )
+
+    # Persist the escalation report to disk for future training / fine-tuning
+    try:
+        import os
+        os.makedirs("./artifacts/escalations", exist_ok=True)
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        safe_code = str(scenario_code).replace("/", "_").replace("\\", "_").strip()
+        filename = f"./artifacts/escalations/{safe_code}_{timestamp}.md"
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write(report_content)
+        logger.info("[CATALOG] Escalation report persistently saved to %s", filename)
+    except Exception as exc:
+        logger.error("[CATALOG] Failed to persistently save escalation report: %s", exc)
+
+    return report_content
 
 
 # =============================================================================
