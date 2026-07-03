@@ -32,12 +32,20 @@ class Threshold(BaseModel):
     operator: Literal[">", "<", ">=", "<=", "=", "BETWEEN", "IN"] = Field(
         ..., description="Comparison operator."
     )
-    value_from: float = Field(
-        ..., description="Primary threshold value (or lower bound for BETWEEN)."
+    value_from: Optional[float] = Field(
+        default=None, description="Primary threshold value (or lower bound for BETWEEN)."
     )
     value_to: Optional[float] = Field(
         default=None,
         description="Upper bound value — only populated for BETWEEN operator.",
+    )
+    provenance: Literal["stated", "assumed_default", "needs_user"] = Field(
+        default="stated",
+        description=(
+            "Where this value came from: 'stated' (user gave it), "
+            "'assumed_default' (parser defaulted it — disclose in applied_defaults), "
+            "or 'needs_user' (materially ambiguous — must be clarified)."
+        ),
     )
 
 
@@ -56,6 +64,84 @@ class TimeWindow(BaseModel):
         default=True,
         description="True = rolling from SYSDATE. False = fixed calendar period.",
     )
+    provenance: Literal["stated", "assumed_default", "needs_user"] = Field(
+        default="stated",
+        description="stated | assumed_default | needs_user (see Threshold.provenance).",
+    )
+
+
+class AggregationProfile(BaseModel):
+    """How the monitored metric is measured and at what grain.
+
+    Grain and metric stay plain English so the downstream text-to-SQL agent can
+    ground them against the data dictionary. This object exists because grain and
+    measure are the most commonly-omitted yet outcome-changing dimensions in AML
+    rules; forcing them out of prose makes omissions visible.
+
+    Args:
+        metric (str): What is measured, plain English (e.g. 'Total deposit
+            amount', 'Count of distinct beneficiaries').
+        function (Optional[str]): Aggregation function in plain English
+            (e.g. 'sum', 'count', 'count distinct', 'max'). None if per-row.
+        grain (str): Evaluation grain, plain English (e.g. 'Per Transaction',
+            'Per Customer per Day').
+        provenance (str): stated | assumed_default | needs_user.
+    """
+
+    metric: str = Field(..., description="What is measured, plain English.")
+    function: Optional[str] = Field(
+        default=None, description="sum | count | count distinct | max | None."
+    )
+    grain: str = Field(..., description="Evaluation grain, plain English.")
+    provenance: Literal["stated", "assumed_default", "needs_user"] = Field(
+        default="stated"
+    )
+
+
+class BusinessQualifier(BaseModel):
+    """A non-numeric business filter expressed in open-ended plain English.
+
+    Captures predicates that don't fit a numeric Threshold — e.g. 'is domiciled
+    in a high-risk country', 'is a cash deposit', 'counterparty is a new
+    beneficiary'. Subject/predicate are intentionally NOT enums: they are handed
+    to the SQL agent, which binds them to columns/flags via the data dictionary.
+    This node never touches the schema.
+
+    Args:
+        raw_phrase (str): The user's own words this qualifier came from.
+        subject (str): Plain English entity noun (e.g. 'Customer', 'Transaction').
+        predicate (str): Plain English business rule.
+        provenance (str): stated | assumed_default | needs_user.
+    """
+
+    raw_phrase: str = Field(..., description="Verbatim user text this came from.")
+    subject: str = Field(..., description="Plain English entity noun. No enums.")
+    predicate: str = Field(..., description="Plain English business rule.")
+    provenance: Literal["stated", "assumed_default", "needs_user"] = Field(
+        default="stated"
+    )
+
+
+class Clarification(BaseModel):
+    """One material ambiguity the parser could not safely resolve.
+
+    Created only when a wrong guess would materially change which alerts fire AND
+    the parser cannot infer or safely default the answer. Everything else is
+    defaulted (recorded in applied_defaults) and NOT asked.
+
+    Args:
+        dimension (str): The ambiguous dimension, plain English (e.g.
+            'transaction direction', 'cash vs wire').
+        why_it_matters (str): One line on how a wrong guess changes the outcome.
+        question (str): Business-phrased question to show the user. Never
+            technical (no table/column talk).
+        options (Optional[list[str]]): Suggested answers, if a small set applies.
+    """
+
+    dimension: str = Field(...)
+    why_it_matters: str = Field(...)
+    question: str = Field(..., description="Business-phrased. Never technical.")
+    options: Optional[List[str]] = Field(default=None)
 
 
 class AMLIntent(BaseModel):
@@ -107,7 +193,33 @@ class AMLIntent(BaseModel):
     )
     clarification_questions: List[str] = Field(
         default_factory=list,
-        description="Business-level questions for the user (never technical).",
+        description=(
+            "Business-level questions for the user (never technical). Kept for "
+            "backward compatibility; prefer the structured `clarifications` list."
+        ),
+    )
+    aggregation: Optional[AggregationProfile] = Field(
+        default=None,
+        description="How the metric is measured and at what grain.",
+    )
+    qualifiers: List[BusinessQualifier] = Field(
+        default_factory=list,
+        description="Non-numeric plain-English business filters (open-ended).",
+    )
+    clarifications: List[Clarification] = Field(
+        default_factory=list,
+        description="Material ambiguities to resolve before handoff to the SQL agent.",
+    )
+    applied_defaults: List[str] = Field(
+        default_factory=list,
+        description="Business defaults the parser assumed, shown to the user.",
+    )
+    ready_for_handoff: bool = Field(
+        default=True,
+        description=(
+            "False if any clarification must be answered before a trustworthy "
+            "query can be built. Mirror of (len(clarifications) == 0)."
+        ),
     )
     expected_alert_range_min: Optional[int] = Field(
         default=None,
