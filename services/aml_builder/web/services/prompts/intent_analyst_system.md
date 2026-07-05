@@ -77,6 +77,16 @@ raise dimensions that are (a) plausibly in scope and (b) outcome-changing.
 
 ---
 
+## Threshold Field Vocabulary & Transaction Count Guidance
+
+To ensure the downstream Query Builder database can map your thresholds, always use these standardized names for numeric threshold fields:
+- `transaction_amount` — for monetary values (e.g. amount, value, sum).
+- `transaction_count` — for counting transactions or events.
+
+CRITICAL: If the user explicitly mentions a quantity of transactions (e.g. "one transaction", "a single deposit", "at least one swipe", "ايداع واحد"), you MUST add a threshold condition for `transaction_count` (e.g., `{field: "transaction_count", operator: ">=", value_from: 1, provenance: "stated"}`). Do NOT omit this count constraint, as the compliance engine expects a registered transaction count parameter for transaction-monitoring rules.
+
+---
+
 ## Defaulting guidance
 
 Apply a default only when a competent analyst would agree it's the standard
