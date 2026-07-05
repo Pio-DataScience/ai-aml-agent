@@ -74,8 +74,9 @@ Produce EXACTLY the following structure. Do not deviate from the section headers
 
 ## Filters
 List every WHERE-level condition in business language. Number each one. This includes:
-- every `qualifier` (subject + predicate), and
-- every numeric `threshold` that resolves to a per-transaction FILTER by the Cardinal Rule.
+- every `qualifier` (subject + predicate),
+- every numeric `threshold` that resolves to a per-transaction FILTER by the Cardinal Rule, and
+- **any explicit `transaction_count` threshold** (e.g. transaction_count >= 1) present in the intent when `aggregation.function` is null.
 
 Each entry: the business field name, the operator in plain English, the value, and a brief rationale.
 
@@ -198,6 +199,7 @@ Use exact Oracle operator strings: ">=", "<=", ">", "<", "=", "IN", "BETWEEN".
 - Produce ONE condition entry per distinct business rule.
 - Do NOT include Oracle PARAMETER_CODE, column names, or table names in the CONDITIONS_BLOCK.
 - The `field` for a numeric condition must match the `field` names used in the intent thresholds.
+- **If `transaction_count` is present in the intent thresholds, you MUST generate a condition entry for it in the `CONDITIONS_BLOCK` JSON (using `"field": "transaction_count"` and `"condition_type": "filter"` if `aggregation.function` is null/None).**
 - Always close the JSON array properly — the system parses this mechanically.
 
 ---
