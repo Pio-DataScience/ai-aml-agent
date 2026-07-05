@@ -204,8 +204,16 @@ def _build_state_context(state: AMLScenarioState, iteration: int) -> str:
 
     intent_name = enriched_intent.get("scenario_name", "Not captured yet")
     intent_type = enriched_intent.get("scenario_type", "")
-    clarification_needed = enriched_intent.get("clarification_needed", False)
-    clarification_questions = enriched_intent.get("clarification_questions", [])
+    ready_for_handoff = enriched_intent.get("ready_for_handoff", True)
+    structured_clarifications = enriched_intent.get("clarifications", []) or []
+    applied_defaults = enriched_intent.get("applied_defaults", []) or []
+    # Prefer structured clarifications; fall back to the legacy flat list.
+    clarification_needed = (not ready_for_handoff) or enriched_intent.get(
+        "clarification_needed", False
+    )
+    clarification_questions = [
+        c.get("question", "") for c in structured_clarifications
+    ] or enriched_intent.get("clarification_questions", [])
 
     samples = validation_result.get("sample_alerts", [])
     sample_lines = ""
@@ -251,12 +259,27 @@ def _build_state_context(state: AMLScenarioState, iteration: int) -> str:
         error_block += "- _No errors_\n"
 
     questions_block = ""
-    if clarification_questions:
+    if structured_clarifications:
         questions_block = "\n\n**Clarification Questions Needed from User:**\n"
-        for q in clarification_questions:
-            questions_block += f"- {q}\n"
+        for idx, c in enumerate(structured_clarifications, 1):
+            q = c.get("question", "")
+            opts = c.get("options")
+            opts_str = f" (Choices: {', '.join(opts)})" if opts else ""
+            why = c.get("why_it_matters", "")
+            why_str = f" — *{why}*" if why else ""
+            questions_block += f"{idx}. {q}{opts_str}{why_str}\n"
+    elif clarification_questions:
+        questions_block = "\n\n**Clarification Questions Needed from User:**\n"
+        for idx, q in enumerate(clarification_questions, 1):
+            questions_block += f"{idx}. {q}\n"
 
-    return table + error_block + questions_block + sample_lines
+    defaults_block = ""
+    if applied_defaults:
+        defaults_block = "\n\n**Defaults Assumed (confirm or correct):**\n"
+        for d in applied_defaults:
+            defaults_block += f"- {d}\n"
+
+    return table + error_block + questions_block + defaults_block + sample_lines
 
 
 def orchestrator_node(
@@ -529,15 +552,31 @@ Schema:
   "scenario_name": "string",
   "scenario_type": "string",
   "detection_logic": "string",
-  "thresholds": [{{"field":"string","operator":"string","value_from":number,"value_to":null}}],
-  "time_window": {{"unit":"DAYS|MONTHS|YEARS","value":number,"is_rolling":true}} | null,
+  "thresholds": [{{"field":"string","operator":"string","value_from":number,"value_to":null,"provenance":"stated|assumed_default|needs_user"}}],
+  "time_window": {{"unit":"DAYS|MONTHS|YEARS","value":number,"is_rolling":true,"provenance":"stated|assumed_default|needs_user"}} | null,
   "customer_segments": ["string"] | null,
   "exclusions": ["string"] | null,
+  "aggregation": {{"metric":"string (plain English)","function":"sum|count|count distinct|max|null","grain":"string (e.g. 'Per Customer per Day')","provenance":"stated|assumed_default|needs_user"}} | null,
+  "qualifiers": [{{"raw_phrase":"string","subject":"string (plain English noun)","predicate":"string (plain English rule)","provenance":"stated|assumed_default|needs_user"}}],
+  "clarifications": [{{"dimension":"string","why_it_matters":"string","question":"business-phrased, never technical","options":["string"] | null}}],
+  "applied_defaults": ["string (plain English default you assumed)"],
+  "ready_for_handoff": true|false,
   "clarification_needed": true|false,
   "clarification_questions": ["string"],
   "expected_alert_range_min": number | null,
   "expected_alert_range_max": number | null
 }}
+
+RULES:
+- Set "provenance" on each value: "stated" if the user gave it, "assumed_default" if you defaulted it (and add a plain sentence to "applied_defaults"), or "needs_user" if it is materially ambiguous.
+- For every "needs_user" value, add a matching entry to "clarifications".
+- "ready_for_handoff" MUST be false whenever "clarifications" is non-empty. Keep "clarification_needed"/"clarification_questions" in sync (mirror of clarifications) for backward compatibility.
+- Never bind terms to tables/columns. Keep subjects and predicates as business English.
+- AGGREGATION IS MANDATORY WHENEVER A NUMERIC THRESHOLD EXISTS. Never leave "aggregation" null if "thresholds" is non-empty. You MUST decide the grain, because it changes what the number means:
+  * If the amount/count applies to EACH single transaction (e.g. "a cash deposit over 10k", "any transaction above X"), set "aggregation" with "function": null and "grain": "Per Transaction" and "provenance": "stated". This is a per-transaction rule, NOT a sum.
+  * If it applies to a CUMULATIVE total across rows (e.g. "total deposits over 10k in a day", "more than 5 transactions"), set "function" to "sum"/"count"/etc. and "grain" to the correct level (e.g. "Per Customer per Day").
+  * If single-transaction vs cumulative is genuinely unclear, DO NOT GUESS: set "aggregation.provenance": "needs_user", add a "clarifications" entry (e.g. "Should this flag a single deposit over 10,000, or total deposits over 10,000 within a period?"), and set "ready_for_handoff": false.
+- Singular phrasing ("a deposit", "a transaction") implies per-transaction; plural/accumulating phrasing ("total", "sum of", "combined", "over a period") implies an aggregate.
 """
 
     llm_messages = [SystemMessage(content=instruction_prompt)]
@@ -564,13 +603,22 @@ Schema:
         # Validate with Pydantic
         intent = AMLIntent(**intent_dict)
 
+        # `ready_for_handoff` is the primary gate; fall back to the legacy
+        # `clarification_needed` flag if the model only populated the old field.
+        needs_clarify = (not intent.ready_for_handoff) or intent.clarification_needed
+        if bool(intent.clarifications) and intent.ready_for_handoff:
+            # Structured clarifications present but flag not set — trust the list.
+            needs_clarify = True
+
         logger.info(
-            "[INTENT_ANALYST] Intent parsed. scenario_type=%s clarification_needed=%s",
+            "[INTENT_ANALYST] Intent parsed. scenario_type=%s ready_for_handoff=%s "
+            "clarifications=%d",
             intent.scenario_type,
-            intent.clarification_needed,
+            intent.ready_for_handoff,
+            len(intent.clarifications),
         )
 
-        next_action = "CLARIFY" if intent.clarification_needed else "SQL_BRIDGE"
+        next_action = "CLARIFY" if needs_clarify else "SQL_BRIDGE"
 
         return {
             "enriched_intent": intent.model_dump(),
@@ -728,23 +776,77 @@ def sql_bridge_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str
         else "None"
     )
 
+    # Semantic MEASURE + GRAIN (WHAT, not HOW). Service B owns all SQL mechanics —
+    # GROUP BY, HAVING, joins, date arithmetic. We only state the business meaning
+    # so it can choose the correct query shape itself.
+    agg = intent.aggregation
+    if agg and agg.function:
+        measure_text = f"{agg.function} of {agg.metric}"
+        grain_label = agg.grain or "the specified grouping"
+        grain_line = (
+            f"Per {grain_label} — the qualifying transactions are considered together "
+            f"and the measure is evaluated against the threshold(s). A threshold on the "
+            f"aggregated measure is a group-level condition; a threshold on a single "
+            f"transaction's value remains a per-transaction condition."
+        )
+    elif agg:
+        measure_text = f"{agg.metric} (evaluated per individual transaction)"
+        grain_line = (
+            "Per individual transaction — each qualifying transaction is evaluated on "
+            "its own, and every numeric threshold applies to that single transaction, "
+            "not to a cumulative total."
+        )
+    else:
+        measure_text = "Individual transaction value"
+        grain_line = (
+            "Per individual transaction (assumed — no aggregation was specified); "
+            "treat thresholds as applying to each single transaction."
+        )
+
+    # Observation window as a business fact — no SQL date mechanics.
+    if intent.time_window:
+        window_line = f"{time_text} — restrict evaluation to this observation period."
+    else:
+        window_line = "None — evaluate without a time constraint."
+
+    # Open-ended non-numeric predicates for the SQL agent to ground itself.
+    qualifiers_text = (
+        "\n".join(f"  - {q.subject}: {q.predicate}" for q in intent.qualifiers)
+        if intent.qualifiers
+        else "None"
+    )
+
+    # Business defaults the intent layer assumed (so the SQL agent knows what was
+    # inferred vs. explicitly stated by the user).
+    defaults_text = (
+        "\n".join(f"  - {d}" for d in intent.applied_defaults)
+        if intent.applied_defaults
+        else "None"
+    )
+
     aml_prompt = (
         f"<AML_SCENARIO_REQUEST>\n"
+        f"REQUEST_SCHEMA: aml-intent/v2\n"
         f"SCENARIO_NAME: {intent.scenario_name}\n"
-        f"SCENARIO_TYPE: {intent.scenario_type}\n"
+        f"MONITORED_DOMAIN: {intent.scenario_type}\n"
         f"DETECTION_LOGIC: {intent.detection_logic}\n\n"
-        f"THRESHOLDS:\n{thresholds_text}\n\n"
-        f"TIME_WINDOW: {time_text}\n"
+        f"# This message states the BUSINESS INTENT only (WHAT to detect).\n"
+        f"# You own every implementation decision (HOW): table and column selection,\n"
+        f"# joins, query shape, grouping and aggregation mechanics, and date handling.\n"
+        f"# Ground each plain-English term against the data dictionary yourself.\n\n"
+        f"BUSINESS_CONDITIONS (numeric thresholds, in business terms):\n{thresholds_text}\n\n"
+        f"QUALIFIERS (plain-English business filters — ground each against the dictionary):\n{qualifiers_text}\n\n"
+        f"MEASURE: {measure_text}\n"
+        f"EVALUATION_GRAIN: {grain_line}\n"
+        f"OBSERVATION_WINDOW: {window_line}\n"
         f"CUSTOMER_SEGMENTS: {segments_text}\n"
-        f"EXCLUSIONS:\n{exclusions_text}\n\n"
-        f"TASK: Write a SQL SELECT query that identifies {intent.scenario_type.lower()}s "
-        f"matching this AML detection scenario. The query must:\n"
-        f"1. Return the primary entity (customer/account/transaction identifier)\n"
-        f"2. Use GROUP BY if counting occurrences\n"
-        f"3. Use HAVING for aggregate filters\n"
-        f"4. Apply time filters using SYSDATE arithmetic\n"
-        f"5. Use ONLY BI_DWH schema tables\n\n"
-        f"RETURN_FORMAT: Return ONLY the SQL query. No explanation. No markdown.\n"
+        f"EXCLUSIONS:\n{exclusions_text}\n"
+        f"ASSUMED_DEFAULTS (inferred by the intent layer, not stated by the user; "
+        f"treat as business facts unless clearly implausible):\n{defaults_text}\n\n"
+        f"OBJECTIVE: Identify everything that matches the business intent above and "
+        f"return the identifier(s) needed to action an alert (customer, account, or "
+        f"transaction — whichever the scenario implies).\n\n"
+        f"RETURN_FORMAT: Return ONLY the executable SQL query. No explanation. No markdown.\n"
         f"</AML_SCENARIO_REQUEST>"
     )
 
@@ -1825,10 +1927,29 @@ def _assert_plan_drift(
     for cond in plan_conditions:
         op = str(cond.get("operator", "")).upper().strip()
         val = str(cond.get("value_from", "")).strip()
-        if (op, val) not in generated_sigs:
-            drifted.append(
-                f"  • [{cond.get('condition_id')}] {cond.get('description')} "
-                f"— expected {op} {val}"
+        
+        # Parse value_from as a float. If it's not a numeric threshold (e.g. 'cash deposit'),
+        # bypass strict value drift comparison since DWH uses code lookups.
+        try:
+            val_float = float(val)
+            matched = False
+            for gen_op, gen_val in generated_sigs:
+                if gen_op == op:
+                    try:
+                        if abs(float(gen_val) - val_float) < 1e-9:
+                            matched = True
+                            break
+                    except ValueError:
+                        continue
+            if not matched:
+                drifted.append(
+                    f"  • [{cond.get('condition_id')}] {cond.get('description')} "
+                    f"— expected {op} {val}"
+                )
+        except ValueError:
+            logger.info(
+                "[DRIFT] Bypassing strict value check for non-numeric condition: %s",
+                cond.get("description")
             )
 
     if drifted:
