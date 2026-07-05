@@ -43,10 +43,10 @@ Apply this decision for each numeric threshold:
    → the threshold is an **AGGREGATE**. `condition_type = "aggregate"`. Use **exactly**
    `aggregation.function` — never substitute a different function.
 
-3. A `transaction_count`-style threshold is an aggregate only when `aggregation.function`
-   is `count`/`count distinct`. If the intent gives no such function, do not invent counting.
-
-If `aggregation` is null while a numeric threshold exists, you MUST add a Risk Flag
+3. If a `transaction_count` threshold is explicitly provided in `intent.thresholds`, you MUST output it in the `CONDITIONS_BLOCK`.
+   - If `intent.aggregation.function` is null/None, output it with `condition_type = "filter"`.
+   - If `intent.aggregation.function` is explicitly set to `count` or `count distinct`, output it with `condition_type = "aggregate"`.
+   Do NOT discard an explicit `transaction_count` threshold from the intent just because the aggregation function is null.
 stating that grain was unspecified and you are treating the threshold as per-transaction
 (single-transaction) — so the compliance manager can correct it if they meant a cumulative
 total. Never silently choose SUM.
