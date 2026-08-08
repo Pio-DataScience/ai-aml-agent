@@ -11,6 +11,15 @@ Format: `[DATE] TYPE: Description`
 - Added `BaselineWindow` Pydantic model and `baseline_window: Optional[BaselineWindow]` field to `AMLIntent` contract in [schemas.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/schemas.py).
 - Added `[INTENT EXTRACTION RULE: HISTORICAL BASELINE ISOLATION]` to Intent Analyst system prompts in [agent.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/agent.py) and [intent_analyst_system_v2.md](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/prompts/intent_analyst_system_v2.md).
 - Updated [planner_system.md](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/prompts/planner_system.md) to render the non-overlapping `baseline_window` explicitly under the plan's Time Interval section.
+## [2026-08-08] feat: Scrollable Domain Checkpoint Table & 60% Similarity Cutoff Filter
+
+### What
+- **Dynamic Similarity Cutoff ($\ge 60\%$ Match):** Updated `explanation_code_search.py` to retrieve and rank all candidate explanation codes meeting the $\ge 60\%$ vector similarity threshold rather than capping to a small hardcoded sample.
+- **Scrollable UI Table Container:** Wrapped the domain discovery checkpoint table in a `<div style="max-height: 380px; overflow-y: auto;">` HTML container so the full list of matching explanation codes renders as a scrollable widget in the frontend chat window.
+- **Match Percentage Column:** Added `Match %` column (e.g. `86%`, `85%`) alongside `Relevance` and `Reason` to provide clear statistical justification for each code.
+
+---
+
 ## [2026-08-08] fix: Domain Explanation Code Routing (Checkpoint 1) & Shadow Executor Dynamic Entity Detection
 
 ### What

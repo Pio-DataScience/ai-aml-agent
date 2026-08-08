@@ -27,7 +27,7 @@ def test_explanation_code_discovery():
         logger.info("  Code: %s | Description: %s | Relevance: %s", m.get("code"), m.get("description"), m.get("relevance"))
 
     formatted_md = format_explanation_code_checkpoint("OUTWARD TRANSFERS", matches)
-    assert "| Code | Description | Relevance | Match Reason |" in formatted_md
+    assert "| Code | Description | Match % | Relevance | Reason |" in formatted_md
     logger.info("Formatted Checkpoint Table View:\n%s", formatted_md)
     print("\nEXPLANATION CODE DISCOVERY TEST PASSED SUCCESSFULLY!")
 
