@@ -94,19 +94,23 @@ class AMLScenarioState(TypedDict):
     error_log: List[str]
 
     # Plan layer
-    plan_artifact: Optional[str]          # markdown plan streamed to frontend side panel
-    plan_conditions: Optional[List[Dict[str, Any]]]  # machine-readable conditions for drift check
-    plan_approved: bool                   # True once user says "proceed"
+    plan_artifact: Optional[str]  # markdown plan streamed to frontend side panel
+    plan_conditions: Optional[
+        List[Dict[str, Any]]
+    ]  # machine-readable conditions for drift check
+    plan_approved: bool  # True once user says "proceed"
 
     # Catalog auto-creation log
-    catalog_creations: List[Dict[str, Any]]  # one entry per auto-provisioned catalog row
+    catalog_creations: List[
+        Dict[str, Any]
+    ]  # one entry per auto-provisioned catalog row
 
     # Post-write verification
     write_verification: Optional[Dict[str, Any]]  # per-table row counts after INSERT
 
     # Escalation
-    escalation_report: Optional[str]      # markdown escalation report on terminal failure
-    failure_mode: Optional[str]           # "REDEFINE" | "ADJUST" | "ESCALATE"
+    escalation_report: Optional[str]  # markdown escalation report on terminal failure
+    failure_mode: Optional[str]  # "REDEFINE" | "ADJUST" | "ESCALATE"
 
 
 # =============================================================================
@@ -279,7 +283,27 @@ def _build_state_context(state: AMLScenarioState, iteration: int) -> str:
         for d in applied_defaults:
             defaults_block += f"- {d}\n"
 
-    return table + error_block + questions_block + defaults_block + sample_lines
+    intent_json_str = ""
+    if enriched_intent:
+        intent_json_str = (
+            f"\n\n**CURRENT CAPTURED INTENT PAYLOAD:**\n```json\n"
+            f"{json.dumps(enriched_intent, indent=2, default=str, ensure_ascii=False)}\n```"
+        )
+
+    plan_str = ""
+    plan_art = state.get("plan_artifact")
+    if plan_art:
+        plan_str = f"\n\n**CURRENT ACTIVE SCENARIO PLAN:**\n{plan_art[:1500]}\n"
+
+    return (
+        table
+        + intent_json_str
+        + plan_str
+        + error_block
+        + questions_block
+        + defaults_block
+        + sample_lines
+    )
 
 
 def orchestrator_node(
@@ -302,17 +326,22 @@ def orchestrator_node(
     iteration = state.get("iteration_count", 0) + 1
     logger.info(
         "[ORCHESTRATOR] Iteration %d  prev_action=%s",
-        iteration, state.get("next_action", "INTENT"),
+        iteration,
+        state.get("next_action", "INTENT"),
     )
 
     # Hard safety cap — only non-LLM logic in this node
     if iteration > settings.MAX_AGENT_ITERATIONS:
         logger.error("[ORCHESTRATOR] Max iterations reached. Halting.")
         return {
-            "messages": [AIMessage(content=(
-                "I've reached the processing limit for this session. "
-                "Please start a new conversation to continue."
-            ))],
+            "messages": [
+                AIMessage(
+                    content=(
+                        "I've reached the processing limit for this session. "
+                        "Please start a new conversation to continue."
+                    )
+                )
+            ],
             "next_action": "END",
             "iteration_count": iteration,
         }
@@ -327,12 +356,16 @@ def orchestrator_node(
     messages_for_llm = (
         [SystemMessage(content=system_prompt)]
         + history[-14:]
-        + [HumanMessage(content=(
-            f"## CURRENT SYSTEM STATE\n\n{state_context}\n\n"
-            f"## YOUR TASK\n\n"
-            f"Read the conversation history and the system state above, "
-            f"then produce your orchestration decision."
-        ))]
+        + [
+            HumanMessage(
+                content=(
+                    f"## CURRENT SYSTEM STATE\n\n{state_context}\n\n"
+                    f"## YOUR TASK\n\n"
+                    f"Read the conversation history and the system state above, "
+                    f"then produce your orchestration decision."
+                )
+            )
+        ]
     )
 
     # Call LLM with structured output
@@ -343,12 +376,41 @@ def orchestrator_node(
     except Exception as exc:
         logger.error("[ORCHESTRATOR] LLM decision call failed: %s", exc, exc_info=True)
         return {
-            "messages": [AIMessage(content=(
-                "I'm experiencing a technical issue. Please try again in a moment."
-            ))],
+            "messages": [
+                AIMessage(
+                    content=(
+                        "I'm experiencing a technical issue. Please try again in a moment."
+                    )
+                )
+            ],
             "next_action": "WAIT_USER",
             "iteration_count": iteration,
         }
+
+    # Safety check: Prevent infinite loops when clarifications are needed
+    if state.get("next_action") == "CLARIFY":
+        if decision.next_action != "WAIT_USER":
+            logger.warning(
+                "[ORCHESTRATOR] LLM tried to bypass CLARIFY phase. Overriding next_action to WAIT_USER."
+            )
+            decision.next_action = "WAIT_USER"
+
+        if not decision.message_to_user:
+            intent_data = state.get("enriched_intent") or {}
+            clarifications = intent_data.get("clarifications") or []
+            if not clarifications:
+                clarifications = intent_data.get("clarification_questions") or []
+
+            if clarifications:
+                fallback_msg = "To build your scenario accurately, I need a few clarifications:\n\n"
+                for idx, cl in enumerate(clarifications, 1):
+                    q_text = cl.get("question") if isinstance(cl, dict) else str(cl)
+                    fallback_msg += f"{idx}. **{q_text}**\n"
+                decision.message_to_user = fallback_msg
+            else:
+                decision.message_to_user = (
+                    "Please provide more details about the scenario you want to build."
+                )
 
     logger.info(
         "[ORCHESTRATOR] Decision → next_action=%s  message=%s",
@@ -361,45 +423,47 @@ def orchestrator_node(
     if decision.message_to_user:
         # Persist plan_artifact and validation_result inside message additional_kwargs for history reload
         add_kwargs = {}
-        # Only attach the plan_artifact if we are presenting the plan (WAIT_APPROVAL)
-        if decision.next_action == "WAIT_APPROVAL":
-            plan_art = state.get("plan_artifact")
-            if plan_art:
-                add_kwargs["plan_artifact"] = plan_art
-
         # Only attach validation_result if we are displaying final results or failure recovery options
-        if decision.next_action in ("FINALIZE", "WAIT_USER") or state.get("next_action") == "VALIDATE":
+        if (
+            decision.next_action in ("FINALIZE", "WAIT_USER")
+            or state.get("next_action") == "VALIDATE"
+        ):
             val_res = state.get("validation_result")
             if val_res:
                 add_kwargs["validation_result"] = val_res
 
-        updates["messages"] = [AIMessage(content=decision.message_to_user, additional_kwargs=add_kwargs)]
+        updates["messages"] = [
+            AIMessage(content=decision.message_to_user, additional_kwargs=add_kwargs)
+        ]
 
     action = decision.next_action
 
     # ── Mechanical side effects based on LLM decision ─────────────────────────
 
     if action == "REDEFINE" or decision.clear_scenario_state:
-        # Wipe all scenario-specific fields; wait for user to describe new scenario
-        updates.update({
-            "enriched_intent": None,
-            "raw_sql": None,
-            "sql_metadata": None,
-            "scenario_parameters": None,
-            "scenario_code": None,
-            "rule_code": None,
-            "plan_artifact": None,
-            "plan_conditions": None,
-            "plan_approved": False,
-            "catalog_creations": [],
-            "write_verification": None,
-            "validation_result": None,
-            "validation_retry_count": 0,
-            "scenario_write_success": False,
-            "error_log": [],
-            "failure_mode": None,
-            "next_action": "WAIT_USER",
-        })
+        # Wipe all scenario-specific fields; preserve INTENT if user provided new scenario directly
+        target_action = "INTENT" if action == "INTENT" else "WAIT_USER"
+        updates.update(
+            {
+                "enriched_intent": None,
+                "raw_sql": None,
+                "sql_metadata": None,
+                "scenario_parameters": None,
+                "scenario_code": None,
+                "rule_code": None,
+                "plan_artifact": None,
+                "plan_conditions": None,
+                "plan_approved": False,
+                "catalog_creations": [],
+                "write_verification": None,
+                "validation_result": None,
+                "validation_retry_count": 0,
+                "scenario_write_success": False,
+                "error_log": [],
+                "failure_mode": None,
+                "next_action": target_action,
+            }
+        )
 
     elif action == "SQL_BRIDGE":
         updates["plan_approved"] = True
@@ -472,7 +536,7 @@ def _generate_escalation_report(state: AMLScenarioState) -> str:
         f"**System:** PioTech AML Builder — Automated Agent\n\n"
         f"---\n\n"
         f"## Intent Submitted\n\n"
-        f"```json\n{json.dumps(intent_dict, indent=2, default=str)}\n```\n\n"
+        f"```json\n{json.dumps(intent_dict, indent=2, default=str, ensure_ascii=False)}\n```\n\n"
         f"---\n\n"
         f"## Generated SQL Query\n\n"
         f"{sql_text}\n\n"
@@ -484,13 +548,13 @@ def _generate_escalation_report(state: AMLScenarioState) -> str:
         f"{catalog_text}\n\n"
         f"---\n\n"
         f"## Scenario Parameters Generated\n\n"
-        f"```json\n{json.dumps(params_dict, indent=2, default=str)}\n```\n\n"
+        f"```json\n{json.dumps(params_dict, indent=2, default=str, ensure_ascii=False)}\n```\n\n"
         f"---\n\n"
         f"## Write Verification Results\n\n"
-        f"```json\n{json.dumps(write_verification, indent=2, default=str)}\n```\n\n"
+        f"```json\n{json.dumps(write_verification, indent=2, default=str, ensure_ascii=False)}\n```\n\n"
         f"---\n\n"
         f"## Validation Results\n\n"
-        f"```json\n{json.dumps(validation_result, indent=2, default=str)}\n```\n\n"
+        f"```json\n{json.dumps(validation_result, indent=2, default=str, ensure_ascii=False)}\n```\n\n"
         f"---\n\n"
         f"_This report was generated automatically by the AML Builder agent._  \n"
         f"_Please reference Scenario Code `{scenario_code}` in all correspondence._"
@@ -499,6 +563,7 @@ def _generate_escalation_report(state: AMLScenarioState) -> str:
     # Persist the escalation report dynamically using the SOLID DatePartitionedFilePersister
     try:
         from web.services.persister import DatePartitionedFilePersister
+
         persister = DatePartitionedFilePersister()
         persister.persist(scenario_code, report_content)
     except Exception as exc:
@@ -535,7 +600,7 @@ def intent_analyst_node(
         (m.content for m in reversed(messages) if isinstance(m, HumanMessage)), ""
     )
 
-    system_prompt = _load_prompt("intent_analyst_system.md")
+    system_prompt = _load_prompt("intent_analyst_system_v2.md")
     llm = _build_llm(fast=False)
 
     # Compile the full system instructions, including schemas.
@@ -551,13 +616,16 @@ Schema:
 {{
   "scenario_name": "string",
   "scenario_type": "string",
+  "transaction_type": "string (e.g. 'LOAN SETTLEMENT', 'CASH DEPOSIT', 'OUTWARD TRANSFER')" | null,
   "detection_logic": "string",
   "thresholds": [{{"field":"string","operator":"string","value_from":number,"value_to":null,"provenance":"stated|assumed_default|needs_user"}}],
   "time_window": {{"unit":"DAYS|MONTHS|YEARS","value":number,"is_rolling":true,"provenance":"stated|assumed_default|needs_user"}} | null,
+  "baseline_window": {{"unit":"DAYS|MONTHS|YEARS","duration":number,"exclude_current_window":true,"offset_days":number,"sql_date_formula":"string","description":"string"}} | null,
   "customer_segments": ["string"] | null,
   "exclusions": ["string"] | null,
+  "mapped_keywords": {{"descriptive_qualifier": "threshold_field_expression"}} | null,
   "aggregation": {{"metric":"string (plain English)","function":"sum|count|count distinct|max|null","grain":"string (e.g. 'Per Customer per Day')","provenance":"stated|assumed_default|needs_user"}} | null,
-  "qualifiers": [{{"raw_phrase":"string","subject":"string (plain English noun)","predicate":"string (plain English rule)","provenance":"stated|assumed_default|needs_user"}}],
+  "semantic_conditions": [{{"raw_phrase":"string","logical_type":"STATE|TRANSITION|SEQUENCE|BEHAVIORAL|TEMPORAL|OTHER","subject":"string (plain English noun)","predicate":"string (plain English rule)","provenance":"stated|assumed_default|needs_user"}}],
   "clarifications": [{{"dimension":"string","why_it_matters":"string","question":"business-phrased, never technical","options":["string"] | null}}],
   "applied_defaults": ["string (plain English default you assumed)"],
   "ready_for_handoff": true|false,
@@ -568,16 +636,48 @@ Schema:
 }}
 
 RULES:
+- Set "transaction_type" to the explicit uppercase transaction category if specified (e.g. 'LOAN SETTLEMENT', 'CASH DEPOSIT', 'OUTWARD TRANSFER', 'ATM WITHDRAWAL', 'WIRE TRANSFER'). Do NOT place transaction categories inside "semantic_conditions".
+- INTENT EXTRACTION RULE: HISTORICAL BASELINE ISOLATION:
+  * When extracting intent for scenarios that compare current activity against a historical baseline (e.g., "historical monthly average", "6-month average", "prior activity profile"):
+    1. EXPLICITLY GENERATE 'baseline_window': You MUST construct a dedicated 'baseline_window' JSON object alongside the 'time_window' object.
+    2. ENFORCE ZERO-OVERLAP ISOLATION: Set 'exclude_current_window' to true and 'offset_days' equal to the current window's value (e.g., offset_days = 30 for a 30-day rolling scenario).
+    3. DEFINE DATES CLEARLY: Specify exact offset boundaries so downstream SQL generators do not include current-period transactions inside baseline averages.
 - Set "provenance" on each value: "stated" if the user gave it, "assumed_default" if you defaulted it (and add a plain sentence to "applied_defaults"), or "needs_user" if it is materially ambiguous.
 - For every "needs_user" value, add a matching entry to "clarifications".
 - "ready_for_handoff" MUST be false whenever "clarifications" is non-empty. Keep "clarification_needed"/"clarification_questions" in sync (mirror of clarifications) for backward compatibility.
+- DYNAMIC BASELINES & COMPARATIVE METRICS (<X> vs <Y>):
+  * When a condition compares a metric <X> against another field or dynamic baseline <Y> (e.g., <Metric_X> > <Metric_Y>, <Metric_X> >= <Ratio_K> * <Baseline_Y>, or <Metric_X> compared to <Historical_Period_Y>), <Y> is a database-computed calculation performed dynamically in SQL.
+  * NEVER set "provenance": "needs_user" or ask a clarification question requesting a hardcoded numeric value for <Y>.
+  * Map the comparison under "semantic_conditions" or map the explicit multiplier/threshold <Ratio_K> under "thresholds" with "provenance": "stated".
+- NO RE-ASKING STATED DETAILS:
+  * Check the user's input thoroughly. If the user provided the timeframe, thresholds, transaction types, or baseline rules in their prompt, NEVER ask a clarification question for them.
+  * If all material scenario requirements are provided in the user's prompt, "clarifications" MUST be empty [] and "ready_for_handoff" MUST be true.
 - Never bind terms to tables/columns. Keep subjects and predicates as business English.
+- Deduplicate resolved semantic conditions: If a semantic logic term (e.g. "unexpected", "suspicious", "large", "high value") is clarified by the user to mean a specific numeric threshold (e.g. > 10,000), set the numeric threshold under "thresholds" and remove the resolved term from the "semantic_conditions" list. Do not keep it in both. Populate the "mapped_keywords" dictionary mapping the term to its threshold field/condition.
+- STRICT NUMERIC TYPES: Under "thresholds", the fields "value_from" and "value_to" MUST always be numeric values (integers or floats) or null. If the value is unknown or needs user clarification, set it to null and set "provenance": "needs_user". NEVER output a string (like a field name or descriptive text) in "value_from" or "value_to".
+- TIME WINDOW IS MANDATORY FOR ALL SCENARIOS. Never leave "time_window" null.
+  * If the user does not specify a window:
+    - For transaction-level/detail rules (e.g. single transaction > 10k), default to a 1-day rolling window (unit: DAYS, value: 1, is_rolling: true) and add a plain sentence to "applied_defaults" (e.g. "Assumed a 1-day rolling window (not stated).").
+    - For cumulative/velocity/aggregate rules, if the window is not obvious, do not guess: set "time_window.provenance": "needs_user", add a "clarifications" entry asking for the observation period, and set "ready_for_handoff": false.
 - AGGREGATION IS MANDATORY WHENEVER A NUMERIC THRESHOLD EXISTS. Never leave "aggregation" null if "thresholds" is non-empty. You MUST decide the grain, because it changes what the number means:
   * If the amount/count applies to EACH single transaction (e.g. "a cash deposit over 10k", "any transaction above X"), set "aggregation" with "function": null and "grain": "Per Transaction" and "provenance": "stated". This is a per-transaction rule, NOT a sum.
   * If it applies to a CUMULATIVE total across rows (e.g. "total deposits over 10k in a day", "more than 5 transactions"), set "function" to "sum"/"count"/etc. and "grain" to the correct level (e.g. "Per Customer per Day").
   * If single-transaction vs cumulative is genuinely unclear, DO NOT GUESS: set "aggregation.provenance": "needs_user", add a "clarifications" entry (e.g. "Should this flag a single deposit over 10,000, or total deposits over 10,000 within a period?"), and set "ready_for_handoff": false.
 - Singular phrasing ("a deposit", "a transaction") implies per-transaction; plural/accumulating phrasing ("total", "sum of", "combined", "over a period") implies an aggregate.
 """
+
+    existing_intent = state.get("enriched_intent")
+    if existing_intent:
+        instruction_prompt += (
+            "\n\nCRITICAL SCENARIO MODIFICATION & DELTA PRESERVATION INSTRUCTION:\n"
+            "An existing AMLIntent payload has already been captured and validated for this session:\n"
+            f"```json\n{json.dumps(existing_intent, indent=2, default=str, ensure_ascii=False)}\n```\n"
+            "The user is requesting a MODIFICATION or REFINEMENT to this existing scenario.\n"
+            "1. You MUST PRESERVE all previously stated fields, customer_segments, transaction_types, thresholds, and conditions.\n"
+            "2. Apply ONLY the user's requested delta modification (e.g. updating time_window, threshold value, or filter condition).\n"
+            "3. DO NOT re-raise clarification questions or set ready_for_handoff=false for dimensions that were already stated or defaulted in the existing intent.\n"
+            "4. Ensure ready_for_handoff is set to true unless the user's modification request itself is completely ambiguous.\n"
+        )
 
     llm_messages = [SystemMessage(content=instruction_prompt)]
     # Append the native conversation history
@@ -639,9 +739,7 @@ RULES:
 # =============================================================================
 
 
-def planner_node(
-    state: AMLScenarioState, config: RunnableConfig
-) -> Dict[str, Any]:
+def planner_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str, Any]:
     """Generate and emit the human-readable execution plan for user approval.
 
     Reads the enriched AMLIntent and uses the LLM to produce:
@@ -668,7 +766,8 @@ def planner_node(
         logger.error("[PLANNER] Could not deserialize AMLIntent: %s", exc)
         return {
             "next_action": "ERROR",
-            "error_log": state.get("error_log", []) + [f"Planner failed to read intent: {exc}"],
+            "error_log": state.get("error_log", [])
+            + [f"Planner failed to read intent: {exc}"],
         }
 
     system_prompt = _load_prompt("planner_system.md")
@@ -676,16 +775,18 @@ def planner_node(
 
     user_prompt = (
         f"Generate the AML Scenario Execution Plan for the following intent:\n\n"
-        f"{json.dumps(intent.model_dump(), indent=2, default=str)}\n\n"
+        f"{json.dumps(intent.model_dump(), indent=2, default=str, ensure_ascii=False)}\n\n"
         f"Follow the OUTPUT FORMAT exactly. "
         f"Produce the full markdown plan AND the CONDITIONS_BLOCK JSON."
     )
 
     try:
-        response = llm.invoke([
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=user_prompt),
-        ])
+        response = llm.invoke(
+            [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=user_prompt),
+            ]
+        )
         raw = response.content.strip()
 
         # Extract the CONDITIONS_BLOCK JSON from the response
@@ -698,8 +799,12 @@ def planner_node(
         if conditions_match:
             try:
                 conditions_raw = json.loads(conditions_match.group(1).strip())
-                plan_conditions = [PlanCondition(**c).model_dump() for c in conditions_raw]
-                logger.info("[PLANNER] Extracted %d plan conditions.", len(plan_conditions))
+                plan_conditions = [
+                    PlanCondition(**c).model_dump() for c in conditions_raw
+                ]
+                logger.info(
+                    "[PLANNER] Extracted %d plan conditions.", len(plan_conditions)
+                )
             except Exception as exc:
                 logger.warning("[PLANNER] Could not parse CONDITIONS_BLOCK: %s", exc)
         else:
@@ -711,11 +816,24 @@ def planner_node(
             len(plan_conditions),
         )
 
+        plan_intro = (
+            "I've generated the Scenario Implementation Plan based on your requirements. "
+            "Please review the plan and let me know if you would like to proceed or make any adjustments."
+        )
+        msg = AIMessage(
+            content=plan_intro,
+            additional_kwargs={
+                "plan_artifact": raw,
+                "timestamp": datetime.utcnow().isoformat(),
+            },
+        )
+
         return {
             "plan_artifact": raw,
             "plan_conditions": plan_conditions,
             "plan_approved": False,
             "next_action": "WAIT_APPROVAL",
+            "messages": [msg],
         }
 
     except Exception as exc:
@@ -749,111 +867,18 @@ def sql_bridge_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str
     intent_dict = state.get("enriched_intent") or {}
     intent = AMLIntent(**intent_dict)
 
-    # Construct a precise, context-rich prompt for the DWH agent
-    thresholds_text = "\n".join(
-        f"  - {t.field} {t.operator} {t.value_from}"
-        + (f" AND {t.value_to}" if t.value_to else "")
-        for t in intent.thresholds
-    )
-
-    time_text = "No time window specified."
-    if intent.time_window:
-        tw = intent.time_window
-        time_text = (
-            f"Rolling {tw.value} {tw.unit}"
-            if tw.is_rolling
-            else f"Fixed {tw.value} {tw.unit}"
-        )
-
-    segments_text = (
-        ", ".join(intent.customer_segments)
-        if intent.customer_segments
-        else "All segments"
-    )
-    exclusions_text = (
-        "\n".join(f"  - {e}" for e in intent.exclusions)
-        if intent.exclusions
-        else "None"
-    )
-
-    # Semantic MEASURE + GRAIN (WHAT, not HOW). Service B owns all SQL mechanics —
-    # GROUP BY, HAVING, joins, date arithmetic. We only state the business meaning
-    # so it can choose the correct query shape itself.
-    agg = intent.aggregation
-    if agg and agg.function:
-        measure_text = f"{agg.function} of {agg.metric}"
-        grain_label = agg.grain or "the specified grouping"
-        grain_line = (
-            f"Per {grain_label} — the qualifying transactions are considered together "
-            f"and the measure is evaluated against the threshold(s). A threshold on the "
-            f"aggregated measure is a group-level condition; a threshold on a single "
-            f"transaction's value remains a per-transaction condition."
-        )
-    elif agg:
-        measure_text = f"{agg.metric} (evaluated per individual transaction)"
-        grain_line = (
-            "Per individual transaction — each qualifying transaction is evaluated on "
-            "its own, and every numeric threshold applies to that single transaction, "
-            "not to a cumulative total."
-        )
-    else:
-        measure_text = "Individual transaction value"
-        grain_line = (
-            "Per individual transaction (assumed — no aggregation was specified); "
-            "treat thresholds as applying to each single transaction."
-        )
-
-    # Observation window as a business fact — no SQL date mechanics.
-    if intent.time_window:
-        window_line = f"{time_text} — restrict evaluation to this observation period."
-    else:
-        window_line = "None — evaluate without a time constraint."
-
-    # Open-ended non-numeric predicates for the SQL agent to ground itself.
-    qualifiers_text = (
-        "\n".join(f"  - {q.subject}: {q.predicate}" for q in intent.qualifiers)
-        if intent.qualifiers
-        else "None"
-    )
-
-    # Business defaults the intent layer assumed (so the SQL agent knows what was
-    # inferred vs. explicitly stated by the user).
-    defaults_text = (
-        "\n".join(f"  - {d}" for d in intent.applied_defaults)
-        if intent.applied_defaults
-        else "None"
-    )
-
-    aml_prompt = (
-        f"<AML_SCENARIO_REQUEST>\n"
-        f"REQUEST_SCHEMA: aml-intent/v2\n"
-        f"SCENARIO_NAME: {intent.scenario_name}\n"
-        f"MONITORED_DOMAIN: {intent.scenario_type}\n"
-        f"DETECTION_LOGIC: {intent.detection_logic}\n\n"
-        f"# This message states the BUSINESS INTENT only (WHAT to detect).\n"
-        f"# You own every implementation decision (HOW): table and column selection,\n"
-        f"# joins, query shape, grouping and aggregation mechanics, and date handling.\n"
-        f"# Ground each plain-English term against the data dictionary yourself.\n\n"
-        f"BUSINESS_CONDITIONS (numeric thresholds, in business terms):\n{thresholds_text}\n\n"
-        f"QUALIFIERS (plain-English business filters — ground each against the dictionary):\n{qualifiers_text}\n\n"
-        f"MEASURE: {measure_text}\n"
-        f"EVALUATION_GRAIN: {grain_line}\n"
-        f"OBSERVATION_WINDOW: {window_line}\n"
-        f"CUSTOMER_SEGMENTS: {segments_text}\n"
-        f"EXCLUSIONS:\n{exclusions_text}\n"
-        f"ASSUMED_DEFAULTS (inferred by the intent layer, not stated by the user; "
-        f"treat as business facts unless clearly implausible):\n{defaults_text}\n\n"
-        f"OBJECTIVE: Identify everything that matches the business intent above and "
-        f"return the identifier(s) needed to action an alert (customer, account, or "
-        f"transaction — whichever the scenario implies).\n\n"
-        f"RETURN_FORMAT: Return ONLY the executable SQL query. No explanation. No markdown.\n"
-        f"</AML_SCENARIO_REQUEST>"
+    # Construct a precise, context-rich prompt payload for the DWH agent
+    # sending the raw serialized JSON intent for a truly domain-agnostic approach.
+    payload_content = json.dumps(
+        {"request_type": "AML_SCENARIO_GENERATION", "intent": intent_dict},
+        indent=2,
+        ensure_ascii=False,
     )
 
     chat_id = f"aml_builder_{uuid.uuid4().hex[:8]}"
 
     payload = {
-        "messages": [{"role": "user", "content": aml_prompt}],
+        "messages": [{"role": "user", "content": payload_content}],
         "metadata": {
             "user_id": settings.PIOTECH_AI_USER_ID,
             "project_id": settings.PIOTECH_AI_PROJECT_ID,
@@ -863,6 +888,7 @@ def sql_bridge_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str
     }
 
     collected_text = []
+    final_answer_text = None
 
     try:
         with httpx.Client(timeout=settings.PIOTECH_AI_TIMEOUT_SECONDS) as client:
@@ -885,21 +911,21 @@ def sql_bridge_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str
                     try:
                         event = json.loads(raw)
                         event_type = event.get("type", "")
-                        if event_type == "content":
-                            collected_text.append(event.get("text", ""))
-                        elif event_type == "final_answer" and not collected_text:
-                            # Fallback if no streaming chunks were captured
+                        if event_type == "final_answer":
+                            final_answer_text = event.get("text", "")
+                        elif event_type == "content":
                             collected_text.append(event.get("text", ""))
                     except json.JSONDecodeError:
                         continue
 
-        full_response = "".join(collected_text).strip()
-        logger.info(
-            "[SQL_BRIDGE] PioTech AI response received (%d chars).", len(full_response)
-        )
+        # Extract SQL: First attempt from final_answer_text, fallback to full collected stream content
+        sql = ""
+        if final_answer_text and final_answer_text.strip():
+            sql = _extract_sql(final_answer_text)
 
-        # Extract SQL from the response
-        sql = _extract_sql(full_response)
+        if not sql:
+            full_stream_text = "".join(collected_text).strip()
+            sql = _extract_sql(full_stream_text)
 
         if not sql:
             logger.error("[SQL_BRIDGE] No SQL found in PioTech AI response.")
@@ -911,7 +937,11 @@ def sql_bridge_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str
 
         # Parse SQL metadata
         metadata = _parse_sql_metadata(sql)
-        logger.info("[SQL_BRIDGE] SQL extracted. tables=%s", metadata.tables)
+        logger.info(
+            "[SQL_BRIDGE] SQL extracted (%d chars). tables=%s",
+            len(sql),
+            metadata.tables,
+        )
 
         return {
             "raw_sql": sql,
@@ -927,6 +957,18 @@ def sql_bridge_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str
         }
 
 
+def _is_real_sql(candidate: str) -> bool:
+    """Helper to verify if a candidate string represents a genuine SQL query."""
+    candidate_upper = candidate.upper()
+    if "SELECT" not in candidate_upper or "FROM" not in candidate_upper:
+        return False
+    if candidate_upper.startswith("WITH"):
+        # Ensure it matches common SQL CTE patterns, e.g. WITH cte_name AS
+        if not re.search(r"\bWITH\s+[a-zA-Z0-9_\"#]+\s+AS\b", candidate, re.IGNORECASE):
+            return False
+    return True
+
+
 def _extract_sql(text: str) -> str:
     """Extract a clean SQL query from LLM response text.
 
@@ -936,22 +978,68 @@ def _extract_sql(text: str) -> str:
     Returns:
         str: The extracted SQL query, or empty string if none found.
     """
-    # Try code block first
-    match = re.search(r"```(?:sql)?\s*([\s\S]+?)```", text, re.IGNORECASE)
-    if match:
-        return match.group(1).strip()
+    if not text or not isinstance(text, str):
+        return ""
 
-    # Look for SELECT / WITH statement
-    match = re.search(r"((?:SELECT|WITH)\s+[\s\S]+?)(?:\n\n|$)", text, re.IGNORECASE)
-    if match:
-        return match.group(1).strip()
+    # 1. Find all code blocks delimited by ```sql ... ``` or ``` ... ```
+    blocks = re.findall(r"```(?:sql)?\s*([\s\S]+?)```", text, re.IGNORECASE)
+    if blocks:
+        valid_blocks = []
+        for block in blocks:
+            block_clean = block.strip().rstrip(";").strip()
+            if re.search(r"\b(SELECT|WITH)\b", block_clean, re.IGNORECASE):
+                if _is_real_sql(block_clean):
+                    valid_blocks.append(block_clean)
+        if valid_blocks:
+            # Pick the latest (last) valid block to ensure we get the final approved query
+            return valid_blocks[-1]
 
-    # If the entire response looks like SQL
-    stripped = text.strip()
-    if re.match(r"^(SELECT|WITH)\s+", stripped, re.IGNORECASE):
-        return stripped
+    # 2. Fallback: if no code blocks found, extract raw WITH or SELECT statement
+    # If WITH exists in text, prefer starting from WITH to capture full CTEs
+    with_match = re.search(r"\bWITH\b", text, re.IGNORECASE)
+    select_match = re.search(r"\bSELECT\b", text, re.IGNORECASE)
+
+    start_idx = -1
+    if with_match and select_match:
+        start_idx = min(with_match.start(), select_match.start())
+    elif with_match:
+        start_idx = with_match.start()
+    elif select_match:
+        start_idx = select_match.start()
+
+    if start_idx != -1:
+        candidate = text[start_idx:].strip()
+
+        # Stop at double newline after semicolon, markdown code block end, or end of string
+        end_match = re.search(r";(?:\s*\n\s*\n|\s*$|\s*```)", candidate)
+        if end_match:
+            candidate = candidate[: end_match.start() + 1].strip()
+        else:
+            # Stop if explanation text starts after semicolon
+            trailing_exp = re.search(r";\s*\n\s*[A-Za-z]{3,}\b", candidate)
+            if trailing_exp:
+                candidate = candidate[: trailing_exp.start() + 1].strip()
+
+        candidate_clean = candidate.rstrip(";").strip()
+        if _is_real_sql(candidate_clean):
+            return candidate_clean
 
     return ""
+
+
+def _remove_parenthesized_subqueries(sql_str: str) -> str:
+    """Iteratively replace nested parenthesized expressions with a placeholder.
+
+    This produces a simplified outer query skeleton so regex searches for
+    outer WHERE, GROUP BY, and HAVING clauses do not get confused by inner
+    subqueries (e.g. scalar subqueries in SELECT or HAVING).
+    """
+    prev = ""
+    curr = sql_str
+    while prev != curr:
+        prev = curr
+        curr = re.sub(r"\([^()]*\)", "__SUBQUERY__", curr)
+    return curr
 
 
 def _parse_sql_metadata(sql: str) -> SQLMetadata:
@@ -966,19 +1054,25 @@ def _parse_sql_metadata(sql: str) -> SQLMetadata:
     Returns:
         SQLMetadata: Populated metadata object.
     """
+    # Strip any trailing semicolons or whitespace from the query
+    sql = sql.strip().rstrip(";").strip()
+
+    # Create simplified skeleton to isolate outer query clauses from inner subqueries
+    simplified_sql = _remove_parenthesized_subqueries(sql)
+
     # Extract tables (FROM and JOIN clauses)
     tables = re.findall(
         r"(?:FROM|JOIN)\s+(BI_DWH\.\w+|\w+\.\w+|\w+)",
-        sql,
+        simplified_sql,
         re.IGNORECASE,
     )
     tables = list(dict.fromkeys(tables))  # deduplicate preserving order
     primary_table = tables[0] if tables else ""
 
-    # Extract WHERE conditions (simplified: split by AND/OR)
+    # Extract WHERE conditions
     where_match = re.search(
         r"WHERE\s+([\s\S]+?)(?:GROUP BY|HAVING|ORDER BY|$)",
-        sql,
+        simplified_sql,
         re.IGNORECASE,
     )
     where_conditions = []
@@ -988,18 +1082,22 @@ def _parse_sql_metadata(sql: str) -> SQLMetadata:
             c.strip()
             for c in re.split(r"\bAND\b|\bOR\b", raw_where, flags=re.IGNORECASE)
         ]
-        where_conditions = [c for c in where_conditions if c]
+        where_conditions = [c for c in where_conditions if c and c != "__SUBQUERY__"]
 
     # Extract GROUP BY fields
     group_match = re.search(
-        r"GROUP BY\s+([\s\S]+?)(?:HAVING|ORDER BY|$)", sql, re.IGNORECASE
+        r"GROUP BY\s+([\s\S]+?)(?:HAVING|ORDER BY|$)", simplified_sql, re.IGNORECASE
     )
     group_by_fields = []
     if group_match:
-        group_by_fields = [f.strip() for f in group_match.group(1).split(",")]
+        group_by_fields = [
+            f.strip() for f in group_match.group(1).split(",") if f.strip()
+        ]
 
     # Extract HAVING conditions
-    having_match = re.search(r"HAVING\s+([\s\S]+?)(?:ORDER BY|$)", sql, re.IGNORECASE)
+    having_match = re.search(
+        r"HAVING\s+([\s\S]+?)(?:ORDER BY|$)", simplified_sql, re.IGNORECASE
+    )
     having_conditions = []
     if having_match:
         raw_having = having_match.group(1).strip()
@@ -1009,11 +1107,11 @@ def _parse_sql_metadata(sql: str) -> SQLMetadata:
         ]
         having_conditions = [c for c in having_conditions if c]
 
-    # Detect date fields
+    # Detect date fields from original sql
     date_fields = re.findall(r"\b(\w*DATE\w*|\w*TIME\w*|\w*DT\b)\b", sql, re.IGNORECASE)
     date_fields = list(set(date_fields))
 
-    # Detect aggregations
+    # Detect aggregations from original sql
     aggregations = re.findall(r"\b(COUNT|SUM|AVG|MAX|MIN)\s*\(", sql, re.IGNORECASE)
     aggregations = list(set(agg.upper() for agg in aggregations))
 
@@ -1057,7 +1155,9 @@ def decomposer_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str
         intent_dict = state.get("enriched_intent") or {}
         sql_meta_dict = state.get("sql_metadata") or {}
         if not sql_meta_dict:
-            raise ValueError("SQL metadata is missing or empty. PioTech AI may have failed to return a valid SQL query.")
+            raise ValueError(
+                "SQL metadata is missing or empty. PioTech AI may have failed to return a valid SQL query."
+            )
 
         intent = AMLIntent(**intent_dict)
         sql_meta = SQLMetadata(**sql_meta_dict)
@@ -1076,6 +1176,7 @@ def decomposer_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str
 
         if not scenario_code:
             import time
+
             epoch_ms = int(time.time() * 1000)
             rand_suffix = random.randint(100, 999)
             scenario_code = f"{epoch_ms}{rand_suffix}"
@@ -1084,23 +1185,166 @@ def decomposer_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str
             timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
             rule_code = f"{timestamp}{random.randint(100, 999)}"
 
+        # Query period types from PIO_PERIOD_TYPE
+        period_type_rows = []
+        try:
+            from web.services.oracle import run_readonly
+
+            _, period_rows = run_readonly(
+                "SELECT PERIOD_CODE, DES_ENG, NO_OF_DAYS FROM PIO_PERIOD_TYPE WHERE CB_CODE = :ic OR CB_CODE IS NULL",
+                {"ic": settings.AML_INST_CODE},
+            )
+            for row in period_rows:
+                period_type_rows.append(
+                    {
+                        "period_code": str(row[0]).strip(),
+                        "des_eng": str(row[1]).strip(),
+                        "no_of_days": int(row[2]) if row[2] is not None else None,
+                    }
+                )
+        except Exception as exc:
+            logger.error("[DECOMPOSER] Failed to query PIO_PERIOD_TYPE: %s", exc)
+
+        # Query risk degrees from PIO_AML_DEGREE_RISK
+        risk_level_rows = []
+        try:
+            from web.services.oracle import run_readonly
+
+            _, risk_rows = run_readonly(
+                "SELECT DEGREE_CODE, DESC_ENG FROM PIO_AML_DEGREE_RISK WHERE COUNTRY_CODE = :cc AND INST_CODE = :ic",
+                {"cc": settings.AML_COUNTRY_CODE, "ic": settings.AML_INST_CODE},
+            )
+            for row in risk_rows:
+                risk_level_rows.append(
+                    {
+                        "degree_code": str(row[0]).strip(),
+                        "desc_eng": str(row[1]).strip(),
+                    }
+                )
+        except Exception as exc:
+            logger.error("[DECOMPOSER] Failed to query PIO_AML_DEGREE_RISK: %s", exc)
+
         # Determine PERIOD_TYPE (PIO_PERIOD_TYPE code) and PERIOD_DAYS from intent.
-        # PIO_PERIOD_TYPE codes: '0'=Last n Days, '2'=Weekly, '3'=Monthly,
-        # '4'=Quarterly, '5'=Half Year, '6'=Yearly.
         period_type = "0"  # default: Last n Days
         period_days = 30  # sensible default
-        if intent.time_window:
-            tw = intent.time_window
-            period_days = tw.value
-            unit_upper = tw.unit.upper()
-            if unit_upper == "DAYS":
-                period_type = "0"  # Last n Days
-            elif unit_upper == "MONTHS":
-                period_type = "3"  # Monthly
-                period_days = tw.value * 30
-            elif unit_upper == "YEARS":
-                period_type = "6"  # Yearly
-                period_days = tw.value * 365
+        degree_code = settings.AML_DEFAULT_VIOLATION_LEVEL or "H"
+
+        if period_type_rows and risk_level_rows:
+            try:
+                tw_unit = intent.time_window.unit if intent.time_window else "DAYS"
+                tw_value = intent.time_window.value if intent.time_window else 30
+                tw_rolling = (
+                    intent.time_window.is_rolling if intent.time_window else True
+                )
+
+                period_types_str = "\n".join(
+                    [
+                        f"- Code: {p['period_code']}, Name: {p['des_eng']}, Default Days: {p['no_of_days']}"
+                        for p in period_type_rows
+                    ]
+                )
+                risk_degrees_str = "\n".join(
+                    [
+                        f"- Code: {r['degree_code']}, Description: {r['desc_eng']}"
+                        for r in risk_level_rows
+                    ]
+                )
+
+                llm = _build_llm(fast=True)
+                prompt = (
+                    "You are an expert system mapping Compliance Scenario settings to database lookup codes.\n\n"
+                    "1. TIME WINDOW SYSTEM:\n"
+                    f"Target Time Window: Unit={tw_unit}, Value={tw_value}, Rolling={tw_rolling}\n"
+                    "Available Period Types:\n"
+                    f"{period_types_str}\n\n"
+                    "2. RISK LEVEL SYSTEM:\n"
+                    f"Scenario Name: {intent.scenario_name}\n"
+                    f"Detection Logic: {intent.detection_logic}\n"
+                    "Available Risk Degrees:\n"
+                    f"{risk_degrees_str}\n\n"
+                    "INSTRUCTIONS:\n"
+                    "- Match the Target Time Window to the most appropriate 'period_code' in the Available Period Types.\n"
+                    "  - If it matches a specific frequency (Daily, Weekly, Monthly, Yearly), use that code.\n"
+                    "  - Otherwise, default to '0' (Last n Days) or a custom code if more appropriate.\n"
+                    "  - Compute 'period_days' as the number of days represented by the window (e.g., 30 for 1 Month, 365 for 1 Year, or the value itself if DAYS).\n"
+                    "- Analyze the Scenario Name and Detection Logic to determine the risk level (e.g. HIGH, MEDIUM, LOW) and match it to 'degree_code' from the Available Risk Degrees.\n"
+                    "  - If not explicitly mentioned, default to High ('H') or Medium ('M') contextually.\n"
+                    "3. Respond ONLY with a valid JSON object matching the following schema. Do not write any explanations, markdown code blocks, or extra text:\n"
+                    "{\n"
+                    '  "period_code": "<matching period_code>",\n'
+                    '  "period_days": <integer number of days>,\n'
+                    '  "degree_code": "<matching degree_code>",\n'
+                    '  "reasoning": "<brief explanation of your decision>"\n'
+                    "}\n"
+                )
+
+                response = llm.invoke(prompt)
+                response_text = str(response.content).strip()
+
+                def _extract_json(text: str) -> Optional[dict]:
+                    match = re.search(
+                        r"```(?:json)?\s*([\s\S]+?)```", text, re.IGNORECASE
+                    )
+                    if match:
+                        try:
+                            return json.loads(match.group(1).strip())
+                        except Exception:
+                            pass
+                    try:
+                        return json.loads(text.strip())
+                    except Exception:
+                        pass
+                    start = text.find("{")
+                    end = text.rfind("}")
+                    if start != -1 and end != -1:
+                        try:
+                            return json.loads(text[start : end + 1].strip())
+                        except Exception:
+                            pass
+                    return None
+
+                res_json = _extract_json(response_text)
+                if res_json:
+                    p_code = res_json.get("period_code")
+                    if p_code is not None:
+                        period_type = str(p_code).strip()
+
+                    p_days = res_json.get("period_days")
+                    if p_days is not None:
+                        try:
+                            period_days = int(p_days)
+                        except Exception:
+                            pass
+
+                    d_code = res_json.get("degree_code")
+                    if d_code is not None:
+                        degree_code = str(d_code).strip()
+
+                    logger.info(
+                        "[DECOMPOSER] Grounded Period Type to '%s' (%s days) and Degree Code to '%s'. Reasoning: %s",
+                        period_type,
+                        str(period_days),
+                        degree_code,
+                        res_json.get("reasoning"),
+                    )
+            except Exception as exc:
+                logger.error(
+                    "[DECOMPOSER] LLM grounding lookup failed: %s. Using defaults.", exc
+                )
+        else:
+            # Simple python mapping fallback
+            if intent.time_window:
+                tw = intent.time_window
+                period_days = tw.value
+                unit_upper = tw.unit.upper()
+                if unit_upper == "DAYS":
+                    period_type = "0"
+                elif unit_upper == "MONTHS":
+                    period_type = "3"
+                    period_days = tw.value * 30
+                elif unit_upper == "YEARS":
+                    period_type = "6"
+                    period_days = tw.value * 365
 
         now = datetime.utcnow()
 
@@ -1114,7 +1358,7 @@ def decomposer_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str
             active_flag=settings.AML_DEFAULT_ACTIVE_FLAG,
             exclude_expl_flag="0",
             use_watchlist_flag="0",
-            violation_level=settings.AML_DEFAULT_VIOLATION_LEVEL,
+            violation_level=degree_code,
             degree_risk_flag=settings.AML_DEFAULT_DEGREE_RISK_FLAG,
             default_scenario_flag="0",
             run_flag=settings.AML_RUN_FLAG,
@@ -1170,7 +1414,9 @@ def decomposer_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str
         )
 
         # Use live PIO_AML_PARAMETERS catalog + auto-provisioning to map conditions.
-        existing_creations: List[Dict[str, Any]] = list(state.get("catalog_creations") or [])
+        existing_creations: List[Dict[str, Any]] = list(
+            state.get("catalog_creations") or []
+        )
         rule_details = _fetch_and_map_parameters(
             intent=intent,
             sql_meta=sql_meta,
@@ -1255,6 +1501,7 @@ def _query_oracle_column_type(table_name: str, column_name: str) -> Optional[str
             or None if not found in ALL_TAB_COLUMNS.
     """
     from web.services.oracle import run_readonly
+
     try:
         _, rows = run_readonly(
             """
@@ -1272,7 +1519,9 @@ def _query_oracle_column_type(table_name: str, column_name: str) -> Optional[str
                 return f"{data_type}({data_length})"
             return data_type
         logger.warning(
-            "[CATALOG] Column %s.%s not found in ALL_TAB_COLUMNS.", table_name, column_name
+            "[CATALOG] Column %s.%s not found in ALL_TAB_COLUMNS.",
+            table_name,
+            column_name,
         )
         return None
     except Exception as exc:
@@ -1280,7 +1529,9 @@ def _query_oracle_column_type(table_name: str, column_name: str) -> Optional[str
         return None
 
 
-def _infer_column_metadata(col_name: str, col_type: str, table_name: str) -> Dict[str, Any]:
+def _infer_column_metadata(
+    col_name: str, col_type: str, table_name: str
+) -> Dict[str, Any]:
     """Use the LLM to infer business metadata for a new catalog column.
 
     Infers: COLUMN_BUSINESS_NAME, COLUMN_BUSINESS_NAME_NAT (Arabic),
@@ -1302,7 +1553,7 @@ def _infer_column_metadata(col_name: str, col_type: str, table_name: str) -> Dic
         f"Column: {col_name}\n"
         f"Table: {table_name}\n"
         f"Oracle Type: {col_type}\n\n"
-        f'Return a JSON object with EXACTLY these fields:\n{{\n'
+        f"Return a JSON object with EXACTLY these fields:\n{{\n"
         f'  "column_business_name": "<clear English business name, max 40 chars>",\n'
         f'  "column_business_name_nat": "<Arabic translation, max 200 chars>",\n'
         f'  "aggregation_code": "<1=None/Direct, 2=Count, 3=Sum, 4=Average, 5=StdDev — '
@@ -1329,7 +1580,9 @@ def _infer_column_metadata(col_name: str, col_type: str, table_name: str) -> Dic
         return {**defaults, **inferred}
     except Exception as exc:
         logger.warning(
-            "[CATALOG] LLM metadata inference failed for %s: %s — using defaults.", col_name, exc
+            "[CATALOG] LLM metadata inference failed for %s: %s — using defaults.",
+            col_name,
+            exc,
         )
         return defaults
 
@@ -1365,9 +1618,12 @@ def _provision_catalog_entry(
         col_name = col_name.split(".", 1)[1]
 
     from web.services.oracle import run_readonly, run_write, get_next_numeric_code
+
     now = datetime.utcnow()
 
-    logger.info("[CATALOG] Provisioning catalog for col=%s table=%s", col_name, table_name)
+    logger.info(
+        "[CATALOG] Provisioning catalog for col=%s table=%s", col_name, table_name
+    )
 
     # ── Step 1: Ensure PIO_AML_TABLES has the source table ────────────────────
     _, table_rows = run_readonly(
@@ -1386,18 +1642,27 @@ def _provision_catalog_entry(
                VALUES (:tc, :tn, :bn, :bnn)""",
             {"tc": table_code, "tn": table_name[:40], "bn": biz_name, "bnn": biz_name},
         )
-        catalog_creations.append(CatalogCreation(
-            entity_type="TABLE", code=table_code, name=table_name, business_name=biz_name
-        ).model_dump(mode="json"))
-        logger.info("[CATALOG] Inserted PIO_AML_TABLES: TABLE_CODE=%s NAME=%s",
-                    table_code, table_name)
+        catalog_creations.append(
+            CatalogCreation(
+                entity_type="TABLE",
+                code=table_code,
+                name=table_name,
+                business_name=biz_name,
+            ).model_dump(mode="json")
+        )
+        logger.info(
+            "[CATALOG] Inserted PIO_AML_TABLES: TABLE_CODE=%s NAME=%s",
+            table_code,
+            table_name,
+        )
 
     # ── Step 2: Query ALL_TAB_COLUMNS for actual data type (NEVER inferred) ───
     col_type = _query_oracle_column_type(table_name, col_name)
     if col_type is None:
         logger.error(
             "[CATALOG] Column %s not found in ALL_TAB_COLUMNS for table %s. Cannot provision.",
-            col_name, table_name,
+            col_name,
+            table_name,
         )
         return None
 
@@ -1413,6 +1678,19 @@ def _provision_catalog_entry(
     else:
         col_code = get_next_numeric_code("PIO_AML_COLUMNS", "COLUMN_CODE")
         meta = _infer_column_metadata(col_name, col_type, table_name)
+
+        # Map physical type to legacy code: 1 = Number, 2 = String, 3 = Date
+        ct_upper = str(col_type).upper()
+        if any(
+            k in ct_upper
+            for k in ("NUMBER", "FLOAT", "INT", "DECIMAL", "DOUBLE", "NUMERIC")
+        ):
+            catalog_col_type = "1"
+        elif any(k in ct_upper for k in ("DATE", "TIME", "TIMESTAMP")):
+            catalog_col_type = "3"
+        else:
+            catalog_col_type = "2"
+
         run_write(
             """INSERT INTO PIO_AML_COLUMNS
                (COLUMN_CODE, COLUMN_TYPE, TABLE_CODE, COLUMN_NAME,
@@ -1421,7 +1699,7 @@ def _provision_catalog_entry(
                VALUES (:cc, :ct, :tc, :cn, :cbn, :cbnnat, '0', :sd, :bal, '0')""",
             {
                 "cc": col_code,
-                "ct": str(col_type)[:40],
+                "ct": catalog_col_type,
                 "tc": table_code,
                 "cn": col_name[:40],
                 "cbn": meta["column_business_name"][:200],
@@ -1430,12 +1708,20 @@ def _provision_catalog_entry(
                 "bal": meta["balance_flag"],
             },
         )
-        catalog_creations.append(CatalogCreation(
-            entity_type="COLUMN", code=col_code, name=col_name,
-            business_name=meta["column_business_name"]
-        ).model_dump(mode="json"))
-        logger.info("[CATALOG] Inserted PIO_AML_COLUMNS: COLUMN_CODE=%s NAME=%s TYPE=%s",
-                    col_code, col_name, col_type)
+        catalog_creations.append(
+            CatalogCreation(
+                entity_type="COLUMN",
+                code=col_code,
+                name=col_name,
+                business_name=meta["column_business_name"],
+            ).model_dump(mode="json")
+        )
+        logger.info(
+            "[CATALOG] Inserted PIO_AML_COLUMNS: COLUMN_CODE=%s NAME=%s TYPE=%s",
+            col_code,
+            col_name,
+            col_type,
+        )
 
     # ── Step 4: Create PARAMETER_CODE in PIO_AML_PARAMETERS ──────────────────
     _, param_rows = run_readonly(
@@ -1474,13 +1760,20 @@ def _provision_catalog_entry(
             "ud": now,
         },
     )
-    catalog_creations.append(CatalogCreation(
-        entity_type="PARAMETER", code=p_code, name=col_name,
-        business_name=param_element, aggregation_code=agg_code
-    ).model_dump(mode="json"))
+    catalog_creations.append(
+        CatalogCreation(
+            entity_type="PARAMETER",
+            code=p_code,
+            name=col_name,
+            business_name=param_element,
+            aggregation_code=agg_code,
+        ).model_dump(mode="json")
+    )
     logger.info(
         "[CATALOG] Inserted PIO_AML_PARAMETERS: PARAMETER_CODE=%s for %s.%s",
-        p_code, table_name, col_name,
+        p_code,
+        table_name,
+        col_name,
     )
     return p_code, agg_code
 
@@ -1524,7 +1817,9 @@ def _verify_catalog_integrity(catalog_creations: List[Dict[str, Any]]) -> bool:
                     p_code,
                 )
                 return False
-            logger.info("[CATALOG] Integrity check PASSED for PARAMETER_CODE=%s", p_code)
+            logger.info(
+                "[CATALOG] Integrity check PASSED for PARAMETER_CODE=%s", p_code
+            )
         return True
     except Exception as exc:
         logger.error("[CATALOG] Integrity check query failed: %s", exc)
@@ -1561,12 +1856,17 @@ def _fetch_and_map_parameters(
     seq = 1
 
     # Load dynamic catalog mappings from database
-    column_map: Dict[str, tuple] = {}
+    detail_column_map: Dict[str, tuple] = {}
+    aggregate_column_map: Dict[str, tuple] = {}
+    parameter_to_column: Dict[str, str] = {}
+    all_catalog_params: List[Dict[str, Any]] = []
+
     try:
         from web.services.oracle import run_readonly
+
         _, catalog_rows = run_readonly(
             """
-            SELECT DISTINCT P.PARAMETER_CODE, UPPER(C.COLUMN_NAME), P.AGGREGATION_CODE
+            SELECT DISTINCT P.PARAMETER_CODE, UPPER(C.COLUMN_NAME), P.AGGREGATION_CODE, P.PARAMETER_ELEMENT, P.TABLE_CODE
             FROM PIO_AML_PARAMETERS P
             JOIN PIO_AML_COLUMNS C ON P.TABLE_CODE = C.TABLE_CODE AND P.COLUMN_CODE = C.COLUMN_CODE
             """,
@@ -1576,16 +1876,42 @@ def _fetch_and_map_parameters(
             p_code = str(row[0]).strip()
             col_name_upper = str(row[1]).strip().upper()
             agg_code = str(row[2]).strip() if row[2] else "1"
+            p_element = str(row[3]).strip()
+            t_code = str(row[4]).strip()
+
+            cp = {
+                "parameter_code": p_code,
+                "column_name": col_name_upper,
+                "aggregation_code": agg_code,
+                "parameter_element": p_element,
+                "table_code": t_code,
+            }
+            all_catalog_params.append(cp)
+
             # Prevent overwriting transaction amount mapping (Param 5)
             # with count (Param 2) or sum (Param 6) which also reference EQU_TRA_AMT.
             if col_name_upper == "EQU_TRA_AMT" and p_code in ("2", "6"):
                 continue
-            column_map[col_name_upper] = (p_code, agg_code)
 
-        logger.info("[DECOMPOSER] Loaded %d dynamic parameter mappings from catalog.", len(column_map))
+            if agg_code == "1":
+                detail_column_map[col_name_upper] = (p_code, agg_code)
+            else:
+                aggregate_column_map[col_name_upper] = (p_code, agg_code)
+
+            parameter_to_column[p_code] = col_name_upper
+
+        logger.info(
+            "[DECOMPOSER] Loaded %d dynamic parameter mappings from catalog.",
+            len(detail_column_map) + len(aggregate_column_map),
+        )
     except Exception as exc:
         logger.error("[DECOMPOSER] Failed to query live parameter catalog: %s.", exc)
-        # No hardcoded fallback — auto-provisioning handles unknowns below
+
+    def _get_parameter_for_column(col_name: str, is_aggregate: bool) -> Optional[tuple]:
+        if is_aggregate:
+            return aggregate_column_map.get(col_name) or detail_column_map.get(col_name)
+        else:
+            return detail_column_map.get(col_name) or aggregate_column_map.get(col_name)
 
     # Helper: build a QBRuleDetail with all required fields.
     def _make_detail(
@@ -1629,9 +1955,11 @@ def _fetch_and_map_parameters(
         cond_clean = re.sub(r"--.*$", "", cond)
         cond_clean = re.sub(r"/\*.*?\*/", "", cond_clean).strip()
 
-        # Match: COLUMN_NAME Operator VALUE
+        # Match: COLUMN_NAME Operator VALUE with strict word boundaries for verbal operators
         match = re.search(
-            r"(\w+(?:\.\w+)?)\s*([><=!]+|LIKE|IN)\s*(.*)", cond_clean, re.IGNORECASE
+            r"(\w+(?:\.\w+)?)\s*([><=!]+|\bLIKE\b|\bIN\b)\s*(.*)",
+            cond_clean,
+            re.IGNORECASE,
         )
         if not match:
             continue
@@ -1655,16 +1983,32 @@ def _fetch_and_map_parameters(
         col_name = col_aliases.get(col_name, col_name)
 
         # Skip standard DWH system columns that aren't rule conditions
-        if col_name in ("CUS_STATUS", "DAY_DATE", "COUNTRY_CODE", "INST_CODE", "UPDATED_DATE", "CREATED_DATE", "STATUS_CODE", "TRA_DATE", "TRANS_DATE"):
+        if col_name in (
+            "CUS_STATUS",
+            "DAY_DATE",
+            "COUNTRY_CODE",
+            "INST_CODE",
+            "UPDATED_DATE",
+            "CREATED_DATE",
+            "STATUS_CODE",
+            "TRA_DATE",
+            "TRANS_DATE",
+        ):
             continue
 
-        # Column not in catalog — attempt auto-provisioning
-        if col_name not in column_map:
+        p_res = _get_parameter_for_column(col_name, is_aggregate=False)
+        if not p_res:
+            # Column not in catalog — attempt auto-provisioning
             logger.info(
-                "[DECOMPOSER] Column '%s' not in catalog — attempting auto-provisioning.", col_name
+                "[DECOMPOSER] Column '%s' not in catalog — attempting auto-provisioning.",
+                col_name,
             )
-            source_table = (sql_meta.primary_table or "PIO_TRANSACTIONS").split(".")[-1].upper()
-            provision_result = _provision_catalog_entry(col_name, source_table, catalog_creations)
+            source_table = (
+                (sql_meta.primary_table or "PIO_TRANSACTIONS").split(".")[-1].upper()
+            )
+            provision_result = _provision_catalog_entry(
+                col_name, source_table, catalog_creations
+            )
             if provision_result is None:
                 raise ValueError(
                     f"Column '{raw_col}' (table: {source_table}) could not be auto-provisioned. "
@@ -1672,25 +2016,41 @@ def _fetch_and_map_parameters(
                     f"Verify the column name is correct or register it manually in PIO_AML_COLUMNS."
                 )
             p_new, agg_new = provision_result
-            column_map[col_name] = (p_new, agg_new)
-            logger.info("[DECOMPOSER] Auto-provisioned '%s' → PARAMETER_CODE=%s", col_name, p_new)
+            # Add to maps
+            all_catalog_params.append(
+                {
+                    "parameter_code": p_new,
+                    "column_name": col_name,
+                    "aggregation_code": agg_new,
+                    "parameter_element": col_name,
+                    "table_code": "unknown",
+                }
+            )
+            if agg_new == "1":
+                detail_column_map[col_name] = (p_new, agg_new)
+            else:
+                aggregate_column_map[col_name] = (p_new, agg_new)
+            parameter_to_column[p_new] = col_name
+            p_res = (p_new, agg_new)
 
-        p_code, agg_code = column_map[col_name]
+        p_code, agg_code = p_res
 
         # Extract comparison values
         if op == "IN":
             # Extract comma-separated values inside parenthesis, stripping quotes
             val_match = re.search(r"\(([^)]+)\)", raw_val)
             if val_match:
-                codes = [c.strip().strip("'").strip('"') for c in val_match.group(1).split(",")]
+                codes = [
+                    c.strip().strip("'").strip('"')
+                    for c in val_match.group(1).split(",")
+                ]
                 oracle_in_val = ",".join(f"''{c}''" for c in codes)
-                oracle_in_val = f"'{oracle_in_val}'"
                 des = ",".join(codes)
                 details.append(_make_detail(p_code, "IN", oracle_in_val, des))
                 seq += 1
         else:
             # Single value comparison
-            val = raw_val.strip("'").strip('"')
+            val = raw_val.strip().rstrip(";").strip("'").strip('"')
             details.append(_make_detail(p_code, op, val, f"{col_name} {op} {val}"))
             seq += 1
 
@@ -1706,9 +2066,13 @@ def _fetch_and_map_parameters(
         # e.g., SUM(TRA_AMT) > AVG(TRA_AMT) + 0.1 * STDDEV(TRA_AMT)
         if "STDDEV" in having_clean.upper() or "STDDEV_SAMP" in having_clean.upper():
             # Parse multiplier of STDDEV, e.g. 0.1 * STDDEV or STDDEV * 0.1
-            mult_match = re.search(r"([\d\.]+)\s*\*\s*STDDEV", having_clean, re.IGNORECASE)
+            mult_match = re.search(
+                r"([\d\.]+)\s*\*\s*STDDEV", having_clean, re.IGNORECASE
+            )
             if not mult_match:
-                mult_match = re.search(r"STDDEV\s*\([^)]+\)\s*\*\s*([\d\.]+)", having_clean, re.IGNORECASE)
+                mult_match = re.search(
+                    r"STDDEV\s*\([^)]+\)\s*\*\s*([\d\.]+)", having_clean, re.IGNORECASE
+                )
 
             mult = float(mult_match.group(1)) if mult_match else 1.0
             from_perc = int(mult * 100)
@@ -1721,10 +2085,11 @@ def _fetch_and_map_parameters(
                     break
 
             des = f"Standard Deviation threshold multiplier: {from_perc}%"
-            # Parameter 6 is summation, map standard deviation constraint to summation code
+            p_res = _get_parameter_for_column("EQU_TRA_AMT", is_aggregate=True)
+            p_code = p_res[0] if p_res else "6"
             details.append(
                 _make_detail(
-                    param_code="6",
+                    param_code=p_code,
                     operator=op_raw,
                     value_from="0",  # Engine evaluates dynamically when USE_SD_FLAG=1
                     value_des=des,
@@ -1744,7 +2109,28 @@ def _fetch_and_map_parameters(
             op_raw = sum_match.group(1).strip()
             val = sum_match.group(2).replace(",", "").strip()
             des = f"Sum of transactions {op_raw} {val}"
-            details.append(_make_detail("6", op_raw, val, des, from_param_perc=100))
+            p_res = _get_parameter_for_column("EQU_TRA_AMT", is_aggregate=True)
+            p_code = p_res[0] if p_res else "6"
+            details.append(_make_detail(p_code, op_raw, val, des, from_param_perc=100))
+            seq += 1
+            continue
+
+        # COUNT(DISTINCT COLUMN) >= N  -> Parameter for distinct count
+        count_dist_match = re.search(
+            r"COUNT\s*\(\s*DISTINCT\s+(\w+(?:\.\w+)?)\s*\)\s*([><=!]+)\s*(\d+)",
+            having_clean,
+            re.IGNORECASE,
+        )
+        if count_dist_match:
+            raw_col = count_dist_match.group(1).strip()
+            op_raw = count_dist_match.group(2).strip()
+            val = count_dist_match.group(3).strip()
+            col_name = raw_col.split(".")[-1].upper()
+
+            p_res = _get_parameter_for_column(col_name, is_aggregate=True)
+            p_code = p_res[0] if p_res else "117"
+            des = f"Distinct {col_name} count {op_raw} {val}"
+            details.append(_make_detail(p_code, op_raw, val, des))
             seq += 1
             continue
 
@@ -1756,99 +2142,192 @@ def _fetch_and_map_parameters(
             op_raw = count_match.group(1).strip()
             val = count_match.group(2).strip()
             des = f"Number of transactions {op_raw} {val}"
-            details.append(_make_detail("2", op_raw, val, des))
+            p_code = "2"
+            for cp in all_catalog_params:
+                if cp["column_name"] == "EQU_TRA_AMT" and cp["aggregation_code"] == "6":
+                    p_code = cp["parameter_code"]
+                    break
+            details.append(_make_detail(p_code, op_raw, val, des))
             seq += 1
 
     # ------------------------------------------------------------------ #
-    # Step 3: Map non-aggregate intent thresholds (Deduplicated fallback)#
+    # Step 3: LLM-Based Intent Grounding (Zero Hardcoded Fallbacks)       #
     # ------------------------------------------------------------------ #
+    # Compile lists of mapped details
     mapped_param_codes = {d.parameter_code for d in details}
+    mapped_columns = {
+        parameter_to_column.get(p)
+        for p in mapped_param_codes
+        if p in parameter_to_column
+    }
 
-    for threshold in intent.thresholds:
-        field_lower = threshold.field.lower().replace(" ", "_")
-
-        # Skip fields already handled
-        if any(x in field_lower for x in ("transaction_type", "type", "txn_type", "expl_code")):
-            continue
-
-        # Check for Standard Deviation in intent field names
-        is_sd = any(x in field_lower for x in ("standard_deviation", "sd", "stddev", "انحراف"))
-
-        # Determine parameter code contextually from intent field names
-        param_code = None
-        from_perc = None
-        use_sd = "0"
-        sd_period = "0"
-
-        if "amount" in field_lower or "amt" in field_lower or "balance" in field_lower or is_sd:
-            if any(x in field_lower for x in ("sum", "total", "summation", "aggregate")) or is_sd:
-                param_code = "6"
-                if is_sd:
-                    # e.g., "10%" standard deviation -> from_perc = 10
-                    try:
-                        from_perc = int(threshold.value_from)
-                    except Exception:
-                        from_perc = 10
-                    use_sd = "1"
-                    sd_period = "1"
-                else:
-                    from_perc = 100
-            else:
-                param_code = "5"
-        elif any(x in field_lower for x in ("count", "num", "freq", "times")):
-            param_code = "2"
-        elif "class" in field_lower:
-            param_code = "7"
-        elif any(x in field_lower for x in ("type", "indv", "corp", "ind")):
-            param_code = "104"
-
-        # Avoid duplicating threshold if already parsed from SQL HAVING/WHERE clauses
-        if param_code and param_code not in mapped_param_codes:
-            value_from = (
-                str(int(threshold.value_from))
-                if not is_sd and threshold.value_from == int(threshold.value_from)
-                else ("0" if is_sd else str(threshold.value_from))
-            )
-            value_to = (
-                str(int(threshold.value_to))
-                if threshold.value_to is not None and threshold.value_to == int(threshold.value_to)
-                else (str(threshold.value_to) if threshold.value_to is not None else None)
-            )
-            des = f"{threshold.field} {threshold.operator} {threshold.value_from}"
-
-            details.append(
-                _make_detail(
-                    param_code,
-                    threshold.operator,
-                    value_from,
-                    des,
-                    value_to=value_to,
-                    from_param_perc=from_perc,
-                    use_sd_flag=use_sd,
-                    sd_period_type=sd_period,
-                )
-            )
-            seq += 1
-            mapped_param_codes.add(param_code)
-
-    # Step 4: Fix combined_rule on last row
-    if details:
-        last = details[-1]
-        details[-1] = last.model_copy(update={"combined_rule": "-"})
-
-    logger.info(
-        "[DECOMPOSER] Mapped %d rule detail rows dynamically. Codes: %s",
-        len(details),
-        [d.parameter_code for d in details],
+    # Find the table_code of the primary table to filter the catalog parameters list
+    primary_table_upper = (
+        (sql_meta.primary_table or "PIO_TRANSACTIONS").split(".")[-1].upper()
     )
-    return details
+    primary_table_code = None
+    try:
+        from web.services.oracle import run_readonly
+
+        _, table_rows = run_readonly(
+            "SELECT TABLE_CODE FROM PIO_AML_TABLES WHERE UPPER(TABLE_NAME) = UPPER(:tn)",
+            {"tn": primary_table_upper},
+        )
+        if table_rows:
+            primary_table_code = str(table_rows[0][0]).strip()
+    except Exception:
+        pass
+
+    # Build filtered catalog list and context string
+    catalog_list = []
+    for cp in all_catalog_params:
+        if primary_table_code and cp.get("table_code") != primary_table_code:
+            continue
+        catalog_list.append(cp)
+
+    catalog_params_str = ""
+    for cp in catalog_list:
+        catalog_params_str += (
+            f"- Parameter Code: {cp['parameter_code']}, "
+            f"Element: {cp['parameter_element']}, "
+            f"Column: {cp['column_name']}, "
+            f"Aggregation Code: {cp['aggregation_code']}\n"
+        )
+
+    already_mapped_str = ""
+    for d in details:
+        already_mapped_str += (
+            f"- Mapped Parameter: {d.parameter_code} ({d.comparison_value_from_des})\n"
+        )
+
+    intent_thresholds_str = ""
+    for t in intent.thresholds:
+        intent_thresholds_str += (
+            f"- Field: {t.field}, Operator: {t.operator}, Value: {t.value_from}\n"
+        )
+
+    if intent.thresholds and catalog_list:
+        try:
+            llm = _build_llm(fast=True)
+            prompt = (
+                "You are an expert database catalog grounding system for an AML compliance transaction monitoring database.\n\n"
+                "Your task is to map plain-English intent thresholds to parameter codes in the PIO_AML_PARAMETERS catalog.\n\n"
+                "DATABASE CATALOG PARAMETERS:\n"
+                f"{catalog_params_str}\n"
+                "ALREADY MAPPED PARAMETERS (from SQL WHERE/HAVING):\n"
+                f"{already_mapped_str if already_mapped_str else 'None'}\n"
+                "INTENT THRESHOLDS TO GROUND:\n"
+                f"{intent_thresholds_str}\n\n"
+                "INSTRUCTIONS:\n"
+                "1. For each intent threshold, determine if it is already covered by the SQL query's mapped parameters.\n"
+                "   If a threshold is already covered (e.g. the SQL query already filtered on transaction amount or type), set its parameter_code to null.\n"
+                "2. If it is NOT covered, look up the most appropriate parameter code in the DATABASE CATALOG PARAMETERS list.\n"
+                "   - Map Detail-level thresholds (e.g. per-transaction amount) to parameters with aggregation_code='1'.\n"
+                "   - Map Aggregated thresholds (e.g. summation, count, monthly frequency) to aggregate parameter codes (aggregation_code != '1').\n"
+                "3. Respond ONLY with a valid JSON object matching the following schema. Do not write any explanations, markdown code blocks, or extra text:\n"
+                "{\n"
+                '  "mappings": [\n'
+                "    {\n"
+                '      "field": "<field name>",\n'
+                '      "parameter_code": "<parameter code or null>",\n'
+                '      "reasoning": "<explanation>"\n'
+                "    }\n"
+                "  ]\n"
+                "}\n"
+            )
+
+            response = llm.invoke(prompt)
+            response_text = str(response.content).strip()
+
+            def _extract_json(text: str) -> Optional[dict]:
+                match = re.search(r"```(?:json)?\s*([\s\S]+?)```", text, re.IGNORECASE)
+                if match:
+                    try:
+                        return json.loads(match.group(1).strip())
+                    except Exception:
+                        pass
+                try:
+                    return json.loads(text.strip())
+                except Exception:
+                    pass
+                start = text.find("{")
+                end = text.rfind("}")
+                if start != -1 and end != -1:
+                    try:
+                        return json.loads(text[start : end + 1].strip())
+                    except Exception:
+                        pass
+                return None
+
+            json_data = _extract_json(response_text)
+            if json_data and "mappings" in json_data:
+                for item in json_data["mappings"]:
+                    p_code = str(item.get("parameter_code") or "").strip()
+                    field_name = str(item.get("field") or "").strip()
+
+                    if p_code and p_code.lower() != "null" and p_code != "none":
+                        underlying_col = parameter_to_column.get(p_code)
+                        if p_code in mapped_param_codes or (
+                            underlying_col and underlying_col in mapped_columns
+                        ):
+                            logger.info(
+                                "[DECOMPOSER] Skipping grounded threshold '%s' (Parameter %s) as it is already mapped.",
+                                field_name,
+                                p_code,
+                            )
+                            continue
+
+                        threshold = None
+                        for t in intent.thresholds:
+                            if t.field == field_name:
+                                threshold = t
+                                break
+
+                        if threshold:
+                            value_from = (
+                                str(int(threshold.value_from))
+                                if threshold.value_from == int(threshold.value_from)
+                                else str(threshold.value_from)
+                            )
+                            value_to = (
+                                str(int(threshold.value_to))
+                                if threshold.value_to is not None
+                                and threshold.value_to == int(threshold.value_to)
+                                else (
+                                    str(threshold.value_to)
+                                    if threshold.value_to is not None
+                                    else None
+                                )
+                            )
+                            des = f"{threshold.field} {threshold.operator} {threshold.value_from}"
+
+                            details.append(
+                                _make_detail(
+                                    p_code.strip(),
+                                    threshold.operator,
+                                    value_from,
+                                    des,
+                                    value_to=value_to,
+                                )
+                            )
+                            seq += 1
+                            mapped_param_codes.add(p_code)
+                            if underlying_col:
+                                mapped_columns.add(underlying_col)
+                            logger.info(
+                                "[DECOMPOSER] Grounded fallback threshold '%s' to PARAMETER_CODE=%s",
+                                field_name,
+                                p_code,
+                            )
+        except Exception as exc:
+            logger.error(
+                "[DECOMPOSER] LLM intent grounding failed: %s. Bypassing fallback.", exc
+            )
 
     # ------------------------------------------------------------------ #
-    # Step 4: Fix combined_rule on last row ('-' per reference template)   #
+    # Step 4: Determine dynamic AND / OR / - connectors                  #
     # ------------------------------------------------------------------ #
-    if details:
-        last = details[-1]
-        details[-1] = last.model_copy(update={"combined_rule": "-"})
+    _determine_combined_connectors(details, intent.detection_logic, sql_meta.raw_sql)
 
     logger.info(
         "[DECOMPOSER] Mapped %d rule detail rows. Codes used: %s",
@@ -1927,7 +2406,7 @@ def _assert_plan_drift(
     for cond in plan_conditions:
         op = str(cond.get("operator", "")).upper().strip()
         val = str(cond.get("value_from", "")).strip()
-        
+
         # Parse value_from as a float. If it's not a numeric threshold (e.g. 'cash deposit'),
         # bypass strict value drift comparison since DWH uses code lookups.
         try:
@@ -1949,14 +2428,15 @@ def _assert_plan_drift(
         except ValueError:
             logger.info(
                 "[DRIFT] Bypassing strict value check for non-numeric condition: %s",
-                cond.get("description")
+                cond.get("description"),
             )
 
     if drifted:
         drift_detail = "\n".join(drifted)
         logger.error(
             "[DRIFT] %d plan condition(s) unmatched in generated parameters:\n%s",
-            len(drifted), drift_detail,
+            len(drifted),
+            drift_detail,
         )
         raise PlanDriftError(
             f"Execution halted — {len(drifted)} approved plan condition(s) "
@@ -1968,13 +2448,17 @@ def _assert_plan_drift(
 
     # Warn about extra rule_details with no plan counterpart
     plan_sigs = {
-        (str(c.get("operator", "")).upper().strip(), str(c.get("value_from", "")).strip())
+        (
+            str(c.get("operator", "")).upper().strip(),
+            str(c.get("value_from", "")).strip(),
+        )
         for c in plan_conditions
     }
     extras = [
-        d for d in rule_details
+        d
+        for d in rule_details
         if (d.rule_operator.upper().strip(), str(d.comparison_value_from or "").strip())
-           not in plan_sigs
+        not in plan_sigs
     ]
     if extras:
         logger.warning(
@@ -2013,20 +2497,36 @@ def _verify_write_integrity(
             return -1
 
     sce_rows = _count(
-        "SELECT COUNT(*) FROM PIO_AML_SCENARIO WHERE SCENARIO_CODE = :sc",
-        {"sc": scenario_code},
+        "SELECT COUNT(*) FROM PIO_AML_SCENARIO WHERE SCENARIO_CODE = :sc AND COUNTRY_CODE = :cc AND INST_CODE = :ic",
+        {
+            "sc": scenario_code,
+            "cc": settings.AML_COUNTRY_CODE,
+            "ic": settings.AML_INST_CODE,
+        },
     )
     rule_rows = _count(
-        "SELECT COUNT(*) FROM PIO_AML_RULES WHERE RULE_CODE = :rc",
-        {"rc": rule_code},
+        "SELECT COUNT(*) FROM PIO_AML_RULES WHERE RULE_CODE = :rc AND COUNTRY_CODE = :cc AND INST_CODE = :ic",
+        {
+            "rc": rule_code,
+            "cc": settings.AML_COUNTRY_CODE,
+            "ic": settings.AML_INST_CODE,
+        },
     )
     sr_rows = _count(
-        "SELECT COUNT(*) FROM PIO_AML_SCENARIO_RULES WHERE AML_SCENARIO = :sc",
-        {"sc": scenario_code},
+        "SELECT COUNT(*) FROM PIO_AML_SCENARIO_RULES WHERE AML_SCENARIO = :sc AND COUNTRY_CODE = :cc AND INST_CODE = :ic",
+        {
+            "sc": scenario_code,
+            "cc": settings.AML_COUNTRY_CODE,
+            "ic": settings.AML_INST_CODE,
+        },
     )
     det_rows = _count(
-        "SELECT COUNT(*) FROM PIO_AML_RULES_DETAILS WHERE RULE_CODE = :rc",
-        {"rc": rule_code},
+        "SELECT COUNT(*) FROM PIO_AML_RULES_DETAILS WHERE RULE_CODE = :rc AND COUNTRY_CODE = :cc AND INST_CODE = :ic",
+        {
+            "rc": rule_code,
+            "cc": settings.AML_COUNTRY_CODE,
+            "ic": settings.AML_INST_CODE,
+        },
     )
 
     if sce_rows != 1:
@@ -2061,8 +2561,13 @@ def _extract_table_from_oracle_error(error_str: str) -> str:
         str: Matching table name, or 'unknown table'.
     """
     for table in (
-        "PIO_AML_SCENARIO", "PIO_AML_RULES", "PIO_AML_SCENARIO_RULES",
-        "PIO_AML_RULES_DETAILS", "PIO_AML_PARAMETERS", "PIO_AML_COLUMNS", "PIO_AML_TABLES",
+        "PIO_AML_SCENARIO",
+        "PIO_AML_RULES",
+        "PIO_AML_SCENARIO_RULES",
+        "PIO_AML_RULES_DETAILS",
+        "PIO_AML_PARAMETERS",
+        "PIO_AML_COLUMNS",
+        "PIO_AML_TABLES",
     ):
         if table in error_str.upper():
             return table
@@ -2103,7 +2608,9 @@ def qb_writer_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str,
             len(plan_conditions),
         )
     except PlanDriftError as drift_exc:
-        logger.error("[QB_WRITER] Drift assertion FAILED — aborting write. %s", drift_exc)
+        logger.error(
+            "[QB_WRITER] Drift assertion FAILED — aborting write. %s", drift_exc
+        )
         return {
             "scenario_write_success": False,
             "next_action": "FAILURE",
@@ -2116,6 +2623,19 @@ def qb_writer_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str,
         # ── Single atomic transaction: delete + 4 INSERTs ────────────────────
         with atomic_connection() as conn:
             cursor = conn.cursor()
+
+            # Deactivate all other scenarios to prevent them from crashing the validation stored procedure
+            cursor.execute(
+                """UPDATE PIO_AML_SCENARIO 
+                   SET ACTIVE_FLAG = '0' 
+                   WHERE COUNTRY_CODE = :cc AND INST_CODE = :ic 
+                     AND SCENARIO_CODE <> :sc""",
+                {
+                    "cc": int(settings.AML_COUNTRY_CODE),
+                    "ic": int(settings.AML_INST_CODE),
+                    "sc": params.scenario.scenario_code,
+                },
+            )
 
             # Cleanup any previous attempt for this scenario_code
             _delete_scenario_atomic(cursor, params.scenario.scenario_code)
@@ -2169,9 +2689,8 @@ def qb_writer_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str,
             "scenario_write_success": False,
             "write_verification": verification.model_dump(mode="json"),
             "next_action": "FAILURE",
-            "error_log": state.get("error_log", []) + [
-                f"Write integrity check failed after commit: {disc_text}"
-            ],
+            "error_log": state.get("error_log", [])
+            + [f"Write integrity check failed after commit: {disc_text}"],
         }
 
     logger.info("[QB_WRITER] Write integrity verified — all row counts match.")
@@ -2193,31 +2712,51 @@ def _delete_scenario_atomic(cursor: Any, scenario_code: str) -> None:
         cursor: An open Oracle cursor from atomic_connection.
         scenario_code (str): The unique scenario identifier to clean up.
     """
-    logger.info("[QB_WRITER] Cleaning existing rows for scenario_code=%s", scenario_code)
+    logger.info(
+        "[QB_WRITER] Cleaning existing rows for scenario_code=%s", scenario_code
+    )
 
     cursor.execute(
         """DELETE FROM PIO_AML_RULES_DETAILS
-           WHERE RULE_CODE IN (
+           WHERE COUNTRY_CODE = :cc AND INST_CODE = :ic
+           AND RULE_CODE IN (
                SELECT AML_RULE_CODE FROM PIO_AML_SCENARIO_RULES
-               WHERE AML_SCENARIO = :sc
+               WHERE AML_SCENARIO = :sc AND COUNTRY_CODE = :cc AND INST_CODE = :ic
            )""",
-        {"sc": scenario_code},
+        {
+            "sc": scenario_code,
+            "cc": settings.AML_COUNTRY_CODE,
+            "ic": settings.AML_INST_CODE,
+        },
     )
     cursor.execute(
         """DELETE FROM PIO_AML_RULES
-           WHERE RULE_CODE IN (
+           WHERE COUNTRY_CODE = :cc AND INST_CODE = :ic
+           AND RULE_CODE IN (
                SELECT AML_RULE_CODE FROM PIO_AML_SCENARIO_RULES
-               WHERE AML_SCENARIO = :sc
+               WHERE AML_SCENARIO = :sc AND COUNTRY_CODE = :cc AND INST_CODE = :ic
            )""",
-        {"sc": scenario_code},
+        {
+            "sc": scenario_code,
+            "cc": settings.AML_COUNTRY_CODE,
+            "ic": settings.AML_INST_CODE,
+        },
     )
     cursor.execute(
-        "DELETE FROM PIO_AML_SCENARIO_RULES WHERE AML_SCENARIO = :sc",
-        {"sc": scenario_code},
+        "DELETE FROM PIO_AML_SCENARIO_RULES WHERE AML_SCENARIO = :sc AND COUNTRY_CODE = :cc AND INST_CODE = :ic",
+        {
+            "sc": scenario_code,
+            "cc": settings.AML_COUNTRY_CODE,
+            "ic": settings.AML_INST_CODE,
+        },
     )
     cursor.execute(
-        "DELETE FROM PIO_AML_SCENARIO WHERE SCENARIO_CODE = :sc",
-        {"sc": scenario_code},
+        "DELETE FROM PIO_AML_SCENARIO WHERE SCENARIO_CODE = :sc AND COUNTRY_CODE = :cc AND INST_CODE = :ic",
+        {
+            "sc": scenario_code,
+            "cc": settings.AML_COUNTRY_CODE,
+            "ic": settings.AML_INST_CODE,
+        },
     )
 
 
@@ -2252,7 +2791,8 @@ def _insert_scenario_cursor(cursor: Any, scenario: QBScenario) -> None:
             "inst_code": int(scenario.inst_code),
             "scenario_code": scenario.scenario_code,
             "scenario_des_eng": scenario.scenario_des_eng,
-            "scenario_des_nat_lan": scenario.scenario_des_nat_lan or scenario.scenario_des_eng,
+            "scenario_des_nat_lan": scenario.scenario_des_nat_lan
+            or scenario.scenario_des_eng,
             "active_flag": scenario.active_flag,
             "exclude_expl_flag": scenario.exclude_expl_flag,
             "use_watchlist_flag": scenario.use_watchlist_flag,
@@ -2350,6 +2890,55 @@ def _insert_scenario_rule_cursor(cursor: Any, sr: QBScenarioRule) -> None:
     logger.debug("[QB_WRITER] PIO_AML_SCENARIO_RULES staged.")
 
 
+def _determine_combined_connectors(
+    details: List[QBRuleDetail], detection_logic: str, raw_sql: str
+) -> None:
+    """Determine dynamic AND / OR / - connectors for QBRuleDetail rows based on logic and SQL syntax."""
+    if not details:
+        return
+
+    raw_upper = (raw_sql or "").upper()
+    logic_upper = (detection_logic or "").upper()
+
+    for idx, d in enumerate(details):
+        d.rule_seq = str(idx + 1)
+        if idx == len(details) - 1:
+            d.combined_rule = "-"
+            continue
+
+        connector = "AND"
+        curr_val = str(d.comparison_value_from or "").strip()
+        next_d = details[idx + 1]
+        next_val = str(next_d.comparison_value_from or "").strip()
+
+        # Check 1: Value comparison in logic or SQL (e.g. 50000 OR 2)
+        if curr_val and next_val:
+            pattern = (
+                re.escape(curr_val) + r"[\s\S]*?\bOR\b[\s\S]*?" + re.escape(next_val)
+            )
+            if re.search(pattern, logic_upper, re.IGNORECASE) or re.search(
+                pattern, raw_upper, re.IGNORECASE
+            ):
+                connector = "OR"
+
+        # Check 2: Direct OR clause detection between descriptions in raw SQL or detection logic
+        if connector == "AND":
+            curr_des = str(d.comparison_value_from_des or "").upper()
+            next_des = str(next_d.comparison_value_from_des or "").upper()
+            if curr_des and next_des:
+                des_pattern = (
+                    re.escape(curr_des)
+                    + r"[\s\S]*?\bOR\b[\s\S]*?"
+                    + re.escape(next_des)
+                )
+                if re.search(des_pattern, logic_upper, re.IGNORECASE) or re.search(
+                    des_pattern, raw_upper, re.IGNORECASE
+                ):
+                    connector = "OR"
+
+        d.combined_rule = connector
+
+
 def _insert_rule_details_cursor(cursor: Any, details: List[QBRuleDetail]) -> None:
     """Batch INSERT rows into PIO_AML_RULES_DETAILS using a shared cursor.
 
@@ -2445,14 +3034,16 @@ def _check_threshold_sensitivity(rule_code: str) -> Dict[str, Any]:
                 else:
                     looser = round(current * 1.2, 2)
                     tighter = round(current * 0.8, 2)
-                adjustments.append({
-                    "parameter_code": row_d["parameter_code"],
-                    "operator": op,
-                    "current_value": current,
-                    "looser_20pct": looser,
-                    "tighter_20pct": tighter,
-                    "suggestion": f"Change threshold from {current} to {looser} to capture more events",
-                })
+                adjustments.append(
+                    {
+                        "parameter_code": row_d["parameter_code"],
+                        "operator": op,
+                        "current_value": current,
+                        "looser_20pct": looser,
+                        "tighter_20pct": tighter,
+                        "suggestion": f"Change threshold from {current} to {looser} to capture more events",
+                    }
+                )
             except (ValueError, TypeError):
                 pass
 
@@ -2467,7 +3058,11 @@ def _check_threshold_sensitivity(rule_code: str) -> Dict[str, Any]:
         }
     except Exception as exc:
         logger.warning("[VALIDATOR] Sensitivity check failed: %s", exc)
-        return {"tested": False, "adjustments": [], "diagnosis": f"Sensitivity check unavailable: {exc}"}
+        return {
+            "tested": False,
+            "adjustments": [],
+            "diagnosis": f"Sensitivity check unavailable: {exc}",
+        }
 
 
 def validator_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str, Any]:
@@ -2616,7 +3211,9 @@ def validator_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str,
             suggested_fix = "Tighten the threshold values or add exclusion criteria."
 
         # Step 6: Pull write_verification from state and check all_pass
-        write_verification_dict: Optional[Dict[str, Any]] = state.get("write_verification")
+        write_verification_dict: Optional[Dict[str, Any]] = state.get(
+            "write_verification"
+        )
         write_ok = (
             write_verification_dict.get("all_pass", False)
             if write_verification_dict
@@ -2637,14 +3234,19 @@ def validator_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str,
             )
             for row in sample_rows:
                 row_dict = dict(zip(sample_cols, row))
-                customer_id = str(row_dict.get("cus_num", row_dict.get("customer_id", "—")))
-                sample_alerts.append(AlertSample(customer_id=customer_id, raw_data=row_dict))
+                customer_id = str(
+                    row_dict.get("cus_num", row_dict.get("customer_id", "—"))
+                )
+                sample_alerts.append(
+                    AlertSample(customer_id=customer_id, raw_data=row_dict)
+                )
 
         # Step 9: Success gate — both tables ≥1 AND write integrity passes
         success = alert_count >= 1 and det_count >= 1 and write_ok and diagnosis is None
 
         # Step 10: Assemble WriteVerification for the result if available
         from web.services.schemas import WriteVerification
+
         write_integrity_obj: Optional[WriteVerification] = None
         if write_verification_dict:
             try:
@@ -2658,6 +3260,7 @@ def validator_node(state: AMLScenarioState, config: RunnableConfig) -> Dict[str,
             success=success,
             scenario_status="ACTIVE" if success else "REVIEW_NEEDED",
             scenario_code=scenario_code,
+            raw_sql=state.get("raw_sql"),
             scenario_name=intent.scenario_name,
             alert_count=alert_count,
             sample_alerts=sample_alerts,
@@ -2762,7 +3365,7 @@ def route_after_intent(state: AMLScenarioState) -> str:
 def route_after_planner(state: AMLScenarioState) -> str:
     """Route after the Planner node.
 
-    On success: returns END to pause and wait for user approval.
+    On success: returns END to pause execution and wait for user approval.
     On error: routes to orchestrator for failure handling.
 
     Args:
@@ -2774,7 +3377,7 @@ def route_after_planner(state: AMLScenarioState) -> str:
     action = state.get("next_action", "WAIT_APPROVAL")
     if action == "ERROR":
         return "orchestrator"
-    return "orchestrator"  # Route back to orchestrator to explain the generated plan
+    return END  # Pause execution and wait for user approval
 
 
 def route_after_sql_bridge(state: AMLScenarioState) -> str:

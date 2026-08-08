@@ -20,6 +20,10 @@ trigger: always_on
 - **Complexity:** Avoid nested loops; prefer vectorization or efficient data structures (sets/dicts) for lookups.
 - **State:** Prefer stateless functions to simplify horizontal scaling.
 
+##4. Architctural blueprint
+- **Fixing Issues:** Never fix a problem with a walkaround or hard coding logic.
+- **root cause analysis:** When debuging a problem make sure to address the root cause and the fix is applied their.
+
 ## 4. Testing
 - Write code that is "Testable by Design." 
 - If a function is too complex to unit test, it must be broken down.

@@ -23,19 +23,16 @@ PIO_LTG_TRASACTION_TYPE
 LTG_ACCOUNT
 
 2) we have this procdure we need to run it then it will populate and run all the dfined scenarios in the above tables. "FILL_PIO_AML_CUSTOMERS"
-then the alerts will be populated in PIO_AML_CUSTOMERS table we can filter ours scenario_code for the scenario we created and count its alerts. using a column called AML_SCENARIO_CODE in PIO_AML_CUSTOMERS table.
-
+   then the alerts will be populated in PIO_AML_CUSTOMERS table we can filter ours scenario_code for the scenario we created and count its alerts. using a column called AML_SCENARIO_CODE in PIO_AML_CUSTOMERS table.
 3) already answeereeed in point 1.
-
 4) 
+
 PIO_AML_CUSTOMERS
 
-5) DWH general 
-http://localhost:8001/chat/stream
-
+5) DWH general
+   http://localhost:8001/chat/stream
 6) notes:
-we are going to have a configred .env file for every thing along side the defulats values e.g. country_code = 400, inst_code = 1 etc..
-
+   we are going to have a configred .env file for every thing along side the defulats values e.g. country_code = 400, inst_code = 1 etc..
 
 ## Main tables columns needed to be filled
 
@@ -50,3 +47,12 @@ PIO_AML_RULES
 
 PIO_AML_RULES_DETAILS
 (COUNTRY_CODE, INST_CODE, PARAMETER_CODE, RULE_CODE, RULE_SEQ,RULE_OPERATOR, COMPARISON_VALUE_FROM, COMBINED_RULE, COMPARISON_VALUE_TO, COMPARISON_VALUE_FROM_DES, SCENARIO_CODE). This table still have more columns you can query it dirctly from the db to understand it more thats what i know for now.
+
+
+
+=======================================================================
+
+7/28/2026
+
+
+The provided on site scenarios need their lookup tables values e.g. PIO_AML_PARAMETERS, without these deafult values we wont be able to map the columns/tables used etc.

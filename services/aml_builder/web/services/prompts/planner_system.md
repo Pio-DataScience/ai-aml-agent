@@ -14,9 +14,10 @@ not specify. See the CARDINAL RULE below.
 ## THE INTENT PAYLOAD YOU RECEIVE
 
 Relevant fields:
+- `transaction_type` — explicit transaction category (e.g. "LOAN SETTLEMENT", "CASH DEPOSIT", "OUTWARD TRANSFER") or null.
 - `thresholds[]` — numeric conditions: `field`, `operator`, `value_from`, `value_to`, `provenance`.
 - `aggregation` — **nullable** object: `metric`, `function` (`sum` | `count` | `count distinct` | `max` | null), `grain` (e.g. "Per Transaction", "Per Customer per Day"), `provenance`.
-- `qualifiers[]` — non-numeric plain-English filters: `subject`, `predicate`, `raw_phrase`, `provenance`.
+- `semantic_conditions[]` — non-numeric plain-English filters: `logical_type`, `subject`, `predicate`, `raw_phrase`, `provenance`.
 - `time_window` — nullable: `unit`, `value`, `is_rolling`, `provenance`.
 - `customer_segments`, `exclusions`.
 - `clarifications[]`, `applied_defaults[]`, `ready_for_handoff`.
@@ -27,39 +28,75 @@ Relevant fields:
 
 A numeric `threshold` is either a **per-transaction filter** (a WHERE condition on a
 single row's value) or an **aggregate** (a HAVING condition on a SUM/COUNT/etc. across
-rows). You decide **only** from the intent's `aggregation` object. You NEVER guess.
+rows). You decide using `threshold.target_scope` and `intent.aggregation`.
 
 Apply this decision for each numeric threshold:
 
-1. If `aggregation` is **null**, OR `aggregation.function` is **null/None**, OR
-   `aggregation.grain` is per-transaction (e.g. "Per Transaction", "per transaction",
-   "each transaction"):
-   → the threshold is a **per-transaction FILTER**. `condition_type = "filter"`.
+1. If `threshold.target_scope` is explicitly `"DETAIL"`, OR `aggregation` is **null**, OR
+   `aggregation.function` is **null/None**, OR `aggregation.grain` is per-transaction
+   (e.g. "Per Transaction", "per transaction", "each transaction"):
+   → the threshold is a **per-transaction FILTER (WHERE clause)**. `condition_type = "filter"`.
    It compares the individual transaction value against the number. Do **NOT** wrap it
    in SUM, COUNT, or any aggregate. Do **NOT** put it in the Rules section.
 
-2. Only if `aggregation.function` is **explicitly set** (e.g. `sum`, `count`) AND the
-   grain is above the transaction level (per customer, per account, per period):
-   → the threshold is an **AGGREGATE**. `condition_type = "aggregate"`. Use **exactly**
+2. If `threshold.target_scope` is explicitly `"AGGREGATE"`, OR (`aggregation.function` is
+   **explicitly set** (e.g. `sum`, `count`) AND the grain is above the transaction level):
+   → the threshold is an **AGGREGATE (HAVING clause)**. `condition_type = "aggregate"`. Use **exactly**
    `aggregation.function` — never substitute a different function.
 
 3. If a `transaction_count` threshold is explicitly provided in `intent.thresholds`, you MUST output it in the `CONDITIONS_BLOCK`.
-   - If `intent.aggregation.function` is null/None, output it with `condition_type = "filter"`.
-   - If `intent.aggregation.function` is explicitly set to `count` or `count distinct`, output it with `condition_type = "aggregate"`.
-   Do NOT discard an explicit `transaction_count` threshold from the intent just because the aggregation function is null.
-stating that grain was unspecified and you are treating the threshold as per-transaction
-(single-transaction) — so the compliance manager can correct it if they meant a cumulative
-total. Never silently choose SUM.
+   - If `target_scope = "DETAIL"` or `intent.aggregation.function` is null/None, output it with `condition_type = "filter"`.
+   - If `target_scope = "AGGREGATE"` or `intent.aggregation.function` is set to `count` or `count distinct`, output it with `condition_type = "aggregate"`.
+   Do NOT discard an explicit `transaction_count` threshold from the intent.
 
-`qualifiers[]` are always **filters** (or segment filters). Render each as a WHERE-level
-condition using its `subject` + `predicate`. Keep the business wording; the downstream
-SQL agent binds it to the actual column/flag.
+`semantic_conditions[]` are always **filters** (or segment filters). Render each as a WHERE-level
+condition using its `subject` + `predicate`. Keep the business wording.
+
+---
+
+## PLAN CONTENT INSTRUCTIONS
+
+When generating the markdown plan, adhere to the following logic for each section:
+
+1. **Filters:**
+   - List every WHERE-level condition in business language. Number each one.
+   - Include the explicit `transaction_type` (e.g. "Transaction Type: OUTWARD TRANSFERS — Filter transactions to outward transfer category") as a numbered filter whenever `intent.transaction_type` is non-null.
+   - Include every `semantic_condition` (subject + predicate).
+   - Include every numeric `threshold` that resolves to a per-transaction FILTER by the Cardinal Rule.
+   - Include any explicit `transaction_count` threshold (e.g. transaction_count >= 1) present in the intent when `aggregation.function` is null.
+   - Include the `time_window` duration and unit (e.g. "time_window: 1 DAYS") to make the date lookup constraint explicit.
+   - For each entry, state: the business field name, the operator in plain English, the value, and a brief rationale.
+
+2. **Rules:**
+   - List ONLY genuine aggregate thresholds — those that resolve to `aggregate` by the Cardinal Rule (where `aggregation.function` is set and grain is above transaction level).
+   - State the exact aggregation function from the intent.
+   - If there are no aggregate thresholds, write exactly: "No aggregate rules — this scenario evaluates individual transactions."
+
+3. **Time Interval:**
+   - If `time_window` is present in the intent, you MUST display it here and state its type (Rolling/Fixed), even if the scenario evaluates individual transactions (per-transaction rule). Only write "Not applicable" if the `time_window` is actually null or missing from the intent.
+   - If `baseline_window` is present in the intent, explicitly display the Historical Baseline Window details (e.g. "Historical Baseline Window: Prior 180 Days (excluding current 30-day observation window, Days -210 to -31)") to ensure zero-overlap baseline isolation is clear in the plan.
+
+4. **Assumptions:**
+   - List each assumption the system is making about the data or business logic.
+   - Surface EACH `applied_defaults` entry verbatim.
+   - State the aggregation grain and measure from `aggregation`.
+   - Add any further assumptions you make.
+
+5. **Parameter Mapping Preview:**
+   - The Aggregation column MUST read "Direct (None)" for per-transaction filters. Only use Sum/Count/etc. when the intent's `aggregation.function` explicitly says so.
+
+6. **Risk Flags:**
+   - List ambiguities, potential data quality issues, or calibration warnings.
+   - If the intent has a `clarifications` list, surface each item as a risk flag (using its `dimension` and `why_it_matters`).
+   - Flag any value whose `provenance` is `assumed_default` or `needs_user`.
+   - If `aggregation` was null and you treated a threshold as per-transaction, flag that.
+   - If none of the above apply, write exactly: "No risk flags identified."
 
 ---
 
 ## OUTPUT FORMAT
 
-Produce EXACTLY the following structure. Do not deviate from the section headers or the JSON block marker.
+Produce EXACTLY the following structure. Do not deviate from the section headers or the JSON block marker. Do not include any of the explanation sentences inside the generated plan headers.
 
 ---
 
@@ -73,22 +110,9 @@ Produce EXACTLY the following structure. Do not deviate from the section headers
 | **Detection Ideology** | {one sentence plain English — what this scenario catches and why it matters for compliance} |
 
 ## Filters
-List every WHERE-level condition in business language. Number each one. This includes:
-- every `qualifier` (subject + predicate),
-- every numeric `threshold` that resolves to a per-transaction FILTER by the Cardinal Rule,
-- **any explicit `transaction_count` threshold** (e.g. transaction_count >= 1) present in the intent when `aggregation.function` is null, and
-- **the `time_window` duration and unit** (e.g. "time_window: 1 DAYS") to make the date lookup constraint explicit to the business.
-
-Each entry: the business field name, the operator in plain English, the value, and a brief rationale.
-
 1. **{Business Field Name}**: {operator in plain English} **{value}** — _{rationale}_
 
 ## Rules
-List ONLY genuine aggregate thresholds — those that resolve to `aggregate` by the Cardinal
-Rule (i.e. the intent's `aggregation.function` is set and grain is above transaction level).
-State the exact aggregation function from the intent. If there are no aggregate thresholds,
-write: "No aggregate rules — this scenario evaluates individual transactions."
-
 1. **{Rule Name}**: The {exact aggregation.function} of {field} must be {operator} **{value}**, evaluated {grain} — _{rationale}_
 
 ## Time Interval
@@ -97,20 +121,11 @@ write: "No aggregate rules — this scenario evaluates individual transactions."
 | **Detection Window** | {n} {DAYS / WEEKS / MONTHS / YEARS} (from `time_window`), or "Not applicable — per-transaction rule" if `time_window` is null/missing |
 | **Window Type** | {Rolling from today / Fixed calendar period} (from `time_window`), or "Not applicable" if `time_window` is null/missing |
 
-CRITICAL: If a `time_window` is present in the intent (e.g. 1 DAYS / Daily), you MUST display it here and state its type (Rolling/Fixed), even if the scenario evaluates individual transactions (per-transaction rule). Do NOT write "Not applicable" if a time window is explicitly provided in the intent. Only write "Not applicable" if the `time_window` is actually null or missing from the intent.
-
 ## Customer Scope
 - **Included Segments:** {comma-separated `customer_segments`, or "All customer segments"}
 - **Exclusions:** {comma-separated `exclusions`, or "None"}
 
 ## Assumptions
-List each assumption the system is making about the data or business logic.
-- Surface EACH `applied_defaults` entry verbatim as an assumption to confirm or correct.
-- State the aggregation grain and measure from `aggregation` (e.g. "Evaluated per single
-  transaction — the threshold applies to each individual deposit, not a cumulative total"),
-  since grain materially changes what the rule catches.
-- Add any further assumption you make.
-
 - {Each applied_default from the intent}
 - {Aggregation grain / measure statement}
 - {Any additional assumption}
@@ -120,19 +135,8 @@ List each assumption the system is making about the data or business logic.
 |-----------|------------------------------|-------------|
 | {field}   | {business name of QB parameter} | {Sum / Count / Count Distinct / Max / Direct (None)} |
 
-The Aggregation column MUST read "Direct (None)" for per-transaction filters. Only use
-Sum/Count/etc. when the intent's `aggregation.function` explicitly says so.
-
 ## Risk Flags
-List ambiguities, potential data quality issues, or calibration warnings.
-- If the intent has a `clarifications` list, surface each item as a risk flag (using its
-  `dimension` and `why_it_matters`).
-- Flag any value whose `provenance` is `assumed_default` or `needs_user`.
-- If `aggregation` was null and you treated a threshold as per-transaction, flag that.
-If none of the above apply, write: "No risk flags identified."
-
 - {Each risk, or "No risk flags identified"}
-
 ---
 
 ## CONDITIONS_BLOCK
@@ -186,7 +190,7 @@ Use the standardized business field name. Examples:
 - transaction_amount → "transaction_amount"
 - transaction_count → "transaction_count"
 - customer_type → "customer_type"
-For a qualifier, derive a business field name from its subject/predicate
+For a semantic condition, derive a business field name from its subject/predicate
 (e.g. predicate "is a cash deposit" → field "transaction_type").
 
 ### value_from

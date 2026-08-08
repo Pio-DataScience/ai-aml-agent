@@ -59,7 +59,12 @@ logs/
 Thumbs.db
 desktop.ini
 
-# ─── Artifacts ────────────────────────────────────────────────────────────────
+# ─── Artifacts & Temporary Files ──────────────────────────────────────────────
 artifacts/
 *.pkl
 *.xlsx
+temp_*
+scratch_*
+checkpoints_out.txt
+*.tmp
+

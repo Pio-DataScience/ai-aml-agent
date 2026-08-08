@@ -98,6 +98,90 @@ def get_connection() -> Generator[oracledb.Connection, None, None]:
         _pool.release(conn)
 
 
+@contextmanager
+def atomic_connection() -> Generator[oracledb.Connection, None, None]:
+    """Yield a single Oracle connection for a multi-statement atomic transaction.
+
+    All statements executed on the yielded connection share one transaction
+    boundary: a clean exit commits everything; any exception triggers a full
+    rollback before re-raising. Use this for all QB writer operations so that
+    a failure mid-sequence never leaves partial data in Oracle.
+
+    Usage:
+        with atomic_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(insert_sql_1, params_1)
+            cursor.execute(insert_sql_2, params_2)
+        # single commit happens automatically on clean exit
+
+    Yields:
+        oracledb.Connection: A live connection from the pool.
+
+    Raises:
+        RuntimeError: If the pool has not been initialized.
+        oracledb.Error: On Oracle execution error (triggers automatic rollback).
+    """
+    if _pool is None:
+        raise RuntimeError(
+            "Oracle pool is not initialized. Call init_pool() at startup."
+        )
+    conn = _pool.acquire()
+    try:
+        yield conn
+        conn.commit()
+        logger.debug("[ORACLE] Atomic transaction committed.")
+    except Exception:
+        conn.rollback()
+        logger.error("[ORACLE] Atomic transaction rolled back due to exception.")
+        raise
+    finally:
+        _pool.release(conn)
+
+
+def get_next_numeric_code(table: str, code_column: str, where_clause: str = "") -> str:
+    """Generate the next sequential numeric code for a catalog table.
+
+    Queries MAX of the code column (filtering to purely numeric values via
+    REGEXP_LIKE) and returns max+1 as a string. Falls back to '1000' if no
+    numeric rows exist.
+
+    Args:
+        table (str): Oracle table name (e.g., 'PIO_AML_PARAMETERS').
+        code_column (str): Column name holding the current codes.
+        where_clause (str): Optional additional filter (without the WHERE keyword).
+
+    Returns:
+        str: The next available numeric code as a string.
+
+    Raises:
+        oracledb.Error: On Oracle execution error.
+    """
+    where_parts = [f"REGEXP_LIKE({code_column}, '^[0-9]+$')"]
+    if where_clause:
+        where_parts.append(where_clause)
+    full_where = " AND ".join(where_parts)
+    sql = (
+        f"SELECT MAX(TO_NUMBER({code_column})) "
+        f"FROM {table} "
+        f"WHERE {full_where}"
+    )
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(sql, {})
+            row = cursor.fetchone()
+            current_max = row[0] if row and row[0] is not None else 999
+            return str(int(current_max) + 1)
+    except Exception as exc:
+        logger.warning(
+            "[ORACLE] Could not determine max code for %s.%s: %s — using fallback 1000.",
+            table,
+            code_column,
+            exc,
+        )
+        return "1000"
+
+
 def run_readonly(sql: str, params: Optional[dict] = None) -> Tuple[List[str], List[tuple]]:
     """Execute a read-only SELECT query and return column names + rows.
 

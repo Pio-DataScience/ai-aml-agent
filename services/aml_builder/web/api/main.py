@@ -17,7 +17,7 @@ from datetime import datetime
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, List, Optional
 
-from fastapi import FastAPI, HTTPException, Request, Body
+from fastapi import FastAPI, HTTPException, Request, Body, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import HumanMessage
@@ -40,6 +40,31 @@ from web.services.schemas import (
 from web.services.settings import settings
 
 logger = logging.getLogger(__name__)
+
+# Global registry to track active scenario background tasks
+RUNNING_TASKS = {}
+
+
+async def run_scenario_graph_task(thread_id: str, initial_state: dict, config: dict):
+    """Asynchronously execute the LangGraph scenario run in the background."""
+    try:
+        RUNNING_TASKS[thread_id] = {
+            "status": "RUNNING",
+            "active_node": "orchestrator",
+            "error": None
+        }
+        graph = await get_graph()
+        async for event in graph.astream(initial_state, config=config):
+            for node_name, _ in event.items():
+                RUNNING_TASKS[thread_id]["active_node"] = node_name
+
+        RUNNING_TASKS[thread_id]["status"] = "COMPLETED"
+        logger.info("[BACKGROUND TASK] Thread %s completed successfully.", thread_id)
+    except Exception as exc:
+        logger.error("[BACKGROUND TASK] Thread %s failed: %s", thread_id, exc, exc_info=True)
+        RUNNING_TASKS[thread_id]["status"] = "FAILED"
+        RUNNING_TASKS[thread_id]["error"] = str(exc)
+
 
 
 def init_session_db():
@@ -390,6 +415,139 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
     )
 
 
+@app.post("/chat/{project_id}/{chat_id}/{user_id}", status_code=202, tags=["Chat"])
+async def create_scenario_run(
+    project_id: str,
+    chat_id: str,
+    user_id: str,
+    request: ChatRequest,
+    background_tasks: BackgroundTasks
+):
+    """Start an asynchronous long-running AML scenario run in the background.
+
+    Returns 202 Accepted immediately with status RUNNING.
+    """
+    normalized_project = project_id if project_id not in ("0", "None") else "no_project"
+    thread_id = f"{normalized_project}_{chat_id}_{user_id}"
+
+    # Upsert sidebar chat session metadata
+    first_msg = request.messages[0].content if request.messages else "New Chat"
+    upsert_chat_session(chat_id, user_id, normalized_project, first_msg)
+
+    logger.info(
+        "[API] POST /chat/%s/%s/%s — Starting async scenario run. Thread=%s",
+        project_id, chat_id, user_id, thread_id
+    )
+
+    # Convert API messages to LangChain message objects
+    lc_messages = [
+        HumanMessage(content=m.content)
+        if m.role == "user"
+        else __import__("langchain_core.messages", fromlist=["AIMessage"]).AIMessage(content=m.content)
+        for m in request.messages
+    ]
+
+    graph = await get_graph()
+    config = {"configurable": {"thread_id": thread_id}}
+
+    # Detect resume vs. first turn
+    existing_state = await graph.aget_state(config)
+    is_resuming = bool(
+        existing_state
+        and existing_state.values
+        and existing_state.values.get("messages")
+    )
+
+    if is_resuming:
+        initial_state: AMLScenarioState = {
+            "messages": lc_messages,
+            "user_intent": request.messages[-1].content if request.messages else "",
+        }
+    else:
+        initial_state = {
+            "messages": lc_messages,
+            "user_intent": request.messages[-1].content if request.messages else "",
+            "enriched_intent": None,
+            "raw_sql": None,
+            "sql_metadata": None,
+            "scenario_parameters": None,
+            "decomposition_confidence": 0.0,
+            "scenario_code": None,
+            "rule_code": None,
+            "scenario_write_success": False,
+            "validation_result": None,
+            "validation_retry_count": 0,
+            "next_action": "INTENT",
+            "iteration_count": 0,
+            "error_log": [],
+            "plan_artifact": None,
+            "plan_conditions": None,
+            "plan_approved": False,
+            "catalog_creations": [],
+            "write_verification": None,
+            "escalation_report": None,
+            "failure_mode": None,
+            "catalog_integrity": True,
+        }
+
+    # Register task as running immediately to prevent client status polling race conditions
+    RUNNING_TASKS[thread_id] = {
+        "status": "RUNNING",
+        "active_node": "orchestrator",
+        "error": None
+    }
+    # Queue the background task
+    background_tasks.add_task(run_scenario_graph_task, thread_id, initial_state, config)
+
+    return {
+        "task_id": thread_id,
+        "status": "RUNNING"
+    }
+
+
+@app.get("/chat/{project_id}/{chat_id}/{user_id}/status", tags=["Chat"])
+async def get_scenario_run_status(project_id: str, chat_id: str, user_id: str):
+    """Retrieve status of the latest scenario run."""
+    normalized_project = project_id if project_id not in ("0", "None") else "no_project"
+    thread_id = f"{normalized_project}_{chat_id}_{user_id}"
+
+    # Check active registry
+    if thread_id in RUNNING_TASKS:
+        task_info = RUNNING_TASKS[thread_id]
+        return {
+            "status": task_info["status"],
+            "active_node": task_info["active_node"],
+            "error": task_info["error"]
+        }
+
+    # Check fallback: query checkpointer state to see if it exists
+    config = {"configurable": {"thread_id": thread_id}}
+    graph = await get_graph()
+    state = await graph.aget_state(config)
+    
+    if state and state.values:
+        error_log = state.values.get("error_log", [])
+        last_error = error_log[-1] if error_log else None
+        
+        next_action = state.values.get("next_action")
+        status = "COMPLETED"
+        if next_action == "FAILURE":
+            status = "FAILED"
+            
+        return {
+            "status": status,
+            "active_node": next_action or "done",
+            "error": last_error
+        }
+
+    # Thread never existed
+    return {
+        "status": "FAILED",
+        "active_node": None,
+        "error": "No execution thread or run state found for this session."
+    }
+
+
 # =============================================================================
 # SESSION MANAGEMENT ENDPOINTS
 # =============================================================================
@@ -413,6 +571,7 @@ async def get_chat_history(project_id: str, chat_id: str, user_id: str):
         state = await graph.aget_state(config)
         
         chat_messages = []
+        
         if state and state.values:
             messages_data = state.values.get("messages", [])
             for msg in messages_data:
@@ -424,26 +583,28 @@ async def get_chat_history(project_id: str, chat_id: str, user_id: str):
                     if hasattr(msg, "tool_calls") and msg.tool_calls:
                         continue
                     content = msg.content if hasattr(msg, "content") else ""
-                    if not content or not content.strip():
+                    
+                    plan_art = None
+                    val_res = None
+                    esc_rep = None
+                    if hasattr(msg, "additional_kwargs") and isinstance(msg.additional_kwargs, dict):
+                        plan_art = msg.additional_kwargs.get("plan_artifact")
+                        esc_rep = msg.additional_kwargs.get("escalation_report")
+                        val_res = msg.additional_kwargs.get("validation_result")
+                    
+                    # Skip if message is entirely empty (no text and no artifacts)
+                    if not content.strip() and not (plan_art or val_res or esc_rep):
                         continue
-                    if any(kw in content.lower() for kw in ["calling tool", "executing"]):
-                        continue
-                    if len(content.strip()) > 10:
-                        plan_art = None
-                        val_res = None
-                        esc_rep = None
-                        if hasattr(msg, "additional_kwargs") and isinstance(msg.additional_kwargs, dict):
-                            plan_art = msg.additional_kwargs.get("plan_artifact")
-                            val_res = msg.additional_kwargs.get("validation_result")
-                            esc_rep = msg.additional_kwargs.get("escalation_report")
-                        chat_messages.append(ChatMessage(
-                            role="assistant",
-                            content=content,
-                            plan_artifact=plan_art,
-                            scenario_result=val_res,
-                            escalation_report=esc_rep
-                        ))
-                        
+                            
+                    chat_messages.append(ChatMessage(
+                        role="assistant",
+                        content=content,
+                        plan_artifact=plan_art,
+                        scenario_result=val_res,
+                        escalation_report=esc_rep,
+                        timestamp=msg.additional_kwargs.get("timestamp") if hasattr(msg, "additional_kwargs") else None
+                    ))
+
         logger.info("[HISTORY] Retrieved %d conversation-level messages.", len(chat_messages))
         return ChatHistoryResponse(
             user_id=user_id,

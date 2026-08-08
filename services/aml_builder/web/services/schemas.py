@@ -47,18 +47,27 @@ class Threshold(BaseModel):
             "or 'needs_user' (materially ambiguous — must be clarified)."
         ),
     )
+    target_scope: Literal["DETAIL", "AGGREGATE"] = Field(
+        default="DETAIL",
+        description=(
+            "Scope of the threshold: 'DETAIL' for single raw transaction/row filters (WHERE clause) "
+            "or 'AGGREGATE' for accumulated period totals, sums, averages, or counts (HAVING clause)."
+        ),
+    )
 
 
 class TimeWindow(BaseModel):
     """A rolling or fixed time window from the user's intent.
 
     Args:
-        unit (str): Time unit: 'DAYS', 'MONTHS', 'YEARS'.
+        unit (str): Time unit: 'DAYS', 'WEEKS', 'MONTHS', 'YEARS'.
         value (int): Numeric size of the window.
         is_rolling (bool): True = rolling window from today. False = fixed period.
     """
 
-    unit: Literal["DAYS", "MONTHS", "YEARS"] = Field(..., description="Time unit.")
+    unit: Literal["DAYS", "WEEKS", "MONTHS", "YEARS"] = Field(
+        ..., description="Time unit."
+    )
     value: int = Field(..., description="Numeric size of the time window.")
     is_rolling: bool = Field(
         default=True,
@@ -67,6 +76,45 @@ class TimeWindow(BaseModel):
     provenance: Literal["stated", "assumed_default", "needs_user"] = Field(
         default="stated",
         description="stated | assumed_default | needs_user (see Threshold.provenance).",
+    )
+
+
+class BaselineWindow(BaseModel):
+    """Dedicated historical baseline window for comparative scenarios.
+
+    Constructed whenever a scenario compares current activity against a historical baseline
+    (e.g., 'historical monthly average', '6-month average', 'prior activity profile').
+
+    Args:
+        unit (str): Time unit: 'DAYS', 'WEEKS', 'MONTHS', 'YEARS'.
+        duration (int): Duration of the historical baseline period (e.g., 180 for 6 months).
+        exclude_current_window (bool): True to enforce zero-overlap isolation with current observation window.
+        offset_days (int): Equal to the current observation window size (e.g., 30 for 30-day window).
+        sql_date_formula (Optional[str]): Explicit SQL predicate formula for non-overlapping date range.
+        description (Optional[str]): Plain English description of baseline range.
+    """
+
+    unit: Literal["DAYS", "WEEKS", "MONTHS", "YEARS"] = Field(
+        default="DAYS", description="Time unit."
+    )
+    duration: int = Field(
+        ..., description="Duration of historical baseline window in units."
+    )
+    exclude_current_window: bool = Field(
+        default=True,
+        description="True = enforce zero-overlap isolation with current observation window.",
+    )
+    offset_days: int = Field(
+        ...,
+        description="Offset days matching current window size to exclude current period.",
+    )
+    sql_date_formula: Optional[str] = Field(
+        default=None,
+        description="SQL date formula for non-overlapping range.",
+    )
+    description: Optional[str] = Field(
+        default=None,
+        description="Plain English description of baseline window.",
     )
 
 
@@ -98,25 +146,27 @@ class AggregationProfile(BaseModel):
     )
 
 
-class BusinessQualifier(BaseModel):
-    """A non-numeric business filter expressed in open-ended plain English.
+class SemanticCondition(BaseModel):
+    """A purely atomic, typed semantic logic filter or state condition.
 
-    Captures predicates that don't fit a numeric Threshold — e.g. 'is domiciled
-    in a high-risk country', 'is a cash deposit', 'counterparty is a new
-    beneficiary'. Subject/predicate are intentionally NOT enums: they are handed
-    to the SQL agent, which binds them to columns/flags via the data dictionary.
-    This node never touches the schema.
+    Captures logic that doesn't fit a numeric Threshold (e.g. 'is an outward transfer',
+    'was dormant then became active'). By giving it a `logical_type`, we classify the
+    nature of the constraint without hard-coding specific database rules.
 
     Args:
-        raw_phrase (str): The user's own words this qualifier came from.
-        subject (str): Plain English entity noun (e.g. 'Customer', 'Transaction').
-        predicate (str): Plain English business rule.
+        raw_phrase (str): The user's own words this condition came from.
+        logical_type (str): Categorizes the logic (STATE, TRANSITION, SEQUENCE, TEMPORAL, BEHAVIORAL, OTHER).
+        subject (str): Entity being evaluated (e.g. 'Customer', 'Transaction', 'Account').
+        predicate (str): A single, atomic plain English business rule.
         provenance (str): stated | assumed_default | needs_user.
     """
 
     raw_phrase: str = Field(..., description="Verbatim user text this came from.")
-    subject: str = Field(..., description="Plain English entity noun. No enums.")
-    predicate: str = Field(..., description="Plain English business rule.")
+    logical_type: Literal["STATE", "TRANSITION", "SEQUENCE", "BEHAVIORAL", "TEMPORAL", "OTHER"] = Field(
+        ..., description="The nature of the logic (e.g. 'dormant to active' = TRANSITION)."
+    )
+    subject: str = Field(..., description="Plain English entity noun (e.g. 'Customer', 'Transaction', 'Account'). No enums.")
+    predicate: str = Field(..., description="A single, atomic plain English business rule.")
     provenance: Literal["stated", "assumed_default", "needs_user"] = Field(
         default="stated"
     )
@@ -156,6 +206,7 @@ class AMLIntent(BaseModel):
         detection_logic (str): Plain English business logic summary.
         thresholds (list[Threshold]): All numeric conditions extracted from intent.
         time_window (Optional[TimeWindow]): Rolling or fixed observation period.
+        baseline_window (Optional[BaselineWindow]): Dedicated non-overlapping baseline window.
         customer_segments (Optional[list[str]]): Target segments (RETAIL, CORPORATE).
         exclusions (Optional[list[str]]): Explicit exclusion rules.
         clarification_needed (bool): True if the agent must ask the user something.
@@ -168,6 +219,13 @@ class AMLIntent(BaseModel):
     scenario_type: str = Field(
         ..., description="Primary entity type or category this scenario monitors."
     )
+    transaction_type: Optional[str] = Field(
+        default=None,
+        description=(
+            "Explicit transaction type name e.g. 'LOAN SETTLEMENT', 'CASH DEPOSIT', "
+            "'OUTWARD TRANSFER', or null if all transaction types are monitored."
+        ),
+    )
     detection_logic: str = Field(
         ..., description="Plain English description of the detection logic."
     )
@@ -179,6 +237,13 @@ class AMLIntent(BaseModel):
         default=None,
         description="Observation time window (rolling or fixed).",
     )
+    baseline_window: Optional[BaselineWindow] = Field(
+        default=None,
+        description=(
+            "Dedicated historical baseline window constructed whenever current activity is "
+            "compared against a historical profile (e.g. 6-month average)."
+        ),
+    )
     customer_segments: Optional[List[str]] = Field(
         default=None,
         description="Target customer segments, e.g. ['RETAIL', 'CORPORATE'].",
@@ -186,6 +251,10 @@ class AMLIntent(BaseModel):
     exclusions: Optional[List[str]] = Field(
         default=None,
         description="Explicit rules about what to exclude from detection.",
+    )
+    mapped_keywords: Optional[Dict[str, str]] = Field(
+        default=None,
+        description="Descriptive terms mapped to their resolved numeric thresholds.",
     )
     clarification_needed: bool = Field(
         default=False,
@@ -202,9 +271,9 @@ class AMLIntent(BaseModel):
         default=None,
         description="How the metric is measured and at what grain.",
     )
-    qualifiers: List[BusinessQualifier] = Field(
+    semantic_conditions: List[SemanticCondition] = Field(
         default_factory=list,
-        description="Non-numeric plain-English business filters (open-ended).",
+        description="All strictly separated, atomic semantic logic constraints.",
     )
     clarifications: List[Clarification] = Field(
         default_factory=list,
@@ -618,6 +687,10 @@ class ValidationResult(BaseModel):
     scenario_code: Optional[str] = Field(
         default=None,
         description="The unique scenario code generated for this run.",
+    )
+    raw_sql: Optional[str] = Field(
+        default=None,
+        description="The raw SQL query that was built by the SQL Bridge.",
     )
     scenario_name: Optional[str] = Field(
         default=None,

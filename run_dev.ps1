@@ -37,4 +37,4 @@ Write-Host "  Endpoint  = http://127.0.0.1:8005/chat/stream" -ForegroundColor Gr
 Write-Host "  Docs      = http://127.0.0.1:8005/docs" -ForegroundColor Gray
 Write-Host ""
 
-uvicorn web.api.main:app --reload --port 8005 --host 0.0.0.0
+& (Join-Path $PSScriptRoot ".venv\Scripts\python.exe") -m uvicorn web.api.main:app --reload --port 8005 --host 0.0.0.0
