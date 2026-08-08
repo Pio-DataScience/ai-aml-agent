@@ -33,6 +33,18 @@ def test_shadow_executor_resilience():
     assert res_2["validation_result"]["success"] is True
     logger.info("Shadow Test 2 Passed! Dynamic entity column detected successfully.")
 
+    # Test 3: CTE WITH query (Regression test for ORA-32034)
+    cte_sql = """
+    WITH Summary AS (
+        SELECT CUS_NUM, SUM(TRA_AMT) AS TOT FROM BI_DWH.PIO_TRANSACTIONS WHERE ROWNUM <= 100 GROUP BY CUS_NUM
+    )
+    SELECT CUS_NUM, TOT FROM Summary
+    """
+    state_3 = {"raw_sql": cte_sql}
+    res_3 = direct_shadow_executor_node(state_3, None)
+    assert res_3["validation_result"]["success"] is True
+    logger.info("Shadow Test 3 (CTE WITH query) Passed! No ORA-32034 error.")
+
     print("\nSHADOW EXECUTOR RESILIENCE TEST PASSED SUCCESSFULLY!")
 
 

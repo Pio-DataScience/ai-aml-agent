@@ -11,6 +11,16 @@ Format: `[DATE] TYPE: Description`
 - Added `BaselineWindow` Pydantic model and `baseline_window: Optional[BaselineWindow]` field to `AMLIntent` contract in [schemas.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/schemas.py).
 - Added `[INTENT EXTRACTION RULE: HISTORICAL BASELINE ISOLATION]` to Intent Analyst system prompts in [agent.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/agent.py) and [intent_analyst_system_v2.md](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/prompts/intent_analyst_system_v2.md).
 - Updated [planner_system.md](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/prompts/planner_system.md) to render the non-overlapping `baseline_window` explicitly under the plan's Time Interval section.
+## [2026-08-08] fix: Inline-View Wrapper in Shadow Executor (ORA-32034 Prevention)
+
+### What
+- **`build_shadow_query` Helper Function:** Added `build_shadow_query` in [agent.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/agent.py#L1150) that dynamically detects if generated SQL queries start with a CTE `WITH` block.
+- **Inline View Wrapping:** When `clean_sql` starts with `WITH`, wraps the subquery inside inline views `( SELECT ... FROM ( {clean_sql} ) Raw_Scenario )`, eliminating nested `WITH` clauses and completely preventing Oracle `ORA-32034: unsupported use of WITH clause` errors.
+- **Sample Records Fix:** Replaced `WITH Raw_Scenario AS ({clean_sql})` in column metadata inspection and top-5 sample alert record retrieval with inline view wrappers `SELECT * FROM ( {clean_sql} ) Raw_Scenario WHERE ROWNUM <= 5`.
+- **Regression Unit Tests:** Added Test 3 to [test_e2e_checkpoints.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/test_e2e_checkpoints.py) verifying execution of multi-CTE `WITH` queries against Oracle DWH.
+
+---
+
 ## [2026-08-08] fix: Fix UnboundLocalError for 'updates' Variable in Orchestrator Node
 
 ### What

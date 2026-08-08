@@ -1150,6 +1150,32 @@ def _parse_sql_metadata(sql: str) -> SQLMetadata:
 # =============================================================================
 
 
+def build_shadow_query(clean_sql: str, key_col: str = "CUS_NUM") -> str:
+    """Build a robust shadow count wrapper query for Oracle DWH.
+
+    Uses inline-view pattern when clean_sql starts with WITH to avoid ORA-32034.
+    Uses single CTE pattern when clean_sql is a standard SELECT statement.
+    """
+    clean_sql = clean_sql.strip().rstrip(";")
+    if clean_sql.upper().startswith("WITH"):
+        return f"""
+        SELECT 
+            (SELECT COUNT(DISTINCT {key_col}) FROM ( {clean_sql} ) Raw_Scenario) AS header_alert_count,
+            (SELECT COUNT(*) FROM ( {clean_sql} ) Raw_Scenario) AS detail_record_count
+        FROM DUAL
+        """
+    else:
+        return f"""
+        WITH Raw_Scenario AS (
+            {clean_sql}
+        )
+        SELECT 
+            (SELECT COUNT(DISTINCT {key_col}) FROM Raw_Scenario) AS header_alert_count,
+            (SELECT COUNT(*) FROM Raw_Scenario) AS detail_record_count
+        FROM DUAL
+        """
+
+
 def direct_shadow_executor_node(
     state: AMLScenarioState, config: RunnableConfig
 ) -> Dict[str, Any]:
@@ -1174,8 +1200,8 @@ def direct_shadow_executor_node(
         from web.services.oracle import get_connection, run_readonly
         from web.services.schemas import AlertSample, ValidationResult
 
-        # 1. Dynamically inspect column names of the generated query
-        test_col_query = f"WITH Raw_Scenario AS ({clean_sql}) SELECT * FROM Raw_Scenario WHERE ROWNUM <= 1"
+        # 1. Dynamically inspect column names of the generated query (using inline-view to avoid ORA-32034)
+        test_col_query = f"SELECT * FROM ( {clean_sql} ) Raw_Scenario WHERE ROWNUM <= 1"
         entity_col = "CUS_NUM"
         with get_connection() as conn:
             cursor = conn.cursor()
@@ -1191,16 +1217,8 @@ def direct_shadow_executor_node(
 
         logger.info("[SHADOW_EXECUTOR] Using entity column '%s' for header counting.", entity_col)
 
-        # 2. Run shadow count query
-        shadow_count_query = f"""
-        WITH Raw_Scenario AS (
-            {clean_sql}
-        )
-        SELECT 
-            (SELECT COUNT(DISTINCT {entity_col}) FROM Raw_Scenario) AS header_alert_count,
-            (SELECT COUNT(*) FROM Raw_Scenario) AS detail_record_count
-        FROM DUAL
-        """
+        # 2. Run shadow count query using build_shadow_query
+        shadow_count_query = build_shadow_query(clean_sql, entity_col)
 
         _, count_rows = run_readonly(shadow_count_query)
         sample_header_count = int(count_rows[0][0]) if count_rows and count_rows[0][0] is not None else 0
@@ -1221,13 +1239,8 @@ def direct_shadow_executor_node(
             alert_density,
         )
 
-        # 3. Retrieve top 5 sample alert records
-        sample_records_query = f"""
-        WITH Raw_Scenario AS (
-            {clean_sql}
-        )
-        SELECT * FROM Raw_Scenario WHERE ROWNUM <= 5
-        """
+        # 3. Retrieve top 5 sample alert records (using inline-view to avoid ORA-32034)
+        sample_records_query = f"SELECT * FROM ( {clean_sql} ) Raw_Scenario WHERE ROWNUM <= 5"
         sample_alerts: List[AlertSample] = []
         try:
             with get_connection() as conn:
