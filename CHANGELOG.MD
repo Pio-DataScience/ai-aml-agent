@@ -11,6 +11,14 @@ Format: `[DATE] TYPE: Description`
 - Added `BaselineWindow` Pydantic model and `baseline_window: Optional[BaselineWindow]` field to `AMLIntent` contract in [schemas.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/schemas.py).
 - Added `[INTENT EXTRACTION RULE: HISTORICAL BASELINE ISOLATION]` to Intent Analyst system prompts in [agent.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/agent.py) and [intent_analyst_system_v2.md](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/prompts/intent_analyst_system_v2.md).
 - Updated [planner_system.md](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/prompts/planner_system.md) to render the non-overlapping `baseline_window` explicitly under the plan's Time Interval section.
+## [2026-08-08] feat: Country & Institution Code Database Filter for Explanation Codes
+
+### What
+- **Filtered RAG Vector Embedding Index:** Updated `explanation_code_search.py` to query `PIO_EXPLANATION_CODE` strictly filtered by `(COUNTRY_CODE = :cc OR COUNTRY_CODE IS NULL) AND (INST_CODE = :ic OR INST_CODE IS NULL)` using `settings.AML_COUNTRY_CODE` (`400`) and `settings.AML_INST_CODE` (`1`).
+- **Dynamic Partition Cache:** Saves the vector cache per institution/country partition (`artifacts/explanation_codes_vector_cache_400_1.pkl`). Reduced initial search space from 6,935 rows down to the exact 1,653 active institution explanation codes.
+
+---
+
 ## [2026-08-08] fix: Clean Markdown Table Formatting & Removal of Technical DB Jargon
 
 ### What

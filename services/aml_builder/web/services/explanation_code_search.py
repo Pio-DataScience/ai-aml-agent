@@ -29,26 +29,32 @@ _VECTOR_CACHE: Optional[Dict[str, Any]] = None
 
 
 def _load_or_build_vector_index() -> Dict[str, Any]:
-    """Load or build persistent vector embeddings for PIO_EXPLANATION_CODE."""
+    """Load or build persistent vector embeddings for PIO_EXPLANATION_CODE filtered by country and institution code."""
     global _VECTOR_CACHE
     if _VECTOR_CACHE is not None:
         return _VECTOR_CACHE
 
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cache_file = CACHE_DIR / f"explanation_codes_vector_cache_{settings.AML_COUNTRY_CODE}_{settings.AML_INST_CODE}.pkl"
 
-    if CACHE_FILE.exists():
+    if cache_file.exists():
         try:
-            with open(CACHE_FILE, "rb") as f:
+            with open(cache_file, "rb") as f:
                 _VECTOR_CACHE = pickle.load(f)
             logger.info(
-                "[EXPL_SEARCH] Loaded %d explanation codes from vector cache.",
+                "[EXPL_SEARCH] Loaded %d explanation codes from vector cache (%s).",
                 len(_VECTOR_CACHE["metadata"]),
+                cache_file.name,
             )
             return _VECTOR_CACHE
         except Exception as exc:
             logger.warning("[EXPL_SEARCH] Failed to load vector cache: %s. Rebuilding...", exc)
 
-    logger.info("[EXPL_SEARCH] Building vector index for PIO_EXPLANATION_CODE from Oracle DWH...")
+    logger.info(
+        "[EXPL_SEARCH] Building vector index for PIO_EXPLANATION_CODE (COUNTRY_CODE=%s INST_CODE=%s)...",
+        settings.AML_COUNTRY_CODE,
+        settings.AML_INST_CODE,
+    )
     from web.services.oracle import init_pool, run_readonly
 
     try:
@@ -60,10 +66,12 @@ def _load_or_build_vector_index() -> Dict[str, Any]:
     SELECT EXPLANATION_CODE, DESC_ENG, DESC_NAT_LAN, LONG_DES_ENG
     FROM PIO_EXPLANATION_CODE
     WHERE EXPLANATION_CODE IS NOT NULL
+      AND (COUNTRY_CODE = :cc OR COUNTRY_CODE IS NULL)
+      AND (INST_CODE = :ic OR INST_CODE IS NULL)
     """
-    _, rows = run_readonly(sql)
+    _, rows = run_readonly(sql, {"cc": settings.AML_COUNTRY_CODE, "ic": settings.AML_INST_CODE})
     if not rows:
-        logger.error("[EXPL_SEARCH] No explanation codes found in PIO_EXPLANATION_CODE!")
+        logger.error("[EXPL_SEARCH] No explanation codes found in PIO_EXPLANATION_CODE for CC=%s IC=%s!", settings.AML_COUNTRY_CODE, settings.AML_INST_CODE)
         return {"embeddings": np.array([]), "metadata": []}
 
     metadata = []
@@ -106,9 +114,9 @@ def _load_or_build_vector_index() -> Dict[str, Any]:
     }
 
     try:
-        with open(CACHE_FILE, "wb") as f:
+        with open(cache_file, "wb") as f:
             pickle.dump(_VECTOR_CACHE, f)
-        logger.info("[EXPL_SEARCH] Persistent vector cache saved to %s.", CACHE_FILE)
+        logger.info("[EXPL_SEARCH] Persistent vector cache saved to %s.", cache_file)
     except Exception as exc:
         logger.error("[EXPL_SEARCH] Failed to save vector cache file: %s", exc)
 
