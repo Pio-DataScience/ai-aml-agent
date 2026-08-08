@@ -11,13 +11,23 @@ Format: `[DATE] TYPE: Description`
 - Added `BaselineWindow` Pydantic model and `baseline_window: Optional[BaselineWindow]` field to `AMLIntent` contract in [schemas.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/schemas.py).
 - Added `[INTENT EXTRACTION RULE: HISTORICAL BASELINE ISOLATION]` to Intent Analyst system prompts in [agent.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/agent.py) and [intent_analyst_system_v2.md](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/prompts/intent_analyst_system_v2.md).
 - Updated [planner_system.md](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/prompts/planner_system.md) to render the non-overlapping `baseline_window` explicitly under the plan's Time Interval section.
+## [2026-08-08] feat: Standalone Production SQL Engine & Fluid HITL Architecture
+
+### What
+- **Legacy QB Node Deprecation:** Removed legacy Query Builder decomposition & write nodes (`decomposer`, `qb_writer`, `validator`) and legacy database catalog insertion procedure calls.
+- **Direct DWH Customer-Hash Shadow Testing (`direct_shadow_executor_node`):**
+  - Implemented Customer-Hash Sampling (`ORA_HASH(CUS_NUM, 99) < 5`) per [shadowtesting_layer.md](file:///c:/Users/abura/Development/AI_AML_AGENT/Docs/shadowtesting_layer.md) to run interactive shadow tests directly against production DWH (`BI_DWH`) without row capping.
+  - Computes sample flagged customer counts, extrapolated 100% production alert estimates, transaction detail counts, alert density ratios, and top 5 sample alert records.
+- **Production Scenario Registry (`production_registry.py` & `production_scenario_persister_node`):**
+  - Created Oracle production registry table `PIO_AML_PRODUCTION_SCENARIOS` to persist active, confirmed scenarios for consumption by the automated daily ETL runner.
+- **Fluid Claude-like HITL Agentic Flow:**
+  - Re-architected Orchestrator system prompt ([orchestrator_system.md](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/prompts/orchestrator_system.md)) into an autonomous, non-preconfigured conversational model.
+  - Supports 4 HITL checkpoints: Domain Lookup Confirmation, Plan Approval, Shadow Test Review, and Production ETL Activation.
 
 ### Why
-- Enforces strict zero-overlap temporal isolation whenever current activity is compared against a historical baseline (e.g. 6-month average).
-- Guarantees downstream SQL generators (Service B) receive explicit `offset_days` and date formula boundaries to prevent data leakage between current observation windows and baseline averages.
+- Aligning with the Head of AML Committee directive: bypassing the legacy Query Builder engine, executing production-grade ANSI Oracle SQL queries directly on DWH, and storing confirmed scenarios in a clean registry for daily ETL execution.
 
-### Verify
-- Verified Pydantic schema validation and prompt compilation.
+---
 
 ## [2026-08-08] fix: Orchestrator prompt architectural invariant for plan modifications
 

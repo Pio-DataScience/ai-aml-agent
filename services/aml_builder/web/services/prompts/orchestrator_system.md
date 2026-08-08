@@ -160,11 +160,19 @@ Write a brief, professional message confirming the report has been generated and
 
 ---
 
-### `FINALIZE` — Scenario created. Write the success summary.
+### `PERSIST` — Commit scenario to production ETL registry
 
-**Use when** `Validation success = True` AND `Header alert count ≥ 1` AND `Transaction detail count ≥ 1`.
+**Use when** shadow test results have been presented to the user, and the user explicitly requests to activate, deploy, commit, or save the scenario for production (e.g. "activate", "deploy", "activate scenario", "commit to production", "save scenario", "confirm activation", "activate it").
 
-Write a complete, detailed success message. See the Message Guide below for exact structure.
+Set `next_action = "PERSIST"` and `message_to_user = null` (or a brief transition message). The pipeline will save the scenario to `PIO_AML_PRODUCTION_SCENARIOS` and route to `FINALIZE`.
+
+---
+
+### `FINALIZE` — Scenario activated for production. Write success summary.
+
+**Use when** the scenario has been successfully written to `PIO_AML_PRODUCTION_SCENARIOS` (`Write success = True`).
+
+Write a complete, detailed success message confirming that the scenario has been committed to the production registry for automated daily ETL execution. Include the Scenario ID, Scenario Name, Observation Window, and Shadow Test Metrics.
 
 ---
 

@@ -724,6 +724,14 @@ class ValidationResult(BaseModel):
         default=None,
         description="Number of transaction-level detail records in PIO_AML_CUSTOMERS_DET.",
     )
+    header_alert_count: Optional[int] = Field(
+        default=None,
+        description="Number of sample flagged customers in shadow test.",
+    )
+    transaction_detail_count: Optional[int] = Field(
+        default=None,
+        description="Number of detail transaction records in shadow test.",
+    )
     det_samples: List[Dict[str, Any]] = Field(
         default_factory=list,
         description="Sample rows from PIO_AML_CUSTOMERS_DET (up to 5).",
