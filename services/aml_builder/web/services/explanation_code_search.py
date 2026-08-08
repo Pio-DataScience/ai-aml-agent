@@ -217,7 +217,7 @@ def select_relevant_explanation_codes(
 
 
 def format_explanation_code_checkpoint(transaction_type: str, matches: List[Dict[str, Any]]) -> str:
-    """Format discovered explanation codes into a scrollable, interactive markdown table view."""
+    """Format discovered transaction types into a clean executive markdown table view."""
     if not matches:
         return ""
 
@@ -228,19 +228,17 @@ def format_explanation_code_checkpoint(transaction_type: str, matches: List[Dict
         sim = m.get("similarity", "—")
         rel = m.get("relevance", "High")
         reason = m.get("reason", "")
-        table_rows.append(f"| **`{code}`** | {desc} | **{sim}** | **{rel}** | {reason} |")
+        table_rows.append(f"| **{code}** | {desc} | **{sim}** | **{rel}** | {reason} |")
 
     table_body = "\n".join(table_rows)
 
-    count_str = f"({len(matches)} matches found with $\\ge 60\\%$ similarity)"
+    count_str = f"({len(matches)} Matches Found)"
 
     return (
-        f"### 🔍 Domain Discovery: Explanation Codes for **\"{transaction_type}\"** {count_str}\n\n"
-        f"I searched the bank DWH catalog (`PIO_EXPLANATION_CODE`) using vector similarity and identified the following matching explanation codes:\n\n"
-        f'<div style="max-height: 380px; overflow-y: auto; margin: 12px 0; border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; padding: 4px;">\n\n'
+        f"### 🔍 Discovered Transaction Types for **\"{transaction_type}\"** {count_str}\n\n"
+        f"I searched our compliance transaction catalog and identified the following matching transaction codes:\n\n"
         f"| Code | Description | Match % | Relevance | Reason |\n"
         f"| :--- | :--- | :--- | :--- | :--- |\n"
         f"{table_body}\n\n"
-        f"</div>\n\n"
-        f"> **Action Needed:** Reply **\"confirm codes\"** to proceed with all {len(matches)} discovered codes, or specify which codes to include/exclude (e.g., *\"only use code {matches[0].get('code')}\"*)."
+        f"> **Action Needed:** Reply **\"confirm codes\"** to proceed with all {len(matches)} codes, or specify which codes to include/exclude (e.g., *\"only use code {matches[0].get('code')}\"*)."
     )

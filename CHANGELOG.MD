@@ -11,6 +11,15 @@ Format: `[DATE] TYPE: Description`
 - Added `BaselineWindow` Pydantic model and `baseline_window: Optional[BaselineWindow]` field to `AMLIntent` contract in [schemas.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/schemas.py).
 - Added `[INTENT EXTRACTION RULE: HISTORICAL BASELINE ISOLATION]` to Intent Analyst system prompts in [agent.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/agent.py) and [intent_analyst_system_v2.md](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/prompts/intent_analyst_system_v2.md).
 - Updated [planner_system.md](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/prompts/planner_system.md) to render the non-overlapping `baseline_window` explicitly under the plan's Time Interval section.
+## [2026-08-08] fix: Clean Markdown Table Formatting & Removal of Technical DB Jargon
+
+### What
+- **Removed Escaped HTML & Raw LaTeX:** Removed raw `<div style="...">` tags and LaTeX math strings (`$\\ge 60\\%$`) that caused React Markdown renderers to expose raw text and escaped characters in the frontend UI.
+- **Clean Table Cell Styling:** Replaced literal backticks inside table cells (`` `1414` ``) with clean markdown bold text (`**1414**`).
+- **Removed Internal Technical Words:** Replaced technical database jargon (`PIO_EXPLANATION_CODE`, `vector similarity`, `DWH catalog`) with clean, executive compliance language (*"compliance transaction catalog"*).
+
+---
+
 ## [2026-08-08] feat: Scrollable Domain Checkpoint Table & 60% Similarity Cutoff Filter
 
 ### What
