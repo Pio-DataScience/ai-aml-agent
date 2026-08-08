@@ -115,6 +115,7 @@ class AMLScenarioState(TypedDict):
     # Explanation code discovery
     discovered_explanation_codes: Optional[List[Dict[str, Any]]]
     explanation_code_checkpoint: Optional[str]  # Markdown table view for Checkpoint 1
+    explanation_codes_confirmed: bool  # True once user confirms Checkpoint 1
 
 
 # =============================================================================
@@ -415,6 +416,25 @@ def orchestrator_node(
                 decision.message_to_user = (
                     "Please provide more details about the scenario you want to build."
                 )
+
+    # Checkpoint 1: Domain Explanation Code Discovery Checkpoint
+    checkpoint = state.get("explanation_code_checkpoint")
+    confirmed = state.get("explanation_codes_confirmed", False)
+
+    if checkpoint and not confirmed:
+        raw_msgs = state.get("messages", [])
+        last_msg_lower = (
+            raw_msgs[-1].content.lower() if raw_msgs and isinstance(raw_msgs[-1], HumanMessage) else ""
+        )
+        confirm_keywords = ["confirm", "confirm codes", "yes", "proceed", "looks good", "ok", "use these"]
+        if any(k in last_msg_lower for k in confirm_keywords):
+            logger.info("[ORCHESTRATOR] User confirmed domain explanation codes!")
+            updates["explanation_codes_confirmed"] = True
+        else:
+            logger.info("[ORCHESTRATOR] Presenting Checkpoint 1 explanation code table view.")
+            decision.next_action = "WAIT_USER"
+            if not decision.message_to_user or "PIO_EXPLANATION_CODE" not in decision.message_to_user:
+                decision.message_to_user = f"{checkpoint}"
 
     logger.info(
         "[ORCHESTRATOR] Decision → next_action=%s  message=%s",
@@ -1133,20 +1153,7 @@ def _parse_sql_metadata(sql: str) -> SQLMetadata:
 def direct_shadow_executor_node(
     state: AMLScenarioState, config: RunnableConfig
 ) -> Dict[str, Any]:
-    """Execute production SQL query directly on Oracle DWH with Customer-Hash Sampling.
-
-    Per shadowtesting_layer.md:
-    Uses ORA_HASH(CUS_NUM, 99) < 5 for a deterministic 5% customer sample on DWH,
-    preserving 100% of transaction lookback history and aggregation mathematics (SUM, COUNT, AVG)
-    without arbitrary FETCH FIRST row capping.
-
-    Computes:
-    - Sample Flagged Customers (COUNT(DISTINCT CUS_NUM))
-    - Extrapolated Production Alerts (Sample * 20)
-    - Transaction Detail Count
-    - Alert Density Ratio
-    - Top 5 Sample Alert Customer Records
-    """
+    """Execute production SQL query directly on Oracle DWH with Customer-Hash Sampling."""
     raw_sql = state.get("raw_sql")
     if not raw_sql or not raw_sql.strip():
         logger.error("[SHADOW_EXECUTOR] Raw SQL is missing or empty.")
@@ -1158,28 +1165,47 @@ def direct_shadow_executor_node(
 
     logger.info("[SHADOW_EXECUTOR] Preparing customer-hash shadow test query.")
 
-    clean_sql = raw_sql.strip().rstrip(";")
-
-    # Wrap query for header count and detail record count
-    shadow_count_query = f"""
-    WITH Raw_Scenario AS (
-        {clean_sql}
-    )
-    SELECT 
-        (SELECT COUNT(DISTINCT CUS_NUM) FROM Raw_Scenario) AS header_alert_count,
-        (SELECT COUNT(*) FROM Raw_Scenario) AS detail_record_count
-    FROM DUAL
-    """
+    clean_sql = raw_sql.strip()
+    clean_sql = re.sub(r"^```(?:sql)?\s*", "", clean_sql, flags=re.IGNORECASE)
+    clean_sql = re.sub(r"\s*```$", "", clean_sql)
+    clean_sql = clean_sql.rstrip(";").strip()
 
     try:
         from web.services.oracle import get_connection, run_readonly
         from web.services.schemas import AlertSample, ValidationResult
 
+        # 1. Dynamically inspect column names of the generated query
+        test_col_query = f"WITH Raw_Scenario AS ({clean_sql}) SELECT * FROM Raw_Scenario WHERE ROWNUM <= 1"
+        entity_col = "CUS_NUM"
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(test_col_query)
+            if cursor.description:
+                available_cols = [c[0].upper() for c in cursor.description]
+                possible_matches = ["CUS_NUM", "CUSTOMER_ID", "CUS_ID", "CUST_ID", "CUSTOMER_NUMBER", "CUS_NO"]
+                matched = next((c for c in possible_matches if c in available_cols), None)
+                if matched:
+                    entity_col = matched
+                elif available_cols:
+                    entity_col = available_cols[0]
+
+        logger.info("[SHADOW_EXECUTOR] Using entity column '%s' for header counting.", entity_col)
+
+        # 2. Run shadow count query
+        shadow_count_query = f"""
+        WITH Raw_Scenario AS (
+            {clean_sql}
+        )
+        SELECT 
+            (SELECT COUNT(DISTINCT {entity_col}) FROM Raw_Scenario) AS header_alert_count,
+            (SELECT COUNT(*) FROM Raw_Scenario) AS detail_record_count
+        FROM DUAL
+        """
+
         _, count_rows = run_readonly(shadow_count_query)
         sample_header_count = int(count_rows[0][0]) if count_rows and count_rows[0][0] is not None else 0
         detail_count = int(count_rows[0][1]) if count_rows and count_rows[0][1] is not None else 0
 
-        # Extrapolate 5% sample to 100% production estimate (5% sample * 20)
         extrapolated_alerts = sample_header_count * 20
         alert_density = (
             round(detail_count / sample_header_count, 2)
@@ -1195,7 +1221,7 @@ def direct_shadow_executor_node(
             alert_density,
         )
 
-        # Retrieve top 5 sample alert records
+        # 3. Retrieve top 5 sample alert records
         sample_records_query = f"""
         WITH Raw_Scenario AS (
             {clean_sql}
@@ -1212,7 +1238,7 @@ def direct_shadow_executor_node(
                     for r in cursor.fetchall():
                         row_dict = dict(zip(cols, r))
                         cus_id = str(
-                            row_dict.get("cus_num", row_dict.get("customer_id", "—"))
+                            row_dict.get(entity_col.lower(), row_dict.get("cus_num", row_dict.get("customer_id", "—")))
                         )
                         sample_alerts.append(
                             AlertSample(customer_id=cus_id, raw_data=row_dict)
@@ -1246,15 +1272,27 @@ def direct_shadow_executor_node(
             "scenario_write_success": True,
             "next_action": "WAIT_USER",
         }
+
     except Exception as exc:
+        err_msg = str(exc)
         logger.error(
             "[SHADOW_EXECUTOR] Direct shadow query execution failed: %s",
-            exc,
+            err_msg,
             exc_info=True,
         )
+        failed_val_result = ValidationResult(
+            success=False,
+            scenario_status="ERROR",
+            scenario_code=state.get("scenario_code") or "PENDING",
+            raw_sql=clean_sql,
+            diagnosis=f"Oracle DWH Execution Error: {err_msg}",
+            suggested_fix="Review generated SQL syntax, table joins, or column definitions.",
+        ).model_dump(mode="json")
+
         return {
+            "validation_result": failed_val_result,
             "next_action": "FAILURE",
-            "error_log": state.get("error_log", []) + [f"Shadow execution failed: {exc}"],
+            "error_log": state.get("error_log", []) + [f"Shadow execution failed: {err_msg}"],
         }
 
 
@@ -1356,15 +1394,22 @@ def route_after_orchestrator(state: AMLScenarioState) -> str:
 def route_after_intent(state: AMLScenarioState) -> str:
     """Route after Intent Analyst node.
 
+    If domain explanation codes were discovered and checkpoint is active: route to orchestrator first!
     Routes to planner on success (user must approve the plan before execution).
     Routes to orchestrator on clarification requests or errors.
     """
     action = state.get("next_action", "SQL_BRIDGE")
-    if action == "CLARIFY":
+    checkpoint = state.get("explanation_code_checkpoint")
+    confirmed = state.get("explanation_codes_confirmed", False)
+
+    if checkpoint and not confirmed:
+        logger.info("[ROUTER] Domain explanation code checkpoint active — routing to orchestrator.")
         return "orchestrator"
-    if action == "ERROR":
+
+    if action in ("CLARIFY", "CONFIRM_DOMAIN", "ERROR"):
         return "orchestrator"
-    return "planner"  # always plan first before sql_bridge
+
+    return "planner"
 
 
 def route_after_planner(state: AMLScenarioState) -> str:
