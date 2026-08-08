@@ -226,6 +226,13 @@ class AMLIntent(BaseModel):
             "'OUTWARD TRANSFER', or null if all transaction types are monitored."
         ),
     )
+    explanation_codes: Optional[List[str]] = Field(
+        default=None,
+        description=(
+            "List of confirmed DWH EXPLANATION_CODE strings (e.g. ['1414', '3405', '745']) "
+            "discovered via RAG vector search for the scenario's transaction_type."
+        ),
+    )
     detection_logic: str = Field(
         ..., description="Plain English description of the detection logic."
     )

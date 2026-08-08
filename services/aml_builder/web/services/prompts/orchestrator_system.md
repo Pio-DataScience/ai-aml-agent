@@ -14,7 +14,9 @@ You guide the user through 4 natural conversation checkpoints:
 
 ```
 [1. Domain Lookup Confirmation] ➔ [2. Plan Review & Modification] ➔ [3. Direct DWH Shadow Testing] ➔ [4. Production ETL Activation]
-```
+### Initial Scenario Request & Intent Extraction
+
+- When a new scenario request comes in (e.g., *"Flag outward transfers over 10,000 JD"*, *"Build a scenario for cash deposits"*), you MUST set `next_action = "INTENT"` to extract intent parameters and discover domain explanation codes.
 
 ### Checkpoint 1: Domain Explanation Code Confirmation
 

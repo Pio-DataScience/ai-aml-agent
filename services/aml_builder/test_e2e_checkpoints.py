@@ -3,6 +3,7 @@ Integration Test for Checkpoint 1 (Domain Explanation Codes) and Checkpoint 3 (D
 """
 
 import asyncio
+import json
 import logging
 import sys
 from pathlib import Path
@@ -52,24 +53,44 @@ async def test_checkpoint1_flow():
     logger.info("=== Testing Checkpoint 1 Explanation Code Flow in Graph ===")
     graph = await get_graph()
     
-    # Simulate turn 1 with "outward transfers"
+    # Simulate turn 1: User asks for scenario
     inputs = {
         "messages": [("user", "Flag outward transfers over 10,000 JD")],
         "iteration_count": 0,
         "error_log": [],
     }
-    config = {"configurable": {"thread_id": "test_thread_checkpoint_1"}}
+    import uuid
+    thread_id = f"test_thread_cp1_{uuid.uuid4().hex[:8]}"
+    config = {"configurable": {"thread_id": thread_id}}
     
-    state_output = await graph.ainvoke(inputs, config)
-    logger.info("Graph execution paused at next_action: %s", state_output.get("next_action"))
-    checkpoint = state_output.get("explanation_code_checkpoint")
-    assert checkpoint is not None, "explanation_code_checkpoint is missing!"
-    assert "PIO_EXPLANATION_CODE" in checkpoint
-    logger.info("Checkpoint 1 explanation table generated cleanly!")
+    state_turn1 = await graph.ainvoke(inputs, config)
+    logger.info("Turn 1 execution paused at next_action: %s", state_turn1.get("next_action"))
+    checkpoint = state_turn1.get("explanation_code_checkpoint")
+    assert checkpoint is not None, "explanation_code_checkpoint is missing in Turn 1!"
+    
+    enriched_intent_1 = state_turn1.get("enriched_intent") or {}
+    explanation_codes_1 = enriched_intent_1.get("explanation_codes")
+    logger.info("Turn 1 Discovered explanation_codes (%d items): %s", len(explanation_codes_1 or []), explanation_codes_1)
+    assert explanation_codes_1 is not None and len(explanation_codes_1) > 0, "explanation_codes was NOT attached to enriched_intent in Turn 1!"
+
+    # Simulate turn 2: User confirms codes
+    inputs_turn2 = {
+        "messages": [("user", "confirm codes")],
+    }
+    state_turn2 = await graph.ainvoke(inputs_turn2, config)
+    logger.info("Turn 2 execution state: next_action=%s, confirmed=%s", state_turn2.get("next_action"), state_turn2.get("explanation_codes_confirmed"))
+    assert state_turn2.get("explanation_codes_confirmed") is True, "explanation_codes_confirmed was NOT set to True in Turn 2!"
+    
+    enriched_intent_2 = state_turn2.get("enriched_intent") or {}
+    explanation_codes_2 = enriched_intent_2.get("explanation_codes")
+    logger.info("Turn 2 Confirmed explanation_codes in intent payload: %s", explanation_codes_2)
+    assert explanation_codes_2 == explanation_codes_1, "Confirmed explanation codes were lost in Turn 2!"
 
     print("\nCHECKPOINT 1 FLOW TEST PASSED SUCCESSFULLY!")
 
 
 if __name__ == "__main__":
     test_shadow_executor_resilience()
+    import time
+    time.sleep(5)
     asyncio.run(test_checkpoint1_flow())

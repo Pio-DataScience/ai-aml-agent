@@ -412,10 +412,10 @@ def orchestrator_node(
                     q_text = cl.get("question") if isinstance(cl, dict) else str(cl)
                     fallback_msg += f"{idx}. **{q_text}**\n"
                 decision.message_to_user = fallback_msg
-            else:
-                decision.message_to_user = (
-                    "Please provide more details about the scenario you want to build."
-                )
+    # Initial scenario request fallback: Force route to INTENT if no enriched_intent exists yet
+    if not state.get("enriched_intent") and decision.next_action != "INTENT":
+        logger.info("[ORCHESTRATOR] Initial scenario request detected without intent — forcing next_action to INTENT.")
+        decision.next_action = "INTENT"
 
     updates: Dict[str, Any] = {"iteration_count": iteration}
 
@@ -690,44 +690,33 @@ RULES:
         response = llm.invoke(llm_messages)
         raw_content = response.content.strip()
 
-        # Strip any accidental markdown fences
-        raw_content = re.sub(r"^```(?:json)?\s*", "", raw_content)
-        raw_content = re.sub(r"\s*```$", "", raw_content)
+        # Clean JSON fences if present
+        match = re.search(r"```(?:json)?\s*([\s\S]+?)```", raw_content, re.IGNORECASE)
+        if match:
+            raw_content = match.group(1).strip()
+        else:
+            start = raw_content.find("{")
+            end = raw_content.rfind("}")
+            if start != -1 and end != -1:
+                raw_content = raw_content[start : end + 1].strip()
 
         intent_dict = json.loads(raw_content)
-        # Validate with Pydantic
-        intent = AMLIntent(**intent_dict)
 
-        # `ready_for_handoff` is the primary gate; fall back to the legacy
-        # `clarification_needed` flag if the model only populated the old field.
-        needs_clarify = (not intent.ready_for_handoff) or intent.clarification_needed
-        if bool(intent.clarifications) and intent.ready_for_handoff:
-            # Structured clarifications present but flag not set — trust the list.
-            needs_clarify = True
-
-        logger.info(
-            "[INTENT_ANALYST] Intent parsed. scenario_type=%s ready_for_handoff=%s "
-            "clarifications=%d",
-            intent.scenario_type,
-            intent.ready_for_handoff,
-            len(intent.clarifications),
-        )
-
-        next_action = "CLARIFY" if needs_clarify else "SQL_BRIDGE"
-
+        tx_type = intent_dict.get("transaction_type")
         explanation_checkpoint = None
-        discovered_codes = []
-        if intent.transaction_type:
+        discovered_codes = state.get("discovered_explanation_codes") or []
+        if tx_type:
             try:
                 from web.services.explanation_code_search import (
                     select_relevant_explanation_codes,
                     format_explanation_code_checkpoint,
                 )
 
-                discovered_codes = select_relevant_explanation_codes(intent.transaction_type)
+                if not discovered_codes:
+                    discovered_codes = select_relevant_explanation_codes(tx_type)
                 if discovered_codes:
                     explanation_checkpoint = format_explanation_code_checkpoint(
-                        intent.transaction_type, discovered_codes
+                        tx_type, discovered_codes
                     )
                     logger.info(
                         "[INTENT_ANALYST] Generated explanation code discovery checkpoint with %d codes.",
@@ -736,8 +725,34 @@ RULES:
             except Exception as exc:
                 logger.error("[INTENT_ANALYST] Failed explanation code vector search: %s", exc)
 
+        # Extract code strings and assign to intent_dict
+        code_strings = [str(c.get("code")).strip() for c in discovered_codes if isinstance(c, dict) and c.get("code")]
+        if code_strings:
+            mentioned_codes = re.findall(r"\b\d{3,6}\b", last_user_msg)
+            matched_subset = [c for c in mentioned_codes if c in code_strings]
+            if matched_subset:
+                logger.info("[INTENT_ANALYST] User specified code subset: %s", matched_subset)
+                intent_dict["explanation_codes"] = matched_subset
+            else:
+                intent_dict["explanation_codes"] = code_strings
+        elif state.get("enriched_intent", {}).get("explanation_codes"):
+            intent_dict["explanation_codes"] = state["enriched_intent"]["explanation_codes"]
+
+        # Validate with Pydantic contract
+        intent = AMLIntent(**intent_dict)
+        enriched_dict = intent.model_dump()
+
+        logger.info(
+            "[INTENT_ANALYST] Enriched intent ready. transaction_type=%s, explanation_codes=%s",
+            intent.transaction_type,
+            intent.explanation_codes,
+        )
+
+        needs_clarify = (not intent.ready_for_handoff) or intent.clarification_needed or bool(intent.clarifications)
+        next_action = "CLARIFY" if needs_clarify else "SQL_BRIDGE"
+
         return {
-            "enriched_intent": intent.model_dump(),
+            "enriched_intent": enriched_dict,
             "user_intent": last_user_msg,
             "next_action": next_action,
             "discovered_explanation_codes": discovered_codes,
