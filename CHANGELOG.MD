@@ -11,6 +11,23 @@ Format: `[DATE] TYPE: Description`
 - Added `BaselineWindow` Pydantic model and `baseline_window: Optional[BaselineWindow]` field to `AMLIntent` contract in [schemas.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/schemas.py).
 - Added `[INTENT EXTRACTION RULE: HISTORICAL BASELINE ISOLATION]` to Intent Analyst system prompts in [agent.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/agent.py) and [intent_analyst_system_v2.md](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/prompts/intent_analyst_system_v2.md).
 - Updated [planner_system.md](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/prompts/planner_system.md) to render the non-overlapping `baseline_window` explicitly under the plan's Time Interval section.
+## [2026-08-08] feat: Vector Similarity Explanation Code Discovery (RAG) & v2 Autonomous Orchestrator
+
+### What
+- **Explanation Code Vector Discovery Module (`explanation_code_search.py`):**
+  - Built persistent vector embedding cache over Oracle DWH table `PIO_EXPLANATION_CODE` (6,935 rows).
+  - Retrieves top $K = 100$ vector similarity candidates for any transaction type (e.g. *"OUTWARD TRANSFERS"*).
+  - Uses lightweight 1-liner sub-LLM call (`LLM_MODEL_FAST` / `gpt-4o-mini`) to filter and rank the top explanation codes.
+  - Renders an interactive markdown table view for HITL Checkpoint 1 confirmation.
+- **Goal-Oriented Autonomous Orchestrator Prompt (v2):**
+  - Archived legacy v1 prompt in [orchestrator_system_v1.md](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/prompts/archive/orchestrator_system_v1.md).
+  - Replaced micromanaged rigid decision tree with a lean, cognitive prompt [orchestrator_system.md](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/prompts/orchestrator_system.md) driving the 4 goal checkpoints.
+  - Eliminates silent routing loops on vague user requests.
+- **Refactored Escalation Report:**
+  - Removed legacy Query Builder 4-table verification fields from `_generate_escalation_report()` in [agent.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/agent.py), aligning 100% with the Standalone Production SQL Engine.
+
+---
+
 ## [2026-08-08] feat: Standalone Production SQL Engine & Fluid HITL Architecture
 
 ### What

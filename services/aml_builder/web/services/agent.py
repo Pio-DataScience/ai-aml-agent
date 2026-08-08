@@ -112,6 +112,10 @@ class AMLScenarioState(TypedDict):
     escalation_report: Optional[str]  # markdown escalation report on terminal failure
     failure_mode: Optional[str]  # "REDEFINE" | "ADJUST" | "ESCALATE"
 
+    # Explanation code discovery
+    discovered_explanation_codes: Optional[List[Dict[str, Any]]]
+    explanation_code_checkpoint: Optional[str]  # Markdown table view for Checkpoint 1
+
 
 # =============================================================================
 # LLM FACTORY
@@ -495,79 +499,50 @@ def orchestrator_node(
 
 
 def _generate_escalation_report(state: AMLScenarioState) -> str:
-    """Build a structured markdown escalation report for the implementation team.
+    """Build a structured markdown escalation report for the compliance & DWH engineering team.
 
-    Includes everything needed to reproduce and diagnose the failure:
-    scenario intent, generated parameters, Oracle errors, catalog provisions,
-    write and validation results, and timestamps.
-
-    Args:
-        state (AMLScenarioState): Current agent state at time of escalation.
-
-    Returns:
-        str: Full markdown escalation report.
+    Includes scenario intent, generated production SQL, error logs, and DWH shadow testing metrics.
     """
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
     intent_dict = state.get("enriched_intent") or {}
-    scenario_code = state.get("scenario_code", "Not generated")
+    scenario_code = state.get("scenario_code", "PENDING")
     error_log = state.get("error_log", [])
-    catalog_creations = state.get("catalog_creations") or []
-    params_dict = state.get("scenario_parameters") or {}
-    write_verification = state.get("write_verification") or {}
     validation_result = state.get("validation_result") or {}
 
     errors_text = "\n".join(f"- {e}" for e in error_log) or "_No errors logged._"
-    catalog_text = (
-        "\n".join(
-            f"- **{c.get('entity_type')}** `{c.get('code')}`: "
-            f"{c.get('name')} ({c.get('business_name')})"
-            for c in catalog_creations
-        )
-        or "_None — all parameters were pre-existing in the catalog._"
-    )
 
     raw_sql = state.get("raw_sql")
     sql_text = f"```sql\n{raw_sql}\n```" if raw_sql else "_No SQL query was generated._"
 
     report_content = (
-        f"# AML Scenario Escalation Report\n\n"
+        f"# AML Scenario Technical Escalation Report\n\n"
         f"**Generated:** {now}  \n"
         f"**Scenario Code:** `{scenario_code}`  \n"
-        f"**System:** PioTech AML Builder — Automated Agent\n\n"
+        f"**Engine:** PioTech AML Standalone Production Engine\n\n"
         f"---\n\n"
-        f"## Intent Submitted\n\n"
+        f"## 1. Scenario Intent & Parameters\n\n"
         f"```json\n{json.dumps(intent_dict, indent=2, default=str, ensure_ascii=False)}\n```\n\n"
         f"---\n\n"
-        f"## Generated SQL Query\n\n"
+        f"## 2. Generated ANSI Oracle SQL Query\n\n"
         f"{sql_text}\n\n"
         f"---\n\n"
-        f"## Error Log (Chronological)\n\n"
+        f"## 3. System Error & Diagnostic Log\n\n"
         f"{errors_text}\n\n"
         f"---\n\n"
-        f"## Catalog Auto-Provisions Attempted\n\n"
-        f"{catalog_text}\n\n"
-        f"---\n\n"
-        f"## Scenario Parameters Generated\n\n"
-        f"```json\n{json.dumps(params_dict, indent=2, default=str, ensure_ascii=False)}\n```\n\n"
-        f"---\n\n"
-        f"## Write Verification Results\n\n"
-        f"```json\n{json.dumps(write_verification, indent=2, default=str, ensure_ascii=False)}\n```\n\n"
-        f"---\n\n"
-        f"## Validation Results\n\n"
+        f"## 4. DWH Shadow Testing & Validation Metrics\n\n"
         f"```json\n{json.dumps(validation_result, indent=2, default=str, ensure_ascii=False)}\n```\n\n"
         f"---\n\n"
-        f"_This report was generated automatically by the AML Builder agent._  \n"
-        f"_Please reference Scenario Code `{scenario_code}` in all correspondence._"
+        f"_This report was generated automatically by the AML Scenario Agent._  \n"
+        f"_Reference Scenario Code `{scenario_code}` in all support communications._"
     )
 
-    # Persist the escalation report dynamically using the SOLID DatePartitionedFilePersister
     try:
         from web.services.persister import DatePartitionedFilePersister
 
         persister = DatePartitionedFilePersister()
         persister.persist(scenario_code, report_content)
     except Exception as exc:
-        logger.error("[CATALOG] Failed to persistently save escalation report: %s", exc)
+        logger.error("[PERSISTER] Failed to save escalation report: %s", exc)
 
     return report_content
 
@@ -720,10 +695,33 @@ RULES:
 
         next_action = "CLARIFY" if needs_clarify else "SQL_BRIDGE"
 
+        explanation_checkpoint = None
+        discovered_codes = []
+        if intent.transaction_type:
+            try:
+                from web.services.explanation_code_search import (
+                    select_relevant_explanation_codes,
+                    format_explanation_code_checkpoint,
+                )
+
+                discovered_codes = select_relevant_explanation_codes(intent.transaction_type)
+                if discovered_codes:
+                    explanation_checkpoint = format_explanation_code_checkpoint(
+                        intent.transaction_type, discovered_codes
+                    )
+                    logger.info(
+                        "[INTENT_ANALYST] Generated explanation code discovery checkpoint with %d codes.",
+                        len(discovered_codes),
+                    )
+            except Exception as exc:
+                logger.error("[INTENT_ANALYST] Failed explanation code vector search: %s", exc)
+
         return {
             "enriched_intent": intent.model_dump(),
             "user_intent": last_user_msg,
             "next_action": next_action,
+            "discovered_explanation_codes": discovered_codes,
+            "explanation_code_checkpoint": explanation_checkpoint,
         }
 
     except (json.JSONDecodeError, Exception) as exc:
