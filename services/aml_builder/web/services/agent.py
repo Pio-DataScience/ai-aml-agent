@@ -417,6 +417,8 @@ def orchestrator_node(
                     "Please provide more details about the scenario you want to build."
                 )
 
+    updates: Dict[str, Any] = {"iteration_count": iteration}
+
     # Checkpoint 1: Domain Explanation Code Discovery Checkpoint
     checkpoint = state.get("explanation_code_checkpoint")
     confirmed = state.get("explanation_codes_confirmed", False)
@@ -433,7 +435,7 @@ def orchestrator_node(
         else:
             logger.info("[ORCHESTRATOR] Presenting Checkpoint 1 explanation code table view.")
             decision.next_action = "WAIT_USER"
-            if not decision.message_to_user or "PIO_EXPLANATION_CODE" not in decision.message_to_user:
+            if not decision.message_to_user or "Discovered Transaction Types" not in decision.message_to_user:
                 decision.message_to_user = f"{checkpoint}"
 
     logger.info(
@@ -441,8 +443,6 @@ def orchestrator_node(
         decision.next_action,
         "yes" if decision.message_to_user else "none (silent routing)",
     )
-
-    updates: Dict[str, Any] = {"iteration_count": iteration}
 
     if decision.message_to_user:
         # Persist plan_artifact and validation_result inside message additional_kwargs for history reload

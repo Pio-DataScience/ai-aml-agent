@@ -11,6 +11,14 @@ Format: `[DATE] TYPE: Description`
 - Added `BaselineWindow` Pydantic model and `baseline_window: Optional[BaselineWindow]` field to `AMLIntent` contract in [schemas.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/schemas.py).
 - Added `[INTENT EXTRACTION RULE: HISTORICAL BASELINE ISOLATION]` to Intent Analyst system prompts in [agent.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/agent.py) and [intent_analyst_system_v2.md](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/prompts/intent_analyst_system_v2.md).
 - Updated [planner_system.md](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/prompts/planner_system.md) to render the non-overlapping `baseline_window` explicitly under the plan's Time Interval section.
+## [2026-08-08] fix: Fix UnboundLocalError for 'updates' Variable in Orchestrator Node
+
+### What
+- **Variable Initialization Placement:** Moved `updates: Dict[str, Any] = {"iteration_count": iteration}` initialization to the top of `orchestrator_node` before Checkpoint 1 execution blocks in [agent.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/agent.py#L418).
+- **Eliminated Runtime Traceback:** Resolved `UnboundLocalError: local variable 'updates' where it is not associated with a value` during background Graph streaming executions.
+
+---
+
 ## [2026-08-08] feat: Country & Institution Code Database Filter for Explanation Codes
 
 ### What
