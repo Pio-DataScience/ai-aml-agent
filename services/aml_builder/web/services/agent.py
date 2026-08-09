@@ -735,8 +735,8 @@ RULES:
                 intent_dict["explanation_codes"] = matched_subset
             else:
                 intent_dict["explanation_codes"] = code_strings
-        elif state.get("enriched_intent", {}).get("explanation_codes"):
-            intent_dict["explanation_codes"] = state["enriched_intent"]["explanation_codes"]
+        elif (state.get("enriched_intent") or {}).get("explanation_codes"):
+            intent_dict["explanation_codes"] = (state.get("enriched_intent") or {})["explanation_codes"]
 
         # Validate with Pydantic contract
         intent = AMLIntent(**intent_dict)
