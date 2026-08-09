@@ -112,6 +112,11 @@ class AMLScenarioState(TypedDict):
     escalation_report: Optional[str]  # markdown escalation report on terminal failure
     failure_mode: Optional[str]  # "REDEFINE" | "ADJUST" | "ESCALATE"
 
+    # Domain Explanation Codes Discovery Layer
+    explanation_code_checkpoint: Optional[str]
+    discovered_explanation_codes: Optional[List[Dict[str, Any]]]
+    explanation_codes_confirmed: bool
+
 
 # =============================================================================
 # LLM FACTORY

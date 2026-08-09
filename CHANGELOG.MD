@@ -5,6 +5,14 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-08-09] fix: Register explanation code state fields in AMLScenarioState TypedDict
+
+### What
+- Added `explanation_code_checkpoint`, `discovered_explanation_codes`, and `explanation_codes_confirmed` fields to `AMLScenarioState` TypedDict in [agent.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/agent.py#L115-L118).
+- Resolves LangGraph state key filtering so explanation code table views pass into orchestrator prompt context.
+
+---
+
 ## [2026-08-09] feat: Relative Top 70% Cutoff for Explanation Code Vector Search
 
 ### What
