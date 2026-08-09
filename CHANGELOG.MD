@@ -5,6 +5,13 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-08-09] feat: Relative Top 70% Cutoff for Explanation Code Vector Search
+
+### What
+- **Relative Similarity Cutoff:** Updated `search_explanation_candidates` in [explanation_code_search.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/explanation_code_search.py#L126-L156) to filter candidate explanation codes using relative top 70% score cutoff (`max_score * 0.70`) up to top 100 items.
+
+---
+
 ## [2026-07-24] upgrade: mandatory baseline_window schema contract & zero-overlap isolation rule
 
 ### What
