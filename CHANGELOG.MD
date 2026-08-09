@@ -5,7 +5,20 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-08-09] feat: Production-Ready Tool-Driven Agent — Shadow Test & Persistence Upgrades
+
+### What
+- **`execute_oracle_dwh_shadow_test` — Real PioTech AI SQL Generation:** Replaced the placeholder `PIO_EXPLANATION_CODE COUNT(*) * 4` stub with a full SSE streaming call to the PioTech AI text-to-SQL service (same `PIOTECH_AI_URL` used by classic `agent.py`). SQL is extracted via `_extract_sql()`, then wrapped in a `SELECT COUNT(*) FROM (...)` shadow query executed live against Oracle `BI_DWH`.
+- **`persist_and_validate_scenario_in_dwh` — Production Registry Write:** Replaced 3-table legacy QB INSERT statements (`PIO_AML_SCENARIOS`, `PIO_AML_RULES`, `PIO_AML_SCENARIO_RULES`) with a single call to `production_registry.save_production_scenario()`. Writes to `PIO_AML_PRODUCTION_SCENARIOS` table with idempotent INSERT-or-UPDATE semantics and `IS_ACTIVE=1`.
+- **`generate_scenario_execution_plan` — Richer Plan Artifact:** Now accepts optional `explanation_code_checkpoint` to embed the discovered codes table directly inside the plan markdown.
+- **Graph-Level Interrupt Gate:** Added `interrupt_after=["generate_scenario_execution_plan"]` to `create_react_agent(...)`. The graph now **hard-stops** after plan generation and only resumes when the user sends a new approval message — no longer relies solely on system prompt instruction.
+- **Scenario ID Format:** Persisted scenarios use `PRD_{8-char-hex}` format (e.g. `PRD_A1B2C3D4`).
+- **Files Changed:** [agent_tool_driven.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/agent_tool_driven.py)
+
+---
+
 ## [2026-08-09] fix: Declare explanation_codes field in AMLIntent Pydantic Schema
+
 
 ### What
 - **AMLIntent Schema Fix:** Added `explanation_codes: Optional[List[str]]` to `AMLIntent` Pydantic model contract in [schemas.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/schemas.py#L226-L231).

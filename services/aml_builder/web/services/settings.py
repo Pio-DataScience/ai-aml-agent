@@ -40,6 +40,10 @@ class Settings(BaseSettings):
         default=False,
         description="Enables verbose debug logging when True.",
     )
+    USE_TOOL_DRIVEN_AGENT: bool = Field(
+        default=False,
+        description="If True, route web API requests to the tool-driven agent.",
+    )
 
     # ─── LLM ──────────────────────────────────────────────────────────────────
     LLM_PROVIDER: str = Field(

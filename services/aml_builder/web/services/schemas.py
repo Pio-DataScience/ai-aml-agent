@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # =============================================================================
@@ -68,6 +68,21 @@ class TimeWindow(BaseModel):
     unit: Literal["DAYS", "WEEKS", "MONTHS", "YEARS"] = Field(
         ..., description="Time unit."
     )
+
+    @field_validator("unit", mode="before")
+    @classmethod
+    def _normalize_unit(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            v_upper = v.upper().strip()
+            unit_map = {
+                "DAY": "DAYS",
+                "WEEK": "WEEKS",
+                "MONTH": "MONTHS",
+                "YEAR": "YEARS",
+            }
+            return unit_map.get(v_upper, v_upper)
+        return v
+
     value: int = Field(..., description="Numeric size of the time window.")
     is_rolling: bool = Field(
         default=True,
@@ -97,6 +112,20 @@ class BaselineWindow(BaseModel):
     unit: Literal["DAYS", "WEEKS", "MONTHS", "YEARS"] = Field(
         default="DAYS", description="Time unit."
     )
+
+    @field_validator("unit", mode="before")
+    @classmethod
+    def _normalize_unit(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            v_upper = v.upper().strip()
+            unit_map = {
+                "DAY": "DAYS",
+                "WEEK": "WEEKS",
+                "MONTH": "MONTHS",
+                "YEAR": "YEARS",
+            }
+            return unit_map.get(v_upper, v_upper)
+        return v
     duration: int = Field(
         ..., description="Duration of historical baseline window in units."
     )

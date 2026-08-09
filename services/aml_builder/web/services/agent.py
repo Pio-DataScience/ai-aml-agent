@@ -116,6 +116,7 @@ class AMLScenarioState(TypedDict):
     explanation_code_checkpoint: Optional[str]
     discovered_explanation_codes: Optional[List[Dict[str, Any]]]
     explanation_codes_confirmed: bool
+    explanation_codes_presented: bool
 
 
 # =============================================================================
@@ -453,38 +454,8 @@ def orchestrator_node(
     if action in ("INTENT", "PLANNER"):
         decision.message_to_user = None
 
-    checkpoint = state.get("explanation_code_checkpoint")
-    confirmed = state.get("explanation_codes_confirmed", False)
-
-    if checkpoint and not confirmed:
-        raw_msgs = state.get("messages", [])
-        last_msg_lower = (
-            raw_msgs[-1].content.lower()
-            if raw_msgs and isinstance(raw_msgs[-1], HumanMessage)
-            else ""
-        )
-        confirm_keywords = [
-            "confirm",
-            "confirm codes",
-            "yes",
-            "proceed",
-            "looks good",
-            "ok",
-            "use these",
-        ]
-        if any(k in last_msg_lower for k in confirm_keywords):
-            logger.info("[ORCHESTRATOR] User confirmed domain explanation codes!")
-            updates["explanation_codes_confirmed"] = True
-        else:
-            logger.info(
-                "[ORCHESTRATOR] Presenting Checkpoint 1 explanation code table view."
-            )
-            decision.next_action = "WAIT_USER"
-            if (
-                not decision.message_to_user
-                or "Discovered Transaction Types" not in decision.message_to_user
-            ):
-                decision.message_to_user = f"{checkpoint}"
+    if state.get("explanation_code_checkpoint") and decision.next_action == "WAIT_USER":
+        updates["explanation_codes_presented"] = True
 
     # ── Mechanical side effects based on LLM decision ─────────────────────────
 
@@ -759,8 +730,7 @@ RULES:
                     format_explanation_code_checkpoint,
                 )
 
-                if not discovered_codes:
-                    discovered_codes = select_relevant_explanation_codes(tx_type)
+                discovered_codes = select_relevant_explanation_codes(tx_type)
                 if discovered_codes:
                     explanation_checkpoint = format_explanation_code_checkpoint(
                         tx_type, discovered_codes
@@ -772,20 +742,13 @@ RULES:
             except Exception as exc:
                 logger.error("[INTENT_ANALYST] Failed explanation code vector search: %s", exc)
 
-        # Extract code strings and assign to intent_dict
-        user_specified = False
+        # Ensure explanation_codes is populated in intent_dict if vector search found codes and intent_dict has none
         code_strings = [str(c.get("code")).strip() for c in discovered_codes if isinstance(c, dict) and c.get("code")]
-        if code_strings:
-            mentioned_codes = re.findall(r"\b\d{1,6}\b", last_user_msg)
-            matched_subset = [c for c in mentioned_codes if c in code_strings]
-            if matched_subset:
-                logger.info("[INTENT_ANALYST] User specified code subset: %s", matched_subset)
-                intent_dict["explanation_codes"] = matched_subset
-                user_specified = True
-            else:
+        if not intent_dict.get("explanation_codes"):
+            if code_strings:
                 intent_dict["explanation_codes"] = code_strings
-        elif (state.get("enriched_intent") or {}).get("explanation_codes"):
-            intent_dict["explanation_codes"] = (state.get("enriched_intent") or {})["explanation_codes"]
+            elif (state.get("enriched_intent") or {}).get("explanation_codes"):
+                intent_dict["explanation_codes"] = (state.get("enriched_intent") or {})["explanation_codes"]
 
         # Validate with Pydantic
         intent = AMLIntent(**intent_dict)
@@ -808,17 +771,13 @@ RULES:
 
         next_action = "CLARIFY" if needs_clarify else "SQL_BRIDGE"
 
-        res_dict = {
+        return {
             "enriched_intent": intent.model_dump(),
             "user_intent": last_user_msg,
             "next_action": next_action,
             "discovered_explanation_codes": discovered_codes,
             "explanation_code_checkpoint": explanation_checkpoint,
         }
-        if user_specified:
-            res_dict["explanation_codes_confirmed"] = True
-
-        return res_dict
 
     except (json.JSONDecodeError, Exception) as exc:
         logger.error("[INTENT_ANALYST] Failed to parse intent: %s", exc, exc_info=True)
@@ -3440,36 +3399,23 @@ def route_after_intent(state: AMLScenarioState) -> str:
     """Route after Intent Analyst node."""
     action = state.get("next_action", "SQL_BRIDGE")
     checkpoint = state.get("explanation_code_checkpoint")
-    confirmed = state.get("explanation_codes_confirmed", False)
-
-    if checkpoint and not confirmed:
-        logger.info(
-            "[ROUTER] Domain explanation code checkpoint active — routing to orchestrator."
-        )
-        return "orchestrator"
+    presented = state.get("explanation_codes_presented", False)
 
     if action in ("CLARIFY", "CONFIRM_DOMAIN", "ERROR"):
         return "orchestrator"
 
-    return "planner"  # always plan first before sql_bridge
+    if checkpoint and not presented:
+        logger.info(
+            "[ROUTER] Domain explanation codes newly discovered — routing to orchestrator to present to user."
+        )
+        return "orchestrator"
+
+    return "planner"  # proceed to planner once checkpoint has been presented
 
 
 def route_after_planner(state: AMLScenarioState) -> str:
-    """Route after the Planner node.
-
-    On success: returns END to pause execution and wait for user approval.
-    On error: routes to orchestrator for failure handling.
-
-    Args:
-        state (AMLScenarioState): Current state.
-
-    Returns:
-        str: END or 'orchestrator'.
-    """
-    action = state.get("next_action", "WAIT_APPROVAL")
-    if action == "ERROR":
-        return "orchestrator"
-    return END  # Pause execution and wait for user approval
+    """Route after Planner node back to orchestrator."""
+    return "orchestrator"
 
 
 def route_after_sql_bridge(state: AMLScenarioState) -> str:

@@ -348,6 +348,41 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
         try:
             yield _sse(SSEEvent(type="thinking", status="Analyzing your request..."))
 
+            if settings.USE_TOOL_DRIVEN_AGENT:
+                logger.info("[API] Running production tool-driven ReAct agent engine...")
+                from web.services.agent_tool_driven import get_tool_driven_graph
+                from langchain_core.messages import AIMessage, ToolMessage
+
+                tool_graph = await get_tool_driven_graph()
+                user_msg = request.messages[-1].content if request.messages else ""
+                inputs = {"messages": [HumanMessage(content=user_msg)]}
+
+                async for event in tool_graph.astream(inputs, config=config):
+                    for node_name, node_output in event.items():
+                        if not isinstance(node_output, dict):
+                            continue
+                        msgs = node_output.get("messages", [])
+                        for m in msgs:
+                            # Suppress internal ToolMessages (raw JSON outputs)
+                            if isinstance(m, ToolMessage) or getattr(m, "type", None) == "tool":
+                                continue
+
+                            if isinstance(m, AIMessage) or getattr(m, "type", None) == "ai":
+                                # Emit tool call indicator if LLM requested a tool, but suppress raw payload
+                                if getattr(m, "tool_calls", None):
+                                    for tc in m.tool_calls:
+                                        t_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "tool")
+                                        yield _sse(SSEEvent(type="tool_call", tool=t_name))
+                                    continue
+
+                                # Stream natural language content to user
+                                text = getattr(m, "content", "")
+                                if isinstance(text, str) and text.strip():
+                                    yield _sse(SSEEvent(type="content", text=text))
+
+                yield _sse(SSEEvent(type="done"))
+                return
+
             async for event in graph.astream(initial_state, config=config):
                 for node_name, node_output in event.items():
                     if not isinstance(node_output, dict):
