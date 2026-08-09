@@ -5,6 +5,14 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-08-09] fix: Declare explanation_codes field in AMLIntent Pydantic Schema
+
+### What
+- **AMLIntent Schema Fix:** Added `explanation_codes: Optional[List[str]]` to `AMLIntent` Pydantic model contract in [schemas.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/schemas.py#L226-L231).
+- **AttributeError Prevention:** Eliminates `AttributeError: 'AMLIntent' object has no attribute 'explanation_codes'` during intent serialization and handoff to execution planner.
+
+---
+
 ## [2026-08-09] fix: Code Regex Match, Silent Orchestrator Routing & Automatic Plan Regeneration
 
 ### What

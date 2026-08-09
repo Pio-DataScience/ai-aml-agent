@@ -226,6 +226,10 @@ class AMLIntent(BaseModel):
             "'OUTWARD TRANSFER', or null if all transaction types are monitored."
         ),
     )
+    explanation_codes: Optional[List[str]] = Field(
+        default=None,
+        description="Discovered or user-selected domain explanation code strings.",
+    )
     detection_logic: str = Field(
         ..., description="Plain English description of the detection logic."
     )
