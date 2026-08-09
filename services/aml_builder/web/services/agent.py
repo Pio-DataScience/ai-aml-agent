@@ -449,6 +449,10 @@ def orchestrator_node(
 
     action = decision.next_action
 
+    # Mechanical safety rule: Suppress conversational chatter when routing silently to INTENT or PLANNER
+    if action in ("INTENT", "PLANNER"):
+        decision.message_to_user = None
+
     checkpoint = state.get("explanation_code_checkpoint")
     confirmed = state.get("explanation_codes_confirmed", False)
 
@@ -769,13 +773,15 @@ RULES:
                 logger.error("[INTENT_ANALYST] Failed explanation code vector search: %s", exc)
 
         # Extract code strings and assign to intent_dict
+        user_specified = False
         code_strings = [str(c.get("code")).strip() for c in discovered_codes if isinstance(c, dict) and c.get("code")]
         if code_strings:
-            mentioned_codes = re.findall(r"\b\d{3,6}\b", last_user_msg)
+            mentioned_codes = re.findall(r"\b\d{1,6}\b", last_user_msg)
             matched_subset = [c for c in mentioned_codes if c in code_strings]
             if matched_subset:
                 logger.info("[INTENT_ANALYST] User specified code subset: %s", matched_subset)
                 intent_dict["explanation_codes"] = matched_subset
+                user_specified = True
             else:
                 intent_dict["explanation_codes"] = code_strings
         elif (state.get("enriched_intent") or {}).get("explanation_codes"):
@@ -793,21 +799,26 @@ RULES:
 
         logger.info(
             "[INTENT_ANALYST] Intent parsed. scenario_type=%s ready_for_handoff=%s "
-            "clarifications=%d",
+            "clarifications=%d explanation_codes=%s",
             intent.scenario_type,
             intent.ready_for_handoff,
             len(intent.clarifications),
+            intent.explanation_codes,
         )
 
         next_action = "CLARIFY" if needs_clarify else "SQL_BRIDGE"
 
-        return {
+        res_dict = {
             "enriched_intent": intent.model_dump(),
             "user_intent": last_user_msg,
             "next_action": next_action,
             "discovered_explanation_codes": discovered_codes,
             "explanation_code_checkpoint": explanation_checkpoint,
         }
+        if user_specified:
+            res_dict["explanation_codes_confirmed"] = True
+
+        return res_dict
 
     except (json.JSONDecodeError, Exception) as exc:
         logger.error("[INTENT_ANALYST] Failed to parse intent: %s", exc, exc_info=True)

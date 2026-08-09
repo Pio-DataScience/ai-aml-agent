@@ -5,6 +5,15 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-08-09] fix: Code Regex Match, Silent Orchestrator Routing & Automatic Plan Regeneration
+
+### What
+- **1-6 Digit Regex Matching:** Updated regex in [agent.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/agent.py#L779) to `\b\d{1,6}\b` (was `\b\d{3,6}\b`), enabling 1-digit and 2-digit codes (e.g. code `1` or `660`) to be parsed correctly.
+- **Silent Orchestrator Routing:** Added mechanical safety rule in [agent.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/agent.py#L453) setting `decision.message_to_user = None` when routing to `INTENT` or `PLANNER` to eliminate raw table dumps and conversational chatter during background processing.
+- **Automatic Code Confirmation & Plan Regeneration:** `intent_analyst_node` automatically sets `explanation_codes_confirmed = True` when the user selects a code subset, causing `route_after_intent` to immediately route to `planner_node` to regenerate the plan artifact.
+
+---
+
 ## [2026-08-09] fix: Register explanation code state fields in AMLScenarioState TypedDict
 
 ### What
