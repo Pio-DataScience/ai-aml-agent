@@ -295,8 +295,14 @@ def _build_state_context(state: AMLScenarioState, iteration: int) -> str:
     if plan_art:
         plan_str = f"\n\n**CURRENT ACTIVE SCENARIO PLAN:**\n{plan_art[:1500]}\n"
 
+    expl_checkpoint = state.get("explanation_code_checkpoint")
+    expl_block = ""
+    if expl_checkpoint and not state.get("explanation_codes_confirmed", False):
+        expl_block = f'\n\n**DISCOVERED DOMAIN EXPLANATION CODES TABLE (Present this full formatted table to the user for review in your message_to_user):**\n{expl_checkpoint}\n'
+
     return (
         table
+        + expl_block
         + intent_json_str
         + plan_str
         + error_block
@@ -437,6 +443,39 @@ def orchestrator_node(
         ]
 
     action = decision.next_action
+
+    checkpoint = state.get("explanation_code_checkpoint")
+    confirmed = state.get("explanation_codes_confirmed", False)
+
+    if checkpoint and not confirmed:
+        raw_msgs = state.get("messages", [])
+        last_msg_lower = (
+            raw_msgs[-1].content.lower()
+            if raw_msgs and isinstance(raw_msgs[-1], HumanMessage)
+            else ""
+        )
+        confirm_keywords = [
+            "confirm",
+            "confirm codes",
+            "yes",
+            "proceed",
+            "looks good",
+            "ok",
+            "use these",
+        ]
+        if any(k in last_msg_lower for k in confirm_keywords):
+            logger.info("[ORCHESTRATOR] User confirmed domain explanation codes!")
+            updates["explanation_codes_confirmed"] = True
+        else:
+            logger.info(
+                "[ORCHESTRATOR] Presenting Checkpoint 1 explanation code table view."
+            )
+            decision.next_action = "WAIT_USER"
+            if (
+                not decision.message_to_user
+                or "Discovered Transaction Types" not in decision.message_to_user
+            ):
+                decision.message_to_user = f"{checkpoint}"
 
     # ── Mechanical side effects based on LLM decision ─────────────────────────
 
@@ -700,6 +739,43 @@ RULES:
         raw_content = re.sub(r"\s*```$", "", raw_content)
 
         intent_dict = json.loads(raw_content)
+
+        tx_type = intent_dict.get("transaction_type")
+        explanation_checkpoint = None
+        discovered_codes = state.get("discovered_explanation_codes") or []
+        if tx_type:
+            try:
+                from web.services.explanation_code_search import (
+                    select_relevant_explanation_codes,
+                    format_explanation_code_checkpoint,
+                )
+
+                if not discovered_codes:
+                    discovered_codes = select_relevant_explanation_codes(tx_type)
+                if discovered_codes:
+                    explanation_checkpoint = format_explanation_code_checkpoint(
+                        tx_type, discovered_codes
+                    )
+                    logger.info(
+                        "[INTENT_ANALYST] Generated explanation code discovery checkpoint with %d codes.",
+                        len(discovered_codes),
+                    )
+            except Exception as exc:
+                logger.error("[INTENT_ANALYST] Failed explanation code vector search: %s", exc)
+
+        # Extract code strings and assign to intent_dict
+        code_strings = [str(c.get("code")).strip() for c in discovered_codes if isinstance(c, dict) and c.get("code")]
+        if code_strings:
+            mentioned_codes = re.findall(r"\b\d{3,6}\b", last_user_msg)
+            matched_subset = [c for c in mentioned_codes if c in code_strings]
+            if matched_subset:
+                logger.info("[INTENT_ANALYST] User specified code subset: %s", matched_subset)
+                intent_dict["explanation_codes"] = matched_subset
+            else:
+                intent_dict["explanation_codes"] = code_strings
+        elif (state.get("enriched_intent") or {}).get("explanation_codes"):
+            intent_dict["explanation_codes"] = (state.get("enriched_intent") or {})["explanation_codes"]
+
         # Validate with Pydantic
         intent = AMLIntent(**intent_dict)
 
@@ -724,6 +800,8 @@ RULES:
             "enriched_intent": intent.model_dump(),
             "user_intent": last_user_msg,
             "next_action": next_action,
+            "discovered_explanation_codes": discovered_codes,
+            "explanation_code_checkpoint": explanation_checkpoint,
         }
 
     except (json.JSONDecodeError, Exception) as exc:
@@ -3343,22 +3421,20 @@ def route_after_orchestrator(state: AMLScenarioState) -> str:
 
 
 def route_after_intent(state: AMLScenarioState) -> str:
-    """Route after Intent Analyst node.
-
-    Routes to planner on success (user must approve the plan before execution).
-    Routes to orchestrator on clarification requests or errors.
-
-    Args:
-        state (AMLScenarioState): Current state.
-
-    Returns:
-        str: Next node name.
-    """
+    """Route after Intent Analyst node."""
     action = state.get("next_action", "SQL_BRIDGE")
-    if action == "CLARIFY":
+    checkpoint = state.get("explanation_code_checkpoint")
+    confirmed = state.get("explanation_codes_confirmed", False)
+
+    if checkpoint and not confirmed:
+        logger.info(
+            "[ROUTER] Domain explanation code checkpoint active — routing to orchestrator."
+        )
         return "orchestrator"
-    if action == "ERROR":
+
+    if action in ("CLARIFY", "CONFIRM_DOMAIN", "ERROR"):
         return "orchestrator"
+
     return "planner"  # always plan first before sql_bridge
 
 
