@@ -22,10 +22,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import HumanMessage
 
-from web.services.agent_tool_driven import get_tool_driven_graph, close_checkpointer
-from web.services.logging_config import setup_logging
-from web.services.oracle import close_pool, init_pool
-from web.services.schemas import (
+from services.aml_builder.web.services.agent_tool_driven import get_tool_driven_graph, close_checkpointer
+from services.aml_builder.web.services.logging_config import setup_logging
+from services.aml_builder.web.services.oracle import close_pool, init_pool
+from services.aml_builder.web.services.schemas import (
     ChatRequest,
     SSEEvent,
     ChatHistoryResponse,
@@ -37,7 +37,7 @@ from web.services.schemas import (
     ChatMessage,
     ChatSessionItem,
 )
-from web.services.settings import settings
+from services.aml_builder.web.services.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -349,7 +349,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
 
             if settings.USE_TOOL_DRIVEN_AGENT:
                 logger.info("[API] Running production tool-driven ReAct agent engine...")
-                from web.services.agent_tool_driven import get_tool_driven_graph
+                from services.aml_builder.web.services.agent_tool_driven import get_tool_driven_graph
                 from langchain_core.messages import AIMessage, ToolMessage
 
                 tool_graph = await get_tool_driven_graph()

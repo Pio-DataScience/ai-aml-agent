@@ -11,7 +11,7 @@ from typing import Generator, List, Optional, Tuple, Any
 
 import oracledb
 
-from web.services.settings import settings
+from services.aml_builder.web.services.settings import settings
 
 logger = logging.getLogger(__name__)
 

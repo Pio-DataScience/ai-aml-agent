@@ -10,7 +10,7 @@ import logging.config
 import sys
 from typing import Any, Dict
 
-from web.services.settings import settings
+from services.aml_builder.web.services.settings import settings
 
 
 def get_logging_config() -> Dict[str, Any]:

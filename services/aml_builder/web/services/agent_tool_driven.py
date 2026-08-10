@@ -27,14 +27,14 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 
-from web.services.settings import settings
-from web.services.schemas import AMLIntent
-from web.services.explanation_code_search import (
+from services.aml_builder.web.services.settings import settings
+from services.aml_builder.web.services.schemas import AMLIntent
+from services.aml_builder.web.services.explanation_code_search import (
     select_relevant_explanation_codes,
     format_explanation_code_checkpoint,
 )
-from web.services.oracle import run_readonly
-from web.services.production_registry import save_production_scenario
+from services.aml_builder.web.services.oracle import run_readonly
+from services.aml_builder.web.services.production_registry import save_production_scenario
 
 logger = logging.getLogger(__name__)
 

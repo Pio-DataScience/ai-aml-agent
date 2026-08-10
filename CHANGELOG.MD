@@ -5,6 +5,15 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-08-10] feat: Standard Root Uvicorn Entrypoint (`app.py`) & Package Imports Fix
+
+### What
+- **Package Imports Fix**: Converted all internal imports across `main.py`, `agent_tool_driven.py`, `explanation_code_search.py`, `oracle.py`, `logging_config.py`, and `production_registry.py` from top-level `web...` to explicit package paths `services.aml_builder.web...`.
+- **Root Entrypoint (`app.py`)**: Created `app.py` in the root directory so standard `uvicorn app:app --reload --port 8005` works directly from root without requiring `PYTHONPATH` exports or helper scripts.
+- **Files Created/Updated**: [app.py](file:///c:/Users/abura/Development/AI_AML_AGENT/app.py), [README.md](file:///c:/Users/abura/Development/AI_AML_AGENT/README.md), [main.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/api/main.py)
+
+---
+
 ## [2026-08-10] refactor: Workspace Cleanup & Legacy agent.py Migration
 
 ### What

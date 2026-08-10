@@ -9,8 +9,8 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from web.services.settings import settings
-from web.services.oracle import run_readonly, run_write
+from services.aml_builder.web.services.settings import settings
+from services.aml_builder.web.services.oracle import run_readonly, run_write
 
 logger = logging.getLogger(__name__)
 

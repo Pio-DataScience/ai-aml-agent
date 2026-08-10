@@ -16,9 +16,8 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 from langchain_openai import OpenAIEmbeddings
 
-from web.services.agent_tool_driven import _build_llm
-from web.services.oracle import run_readonly
-from web.services.settings import settings
+from services.aml_builder.web.services.oracle import run_readonly
+from services.aml_builder.web.services.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +54,7 @@ def _load_or_build_vector_index() -> Dict[str, Any]:
         settings.AML_COUNTRY_CODE,
         settings.AML_INST_CODE,
     )
-    from web.services.oracle import init_pool, run_readonly
+    from services.aml_builder.web.services.oracle import init_pool, run_readonly
 
     try:
         init_pool()
