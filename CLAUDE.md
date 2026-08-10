@@ -47,45 +47,40 @@ PYTHONPATH=services/aml_builder pytest --asyncio-mode=auto
 
 ## Architecture
 
-The service is a **LangGraph multi-agent system** exposed via a single FastAPI SSE endpoint (`POST /chat/stream`). All source code lives under `services/aml_builder/` with `PYTHONPATH` set to that directory, so all imports are `web.*`.
+The service is a single autonomous **LangGraph ReAct tool-driven agent** exposed via a FastAPI SSE endpoint (`POST /chat/stream`). All source code lives under `services/aml_builder/` with `PYTHONPATH` set to that directory, so all imports are `web.*`. There is no multi-node graph and no routing logic in Python — the LLM decides tool invocation order via a goal-oriented system prompt. Full detail: [`Docs/01_architecture.md`](Docs/01_architecture.md) and [`Docs/02_module_layout_refactor.md`](Docs/02_module_layout_refactor.md).
 
-### Graph topology
-```
-orchestrator → intent_analyst → sql_bridge → decomposer
-                                                  ↓
-              validator ←─────────────────── qb_writer
-                  ↓ (retry → decomposer)
-              orchestrator (final answer)
-```
+### The four tools (`web/services/tools.py`)
 
-### Node responsibilities (`services/aml_builder/web/services/agent.py`)
-
-| Node | Role |
+| Tool | Role |
 |------|------|
-| `orchestrator` | Entry point for every turn. Routes between nodes, formats final user-facing message, enforces iteration cap. |
-| `intent_analyst` | Calls OpenAI to convert natural language into a structured `AMLIntent` JSON object. Raises clarification questions if intent is ambiguous. |
-| `sql_bridge` | Calls the **external PioTech AI DWH agent** (`PIOTECH_AI_URL`) via HTTP SSE to get an Oracle SQL query. Parses SQL into `SQLMetadata`. |
-| `decomposer` | Maps SQL conditions to Oracle AML table parameter codes. Queries `PIO_AML_PARAMETERS` live to build `ScenarioParameters`. |
-| `qb_writer` | Inserts rows into 4 Oracle tables: `PIO_AML_SCENARIO`, `PIO_AML_RULES`, `PIO_AML_SCENARIO_RULES`, `PIO_AML_RULES_DETAILS`. Deletes existing rows first to support retry loops. |
-| `validator` | Calls `FILL_PIO_AML_CUSTOMERS` stored procedure, counts generated alerts in `PIO_AML_CUSTOMERS`, pulls samples. Retries via decomposer up to `MAX_VALIDATION_RETRIES` times on failure. |
-
-### State (`AMLScenarioState`)
-Single `TypedDict` passed between every node. Thread-isolated per conversation via `thread_id = "{project_id}_{chat_id}_{user_id}"`. Persisted to SQLite via LangGraph's `AsyncSqliteSaver` at `artifacts/checkpoints.sqlite`.
+| `analyze_intent_and_discover_explanation_codes` | Calls OpenAI to convert natural language into a structured `AMLIntent` JSON object; runs vector similarity search over `PIO_EXPLANATION_CODE` to discover domain explanation codes. |
+| `generate_scenario_execution_plan` | Deterministic (zero-LLM) markdown renderer producing the side-panel implementation plan. |
+| `execute_oracle_dwh_shadow_test` | Calls the **external PioTech AI DWH agent** (`PIOTECH_AI_URL`) via HTTP SSE to get production Oracle SQL, then shadow-tests it (`SELECT COUNT(*) FROM (...)`) against `BI_DWH`. |
+| `persist_and_validate_scenario_in_dwh` | Writes the confirmed scenario into `PIO_AML_PRODUCTION_SCENARIOS` for the automated daily ETL runner. |
 
 ### Key modules
 
-- **`web/services/agent.py`** — all LangGraph nodes, routing functions, and graph builder.
-- **`web/services/schemas.py`** — all Pydantic models for inter-node communication (single source of truth).
-- **`web/services/oracle.py`** — Oracle connection pool (`init_pool`/`close_pool`), `run_readonly`, `run_write`, `run_write_many`, `get_connection`.
-- **`web/services/settings.py`** — Pydantic `BaseSettings` reading all config from `.env`. Includes AML domain defaults (`AML_COUNTRY_CODE`, `AML_INST_CODE`, etc.).
-- **`web/api/main.py`** — FastAPI app, lifespan (pool init + graph warm-up), `/chat/stream` SSE streaming, `/health`.
-- **`web/services/prompts/`** — Markdown system prompt files loaded at runtime by `_load_prompt()`.
+- **`web/services/tools.py`** — the four `@tool` definitions above.
+- **`web/services/graph.py`** — compiles the ReAct agent (`get_tool_driven_graph`), manages the SQLite checkpointer lifecycle (`close_checkpointer`).
+- **`web/services/plan_renderer.py`** — the 11-section markdown plan builder.
+- **`web/services/sql_extraction.py`** — pulls clean SQL out of the PioTech AI SSE response text.
+- **`web/services/llm_client.py`** — shared `build_llm()`/`safe_parse_json()`.
+- **`web/services/explanation_code_search.py`** — vector similarity RAG search over `PIO_EXPLANATION_CODE`.
+- **`web/services/production_registry.py`** — writer for `PIO_AML_PRODUCTION_SCENARIOS`.
+- **`web/services/session_store.py`** — chat-sessions sidebar metadata (SQLite).
+- **`web/services/schemas.py`** — Pydantic contracts: `AMLIntent` and friends (intent layer), plus HTTP/SSE request-response models.
+- **`web/services/oracle.py`** — Oracle connection pool (`init_pool`/`close_pool`), `run_readonly`, `run_write`, `run_write_many`, `get_connection`, `atomic_connection`.
+- **`web/services/settings.py`** — Pydantic `BaseSettings` reading all config from `.env`.
+- **`web/api/main.py`** — FastAPI app, lifespan (pool init + graph warm-up), CORS, `/health`.
+- **`web/api/routes/chat.py`** — `POST /chat/stream` SSE streaming.
+- **`web/api/routes/sessions.py`** — chat history/list/rename/pin/delete endpoints.
+- **`web/services/prompts/`** — Markdown system prompt files loaded at runtime by `graph.py`'s `_load_prompt()`.
 
-### Parameter mapping in the decomposer
-The decomposer queries `PIO_AML_PARAMETERS` and `PIO_AML_COLUMNS` live to build a `column_map`. It maps SQL WHERE conditions, HAVING conditions, and intent thresholds to `PARAMETER_CODE` values. Key codes: `'2'`=Count, `'5'`=Amount, `'6'`=Summation, `'7'`=Customer Class, `'104'`=Individual/Corporate. The last `QBRuleDetail` row always has `combined_rule='-'`.
+### Thread isolation
+Each conversation is isolated by `thread_id = "{project_id}_{chat_id}_{user_id}"`, persisted via LangGraph's `AsyncSqliteSaver` at `artifacts/checkpoints.sqlite`.
 
 ### External dependency
-The `sql_bridge` node calls a **separate PioTech AI DWH service** (text-to-SQL agent) at `PIOTECH_AI_URL` (default `http://localhost:8001/chat/stream`). That service must be running independently for SQL generation to work.
+`execute_oracle_dwh_shadow_test` calls a **separate PioTech AI DWH service** (text-to-SQL agent) at `PIOTECH_AI_URL` (default `http://localhost:8001/chat/stream`). That service must be running independently for SQL generation to work.
 
 ---
 
@@ -101,7 +96,7 @@ Optional LLM:
 - `LLM_MODEL_FAST` — default `gpt-4o-mini`
 
 Optional AML domain defaults (all have production-safe defaults in `settings.py`):
-- `AML_COUNTRY_CODE`, `AML_INST_CODE`, `AML_CREATED_BY`, `AML_CATEGORY_CODE`, etc.
+- `AML_COUNTRY_CODE`, `AML_INST_CODE`, `AML_CREATED_BY`
 
 ---
 
@@ -125,6 +120,4 @@ Optional AML domain defaults (all have production-safe defaults in `settings.py`
 
 ## Known issues
 
-1. **`FILL_PIO_AML_CUSTOMERS` hardcoded filter**: The stored procedure originally had `AND SCENARIO_CODE IN ('1782638293246757')` in its cursor — this was commented out to allow all active scenarios to be evaluated. Any future DB refresh may reintroduce this filter.
-
-2. **Test dataset referential integrity**: In the dev/test Oracle instance, only customer `20210249` has a matching profile in `PIO_CUSTOMERS`. Other customers may appear in `PIO_AML_CUSTOMERS_DET` but not in `PIO_AML_CUSTOMERS` due to missing master records. This is a test data constraint, not a code bug.
+No open issues specific to the current tool-driven architecture.
