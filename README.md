@@ -56,6 +56,7 @@ You can run the service in two ways:
 ### Method 1: Direct `uvicorn` Command (Standard FastAPI Way)
 
 #### PowerShell (Windows):
+
 ```powershell
 # 1. Set PYTHONPATH to the services directory
 $env:PYTHONPATH = "services\aml_builder"
@@ -65,12 +66,13 @@ $env:PYTHONPATH = "services\aml_builder"
 ```
 
 #### Bash (Linux / macOS / Git Bash):
+
 ```bash
 # 1. Set PYTHONPATH
 export PYTHONPATH="services/aml_builder"
 
 # 2. Run uvicorn
-uvicorn web.api.main:app --reload --port 8005 --host 0.0.0.0
+uvicorn app:app --reload --port 8005 --host 0.0.0.0
 ```
 
 ---
@@ -87,14 +89,14 @@ If you are on Windows, `run_dev.ps1` automatically exports `.env` variables, set
 
 ## 📡 API Endpoints Overview
 
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/health` | Service health check |
-| `POST` | `/chat/stream` | SSE streaming chat endpoint for scenario building |
-| `GET` | `/chat/{project}/{chat_id}/{user}/history` | Retrieves conversation history & artifacts |
-| `GET` | `/chat/{project}/{user}/sessions` | Lists user chat sessions |
-| `PATCH` | `/chat/session/title` | Renames a chat session |
-| `DELETE` | `/chat/{project}/{chat_id}/{user}` | Deletes a chat session |
+| Method     | Endpoint                                     | Description                                       |
+| ---------- | -------------------------------------------- | ------------------------------------------------- |
+| `GET`    | `/health`                                  | Service health check                              |
+| `POST`   | `/chat/stream`                             | SSE streaming chat endpoint for scenario building |
+| `GET`    | `/chat/{project}/{chat_id}/{user}/history` | Retrieves conversation history & artifacts        |
+| `GET`    | `/chat/{project}/{user}/sessions`          | Lists user chat sessions                          |
+| `PATCH`  | `/chat/session/title`                      | Renames a chat session                            |
+| `DELETE` | `/chat/{project}/{chat_id}/{user}`         | Deletes a chat session                            |
 
 ---
 
@@ -125,5 +127,6 @@ AI_AML_AGENT/
 ## 📝 Documenting Code Changes
 
 Per project collaboration protocol, whenever modifying code:
+
 1. Update [`CHANGELOG.md`](file:///c:/Users/abura/Development/AI_AML_AGENT/CHANGELOG.md) with what changed.
 2. Ensure all code passes syntax check: `python -m py_compile ...`

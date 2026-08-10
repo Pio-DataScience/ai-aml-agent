@@ -5,6 +5,14 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-08-10] fix: Clean interactive prompt lines from Section 8 in Scenario Plan Renderer
+
+### Bug fixes
+- **Stripped interactive prompt from plan artifact**: `explanation_code_checkpoint` included a call-to-action line (`> **Action Needed:** Reply "confirm codes"...`) designed for interactive chat turns. When `build_plan_markdown()` rendered Section 8 (Explanation Codes), this line was embedded verbatim into the Scenario Implementation Plan artifact. Added `_clean_explanation_checkpoint()` in `plan_renderer.py` using case-insensitive pattern matching to strip out interactive prompts while preserving the discovered codes catalog table.
+- **Files modified**: [plan_renderer.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/plan_renderer.py)
+
+---
+
 ## [2026-08-10] fix+refactor: Restore `/chat/stream`, Split Agent & API Modules by Responsibility
 
 ### Bug fixes

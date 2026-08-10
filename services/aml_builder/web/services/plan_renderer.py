@@ -6,7 +6,39 @@ markdown section so the frontend side panel always receives a structured,
 predictable document regardless of which model produced the intent.
 """
 
+import re
 from typing import Optional
+
+
+def _clean_explanation_checkpoint(checkpoint: Optional[str]) -> Optional[str]:
+    """
+    Strips interactive call-to-action prompts from the explanation codes checkpoint.
+
+    Args:
+        checkpoint (Optional[str]): Raw markdown text containing discovered explanation
+            codes table and optional call-to-action text.
+
+    Returns:
+        Optional[str]: Cleaned markdown string stripped of interactive prompts,
+            or None if input is empty or invalid.
+    """
+    if not checkpoint or not isinstance(checkpoint, str):
+        return None
+
+    cleaned_lines: list[str] = []
+    # Pattern matching 'Action Needed:', 'Action Needed', 'confirm codes', etc.
+    action_pattern = re.compile(
+        r"(?:action\s+needed:|confirm\s+codes|reply\s+[\"'\`]?confirm)",
+        re.IGNORECASE,
+    )
+
+    for line in checkpoint.splitlines():
+        if action_pattern.search(line):
+            continue
+        cleaned_lines.append(line)
+
+    result = "\n".join(cleaned_lines).rstrip()
+    return result if result.strip() else None
 
 
 def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]) -> str:
@@ -207,7 +239,8 @@ def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]
     # SECTION 8 — EXPLANATION CODES
     # ─────────────────────────────────────────
     expl_codes = intent.get("explanation_codes")
-    if expl_codes or explanation_code_checkpoint:
+    cleaned_checkpoint = _clean_explanation_checkpoint(explanation_code_checkpoint)
+    if expl_codes or cleaned_checkpoint:
         lines.append("---")
         lines.append("")
         lines.append("## 8. Explanation Codes")
@@ -215,10 +248,10 @@ def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]
         if expl_codes:
             lines.append(f"**Selected Codes:** {', '.join(f'`{c}`' for c in expl_codes)}")
             lines.append("")
-        if explanation_code_checkpoint:
+        if cleaned_checkpoint:
             lines.append("**Discovered Codes (from DWH catalog):**")
             lines.append("")
-            lines.append(explanation_code_checkpoint)
+            lines.append(cleaned_checkpoint)
             lines.append("")
 
     # ─────────────────────────────────────────
