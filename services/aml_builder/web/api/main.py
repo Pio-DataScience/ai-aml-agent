@@ -22,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import HumanMessage
 
-from web.services.agent import AMLScenarioState, get_graph
+from web.services.agent_tool_driven import get_tool_driven_graph, close_checkpointer
 from web.services.logging_config import setup_logging
 from web.services.oracle import close_pool, init_pool
 from web.services.schemas import (
@@ -160,8 +160,8 @@ async def lifespan(app: FastAPI):
 
     # Pre-warm the LangGraph
     try:
-        await get_graph()
-        logger.info("[STARTUP] LangGraph compiled and warmed.")
+        await get_tool_driven_graph()
+        logger.info("[STARTUP] Tool-driven ReAct graph compiled and warmed.")
     except Exception as exc:
         logger.error("[STARTUP] LangGraph compilation failed: %s", exc)
 
@@ -170,7 +170,6 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("[SHUTDOWN] Closing SQLite checkpointer connection.")
     try:
-        from web.services.agent import close_checkpointer
         await close_checkpointer()
     except Exception as exc:
         logger.error("[SHUTDOWN] Error closing checkpointer: %s", exc)
@@ -635,7 +634,7 @@ async def get_chat_history(project_id: str, chat_id: str, user_id: str):
             return ChatHistoryResponse(user_id=user_id, project_id=project_id, chat_id=chat_id, messages=[])
             
         config = {"configurable": {"thread_id": thread_id}}
-        graph = await get_graph()
+        graph = await get_tool_driven_graph()
         state = await graph.aget_state(config)
         
         chat_messages = []

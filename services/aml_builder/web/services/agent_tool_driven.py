@@ -29,7 +29,6 @@ from langchain_openai import ChatOpenAI
 
 from web.services.settings import settings
 from web.services.schemas import AMLIntent
-from web.services.agent import _load_prompt, _extract_sql
 from web.services.explanation_code_search import (
     select_relevant_explanation_codes,
     format_explanation_code_checkpoint,
@@ -38,6 +37,89 @@ from web.services.oracle import run_readonly
 from web.services.production_registry import save_production_scenario
 
 logger = logging.getLogger(__name__)
+
+
+def _load_prompt(filename: str) -> str:
+    """Load a system prompt from the prompts directory.
+
+    Args:
+        filename (str): Filename of the prompt markdown file.
+
+    Returns:
+        str: File contents as a string. Returns empty string on failure.
+    """
+    from pathlib import Path
+
+    prompt_path = Path(__file__).parent / "prompts" / filename
+    try:
+        return prompt_path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        logger.warning("[PROMPT] Not found: %s — using empty prompt.", filename)
+        return ""
+
+
+def _is_real_sql(candidate: str) -> bool:
+    """Helper to verify if a candidate string represents a genuine SQL query."""
+    candidate_upper = candidate.upper()
+    if "SELECT" not in candidate_upper or "FROM" not in candidate_upper:
+        return False
+    if candidate_upper.startswith("WITH"):
+        if not re.search(r"\bWITH\s+[a-zA-Z0-9_\"#]+\s+AS\b", candidate, re.IGNORECASE):
+            return False
+    return True
+
+
+def _extract_sql(text: str) -> str:
+    """Extract a clean SQL query from LLM response text.
+
+    Args:
+        text (str): Raw text response from PioTech AI.
+
+    Returns:
+        str: The extracted SQL query, or empty string if none found.
+    """
+    if not text or not isinstance(text, str):
+        return ""
+
+    # 1. Find all code blocks delimited by ```sql ... ``` or ``` ... ```
+    blocks = re.findall(r"```(?:sql)?\s*([\s\S]+?)```", text, re.IGNORECASE)
+    if blocks:
+        valid_blocks = []
+        for block in blocks:
+            block_clean = block.strip().rstrip(";").strip()
+            if re.search(r"\b(SELECT|WITH)\b", block_clean, re.IGNORECASE):
+                if _is_real_sql(block_clean):
+                    valid_blocks.append(block_clean)
+        if valid_blocks:
+            return valid_blocks[-1]
+
+    # 2. Fallback: if no code blocks found, extract raw WITH or SELECT statement
+    with_match = re.search(r"\bWITH\b", text, re.IGNORECASE)
+    select_match = re.search(r"\bSELECT\b", text, re.IGNORECASE)
+
+    start_idx = -1
+    if with_match and select_match:
+        start_idx = min(with_match.start(), select_match.start())
+    elif with_match:
+        start_idx = with_match.start()
+    elif select_match:
+        start_idx = select_match.start()
+
+    if start_idx != -1:
+        candidate = text[start_idx:].strip()
+        end_match = re.search(r";(?:\s*\n\s*\n|\s*$|\s*```)", candidate)
+        if end_match:
+            candidate = candidate[: end_match.start() + 1].strip()
+        else:
+            trailing_exp = re.search(r";\s*\n\s*[A-Za-z]{3,}\b", candidate)
+            if trailing_exp:
+                candidate = candidate[: trailing_exp.start() + 1].strip()
+
+        candidate_clean = candidate.rstrip(";").strip()
+        if _is_real_sql(candidate_clean):
+            return candidate_clean
+
+    return ""
 
 
 def _build_llm() -> ChatOpenAI:
@@ -943,3 +1025,17 @@ async def get_tool_driven_graph() -> Any:
             "[TOOL_AGENT] Compiled production ReAct graph with checkpointer ready."
         )
     return _tool_graph
+
+
+async def close_checkpointer() -> None:
+    """Close the SQLite checkpointer connection if open."""
+    global _checkpointer_conn
+    if _checkpointer_conn is not None:
+        try:
+            await _checkpointer_conn.close()
+            logger.info("[TOOL_AGENT] Checkpointer database connection closed.")
+        except Exception as exc:
+            logger.error(
+                "[TOOL_AGENT] Error closing checkpointer database connection: %s", exc
+            )
+        _checkpointer_conn = None

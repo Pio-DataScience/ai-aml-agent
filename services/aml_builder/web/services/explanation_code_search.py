@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 from langchain_openai import OpenAIEmbeddings
 
-from web.services.agent import _build_llm
+from web.services.agent_tool_driven import _build_llm
 from web.services.oracle import run_readonly
 from web.services.settings import settings
 

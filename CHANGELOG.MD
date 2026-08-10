@@ -5,6 +5,17 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-08-10] refactor: Workspace Cleanup & Legacy agent.py Migration
+
+### What
+- **Legacy Agent Removal**: Migrated `_load_prompt`, `_is_real_sql`, and `_extract_sql` into [`agent_tool_driven.py`](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/agent_tool_driven.py) and added `close_checkpointer()`. Deleted the 148 KB legacy multi-node `agent.py`.
+- **Imports Cleanup**: Updated [`explanation_code_search.py`](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/explanation_code_search.py) and [`main.py`](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/api/main.py) to import directly from `agent_tool_driven.py`. Removed all references to the legacy multi-node graph.
+- **Documentation**: Created [`Docs/01_architecture.md`](file:///c:/Users/abura/Development/AI_AML_AGENT/Docs/01_architecture.md) documenting the complete tool-driven system architecture, data contracts, and tool pipeline.
+- **Files Deleted**: `agent.py`
+- **Files Created/Updated**: [agent_tool_driven.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/agent_tool_driven.py), [explanation_code_search.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/explanation_code_search.py), [main.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/api/main.py), [01_architecture.md](file:///c:/Users/abura/Development/AI_AML_AGENT/Docs/01_architecture.md)
+
+---
+
 ## [2026-08-10] fix: History Endpoint Artifact Resolution for Tool-Driven Agent
 
 ### What
