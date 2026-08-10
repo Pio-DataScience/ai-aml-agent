@@ -66,3 +66,27 @@ Decouple your interactive agent testing from full statistical auditing:
 
 * **NEVER** use `FETCH FIRST N ROWS ONLY` on AML/Transaction Monitoring queries—it invalidates the underlying aggregation mathematics.
 * **DO** use `ORA_HASH(CUS_NUM, 99) < N` in your initial CTEs during interactive shadow testing. It preserves exact per-customer mathematical accuracy while reducing query execution time linearly with sample size.
+
+---
+
+## 📌 BACKLOG: Production-Grade Shadow Test Implementation
+
+**Status:** Deferred — not a current priority.
+
+**What to implement:**
+
+Replace the current `SELECT COUNT(*) FROM ({sql}) shadow_query` wrapper approach with a proper **Hash-Based Customer Sampling** strategy:
+
+1. **Inject ORA_HASH filter** into the generated SQL's first CTE or WHERE clause before executing interactively:
+   ```sql
+   WHERE ORA_HASH(CUST_NO, 99) < <SAMPLE_PCT>  -- e.g. 5 for 5% sample
+   ```
+2. **Execute the sampled query** and count returned rows in Python (`len(rows)`) instead of wrapping in COUNT.
+3. **Extrapolate** production alert estimate: `estimated_alerts = sample_count * (100 / <SAMPLE_PCT>)`.
+4. **Strip trailing `ORDER BY`** from generated SQL before any subquery wrapping (Oracle ORA-00907 prevention).
+5. **Replace the `detail_count * 4` heuristic** with a real transaction detail count query using the same sample filter.
+
+**Target latency:** < 3 seconds for interactive shadow tests.
+
+**Note on `anchor_date`:** If an `anchor_date` field is added to `AMLIntent` (see anchor_date design decision), the hash sampling injection must also honour the anchor date rather than `SYSDATE`.
+

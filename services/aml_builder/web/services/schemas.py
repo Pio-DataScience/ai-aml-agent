@@ -7,10 +7,11 @@ the single source of truth for all inter-node communication.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 # =============================================================================
@@ -39,6 +40,28 @@ class Threshold(BaseModel):
         default=None,
         description="Upper bound value — only populated for BETWEEN operator.",
     )
+
+    @field_validator("value_from", "value_to", mode="before")
+    @classmethod
+    def _normalize_numeric_value(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            v_clean = v.strip()
+            # Handle percentage strings like "300%", "90%" -> 3.0, 0.90
+            pct_match = re.search(r"(\d+(?:\.\d+)?)\s*%", v_clean)
+            if pct_match:
+                return float(pct_match.group(1)) / 100.0
+            # Handle string multipliers like "3.0x", "3x"
+            mult_match = re.search(r"^(\d+(?:\.\d+)?)\s*x$", v_clean, re.IGNORECASE)
+            if mult_match:
+                return float(mult_match.group(1))
+            # Extract first float/int from string if raw numeric phrase
+            num_match = re.search(r"[-+]?\d*\.\d+|\d+", v_clean)
+            if num_match:
+                try:
+                    return float(num_match.group(0))
+                except ValueError:
+                    pass
+        return v
     provenance: Literal["stated", "assumed_default", "needs_user"] = Field(
         default="stated",
         description=(
@@ -48,10 +71,11 @@ class Threshold(BaseModel):
         ),
     )
     target_scope: Literal["DETAIL", "AGGREGATE"] = Field(
-        default="DETAIL",
+        ...,
         description=(
-            "Scope of the threshold: 'DETAIL' for single raw transaction/row filters (WHERE clause) "
-            "or 'AGGREGATE' for accumulated period totals, sums, averages, or counts (HAVING clause)."
+            "MANDATORY: Scope of threshold. "
+            "Use 'DETAIL' ONLY for filtering individual raw transaction amounts BEFORE aggregation (WHERE clause). "
+            "Use 'AGGREGATE' for accumulated daily totals, sums, counts, or averages (HAVING clause)."
         ),
     )
 
@@ -331,6 +355,36 @@ class AMLIntent(BaseModel):
         default=None,
         description="Maximum expected alert count (used in validator sanity check).",
     )
+    anchor_date: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional evaluation anchor date in 'YYYY-MM-DD' format. "
+            "When null (default), SQL is generated with TRUNC(SYSDATE) for production. "
+            "When populated (e.g. '2024-01-04'), SQL uses DATE '<value>' as the temporal "
+            "anchor — used during shadow testing against seeded/historical DWH snapshots."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def validate_and_deduplicate_thresholds(self) -> "AMLIntent":
+        """Guarantees zero conflict between DETAIL and AGGREGATE scopes for cumulative scenarios.
+        
+        If a scenario is at CUSTOMER or ACCOUNT grain with SUM/COUNT aggregation, any redundant 
+        DETAIL threshold matching an AGGREGATE threshold value is purged so the WHERE clause 
+        never filters out raw transactions before summing.
+        """
+        if self.scenario_type in ["CUSTOMER", "ACCOUNT"] and self.aggregation:
+            if self.aggregation.function in ["SUM", "COUNT"]:
+                aggregate_thresholds = [t for t in self.thresholds if t.target_scope == "AGGREGATE"]
+                detail_thresholds = [t for t in self.thresholds if t.target_scope == "DETAIL"]
+
+                if aggregate_thresholds and detail_thresholds:
+                    agg_values = {t.value_from for t in aggregate_thresholds if t.value_from is not None}
+                    self.thresholds = [
+                        t for t in self.thresholds
+                        if not (t.target_scope == "DETAIL" and t.value_from in agg_values)
+                    ]
+        return self
 
 
 # =============================================================================

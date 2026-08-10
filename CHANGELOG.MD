@@ -5,6 +5,70 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-08-10] fix: History Endpoint Artifact Resolution for Tool-Driven Agent
+
+### What
+- **`main.py` (`get_chat_history`):** Enhanced history response construction to inspect preceding `ToolMessage` payloads. When `generate_scenario_execution_plan` or `persist_and_validate_scenario_in_dwh` returns `plan_artifact` or `scenario_result` in tool outputs, `get_chat_history` now extracts and attaches them directly to the corresponding `ChatMessage` assistant response.
+- **Result**: Reloading the chat UI session (`GET /api/chat/history`) now re-hydrates the side panel plan artifact and scenario results card 1-to-1 with the live SSE streaming session.
+- **Files Changed:** [main.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/api/main.py)
+
+---
+
+## [2026-08-10] feat: Scenario Implementation Plan — Deterministic Renderer
+
+### What
+- **`agent_tool_driven.py` (`_build_plan_markdown`):** Replaced the vague LLM-driven plan prompt with a deterministic Python renderer. The plan is now built directly from the parsed `AMLIntent` dict — no LLM involved. This guarantees consistent, structured output regardless of which model is running.
+- **Plan Structure — 11 Sections (every non-empty AMLIntent field is reflected):**
+  1. **Status Banner** — `✅ Ready for Handoff` or `⚠️ Clarification Required`
+  2. **Scenario Overview** — Name, type, transaction type, customer segments, evaluation mode
+  3. **Detection Logic** — Rendered as a blockquote
+  4. **Observation Window & Time Parameters** — Window size, rolling vs fixed, plus Historical Baseline Window table
+  5. **Aggregation Profile** — Metric, function, grain, provenance badges
+  6. **Thresholds & Alert Conditions** — Split into `5.1 Detail (WHERE)` and `5.2 Aggregate (HAVING)` tables with `BETWEEN` range support and provenance labels (✅ Stated / ⚙️ Assumed / ❓ Needs User)
+  7. **Behavioral & Semantic Rules** — Typed table with emoji badges per `logical_type`
+  8. **Exclusion Rules** — Bullet list with 🚫 icons
+  9. **Explanation Codes** — Selected codes + full DWH discovery table
+  10. **Applied Defaults** — Disclosed assumptions with ⚙️ icons
+  11. **Open Clarifications** — Structured Q&A with `why_it_matters` and options
+  12. **Shadow Testing Scope** — Production vs historical shadow test mode
+- **`plan_conditions`:** Now built dynamically from what is actually populated in the intent (not hardcoded list).
+- **Files Changed:** [agent_tool_driven.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/agent_tool_driven.py)
+
+---
+
+## [2026-08-10] feat: Intent Layer Hardening & Disambiguation Engine
+
+### What
+- **`schemas.py` (`Threshold._normalize_numeric_value`):** Added `@field_validator("value_from", "value_to", mode="before")` to automatically convert percentage strings (e.g. `"300%"` -> `3.0`, `"90%"` -> `0.90`) and string multipliers into clean `float` values.
+- **`schemas.py` (`Threshold.target_scope`):** Removed `default="DETAIL"` and made `target_scope` required (`...`). Forces LLMs to explicitly classify thresholds as `DETAIL` or `AGGREGATE`.
+- **`schemas.py` (`AMLIntent.validate_and_deduplicate_thresholds`):** Added `@model_validator(mode="after")` to programmatically purge redundant `DETAIL` thresholds on cumulative `SUM`/`COUNT` scenarios when an `AGGREGATE` threshold exists for the same metric value.
+- **`agent_tool_driven.py` System Prompt**: Enforced 9 Extraction Laws in `system_instruction` covering `BETWEEN` operator bounds (`value_from` + `value_to`), ratio conversions, mandatory `baseline_window` construction, demographic filters (`customer_age`), distinct counts (`distinct_branch_count`), risk ratings, exclusions, and snapshot `anchor_date` fields.
+- **Files Changed:** [schemas.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/schemas.py), [agent_tool_driven.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/agent_tool_driven.py)
+
+---
+
+## [2026-08-09] feat: anchor_date field added to AMLIntent for historical snapshot testing
+
+### What
+- **`schemas.py`:** Added `anchor_date: Optional[str]` field to `AMLIntent`. Default `null` = production mode (`TRUNC(SYSDATE)`). Populated (e.g. `"2024-01-04"`) = shadow test against a seeded historical DWH snapshot.
+- **`agent_tool_driven.py`:** Updated intent extraction system instruction to recognize and extract `anchor_date` when the user explicitly specifies a historical test date.
+- **Service B prompt update required:** Data Agent and `DwhMechanicsAuditor` must be updated to honor `anchor_date` in the intent contract (see separate Service B prompt note).
+- **Files Changed:** [schemas.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/schemas.py), [agent_tool_driven.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/agent_tool_driven.py)
+
+---
+
+## [2026-08-09] feat: Plan Artifact Side-Panel Rendering for Tool-Driven Agent
+
+### What
+- **`main.py` SSE Intercept:** In the tool-driven streaming loop, built a `tool_call_id → tool_name` lookup map from each `AIMessage.tool_calls` list. `ToolMessage` outputs are now routed by source tool:
+  - `generate_scenario_execution_plan` → parses `plan_artifact` from JSON and emits `SSEEvent(type="plan_artifact")` → side panel renders automatically.
+  - `persist_and_validate_scenario_in_dwh` → parses result and emits `SSEEvent(type="scenario_result")` → confirmation card renders.
+  - All other `ToolMessage` outputs remain suppressed (raw JSON stays internal).
+- **`tool_driven_system.md` UX Rule:** Added concise principle — the plan is automatically rendered in the side panel; agent must only acknowledge it in chat and not reproduce the full markdown content in the conversation.
+- **Files Changed:** [main.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/api/main.py), [tool_driven_system.md](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/prompts/tool_driven_system.md)
+
+---
+
 ## [2026-08-09] feat: Production-Ready Tool-Driven Agent — Shadow Test & Persistence Upgrades
 
 ### What

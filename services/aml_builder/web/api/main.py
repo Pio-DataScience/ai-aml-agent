@@ -357,31 +357,64 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                 user_msg = request.messages[-1].content if request.messages else ""
                 inputs = {"messages": [HumanMessage(content=user_msg)]}
 
+                # Build a running map of tool_call_id → tool_name so ToolMessages
+                # can be routed by which tool produced them.
+                tool_call_id_to_name: dict = {}
+
                 async for event in tool_graph.astream(inputs, config=config):
                     for node_name, node_output in event.items():
                         if not isinstance(node_output, dict):
                             continue
                         msgs = node_output.get("messages", [])
                         for m in msgs:
-                            # Suppress internal ToolMessages (raw JSON outputs)
-                            if isinstance(m, ToolMessage) or getattr(m, "type", None) == "tool":
-                                continue
 
+                            # ── AIMessage: register tool calls + emit tool_call SSE ──
                             if isinstance(m, AIMessage) or getattr(m, "type", None) == "ai":
-                                # Emit tool call indicator if LLM requested a tool, but suppress raw payload
                                 if getattr(m, "tool_calls", None):
                                     for tc in m.tool_calls:
                                         t_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "tool")
+                                        t_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
+                                        if t_id and t_name:
+                                            tool_call_id_to_name[t_id] = t_name
                                         yield _sse(SSEEvent(type="tool_call", tool=t_name))
                                     continue
 
-                                # Stream natural language content to user
+                                # Natural language reply → stream to chat
                                 text = getattr(m, "content", "")
                                 if isinstance(text, str) and text.strip():
                                     yield _sse(SSEEvent(type="content", text=text))
 
+                            # ── ToolMessage: intercept specific tools, suppress the rest ──
+                            elif isinstance(m, ToolMessage) or getattr(m, "type", None) == "tool":
+                                tool_call_id = getattr(m, "tool_call_id", None)
+                                tool_name = tool_call_id_to_name.get(tool_call_id, "")
+
+                                if tool_name == "generate_scenario_execution_plan":
+                                    # Emit plan to side panel
+                                    try:
+                                        payload = json.loads(getattr(m, "content", "{}"))
+                                        plan_md = payload.get("plan_artifact", "")
+                                        if plan_md:
+                                            yield _sse(SSEEvent(type="plan_artifact", text=plan_md))
+                                            logger.info("[API] Emitted plan_artifact SSE from tool output (%d chars).", len(plan_md))
+                                    except (json.JSONDecodeError, Exception) as exc:
+                                        logger.warning("[API] Could not parse plan_artifact from ToolMessage: %s", exc)
+
+                                elif tool_name == "persist_and_validate_scenario_in_dwh":
+                                    # Emit scenario result confirmation card
+                                    try:
+                                        payload = json.loads(getattr(m, "content", "{}"))
+                                        if payload.get("write_success"):
+                                            yield _sse(SSEEvent(type="scenario_result", data=payload))
+                                            logger.info("[API] Emitted scenario_result SSE. SCENARIO_ID=%s", payload.get("scenario_id"))
+                                    except (json.JSONDecodeError, Exception) as exc:
+                                        logger.warning("[API] Could not parse scenario_result from ToolMessage: %s", exc)
+
+                                # All other ToolMessages are suppressed — raw JSON stays internal
+
                 yield _sse(SSEEvent(type="done"))
                 return
+
 
             async for event in graph.astream(initial_state, config=config):
                 for node_name, node_output in event.items():
@@ -609,6 +642,10 @@ async def get_chat_history(project_id: str, chat_id: str, user_id: str):
         
         if state and state.values:
             messages_data = state.values.get("messages", [])
+            tool_call_id_to_name = {}
+            pending_plan_artifact = None
+            pending_scenario_result = None
+
             for msg in messages_data:
                 msg_class = msg.__class__.__name__
                 if msg_class == "HumanMessage":
@@ -616,9 +653,15 @@ async def get_chat_history(project_id: str, chat_id: str, user_id: str):
                     chat_messages.append(ChatMessage(role="user", content=content))
                 elif msg_class == "AIMessage":
                     if hasattr(msg, "tool_calls") and msg.tool_calls:
+                        for tc in msg.tool_calls:
+                            tc_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
+                            tc_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", None)
+                            if tc_id and tc_name:
+                                tool_call_id_to_name[tc_id] = tc_name
                         continue
+
                     content = msg.content if hasattr(msg, "content") else ""
-                    
+
                     plan_art = None
                     val_res = None
                     esc_rep = None
@@ -626,11 +669,19 @@ async def get_chat_history(project_id: str, chat_id: str, user_id: str):
                         plan_art = msg.additional_kwargs.get("plan_artifact")
                         esc_rep = msg.additional_kwargs.get("escalation_report")
                         val_res = msg.additional_kwargs.get("validation_result")
-                    
+
+                    # Fallback to pending artifacts extracted from preceding ToolMessages
+                    if not plan_art and pending_plan_artifact:
+                        plan_art = pending_plan_artifact
+                        pending_plan_artifact = None
+                    if not val_res and pending_scenario_result:
+                        val_res = pending_scenario_result
+                        pending_scenario_result = None
+
                     # Skip if message is entirely empty (no text and no artifacts)
                     if not content.strip() and not (plan_art or val_res or esc_rep):
                         continue
-                            
+
                     chat_messages.append(ChatMessage(
                         role="assistant",
                         content=content,
@@ -639,6 +690,21 @@ async def get_chat_history(project_id: str, chat_id: str, user_id: str):
                         escalation_report=esc_rep,
                         timestamp=msg.additional_kwargs.get("timestamp") if hasattr(msg, "additional_kwargs") else None
                     ))
+                elif msg_class == "ToolMessage" or getattr(msg, "type", None) == "tool":
+                    tool_call_id = getattr(msg, "tool_call_id", None)
+                    tool_name = tool_call_id_to_name.get(tool_call_id, "") or getattr(msg, "name", "")
+                    content_raw = getattr(msg, "content", "")
+                    if content_raw:
+                        try:
+                            payload = json.loads(content_raw) if isinstance(content_raw, str) else content_raw
+                            if isinstance(payload, dict):
+                                if tool_name == "generate_scenario_execution_plan" or "plan_artifact" in payload:
+                                    if payload.get("plan_artifact"):
+                                        pending_plan_artifact = payload.get("plan_artifact")
+                                elif tool_name in ("persist_and_validate_scenario_in_dwh", "execute_oracle_dwh_shadow_test") or "write_success" in payload or "header_alert_count" in payload:
+                                    pending_scenario_result = payload
+                        except (json.JSONDecodeError, Exception):
+                            pass
 
         logger.info("[HISTORY] Retrieved %d conversation-level messages.", len(chat_messages))
         return ChatHistoryResponse(
