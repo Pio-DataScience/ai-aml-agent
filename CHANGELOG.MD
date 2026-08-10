@@ -5,6 +5,33 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-08-10] fix+refactor: Restore `/chat/stream`, Split Agent & API Modules by Responsibility
+
+### Bug fixes
+- **`/chat/stream` was crashing on every call**: the prior "Legacy Agent Removal" pass deleted `agent.py` (and its `get_graph()`/`AMLScenarioState`) but left `main.py` calling `get_graph()` unconditionally before the tool-driven-agent branch even ran. Every chat request raised `NameError`. Removed the dead legacy-graph branches entirely (the tool-driven ReAct agent is now the only path — confirmed via `Docs/01_architecture.md` as already the intended architecture); the `USE_TOOL_DRIVEN_AGENT` flag was dropped since it no longer gates anything. The equally dead `POST /chat/{project_id}/{chat_id}/{user_id}` background-task endpoint (built entirely around the deleted graph's state shape) was removed for the same reason.
+- **`explanation_code_search.py` silently lost sub-LLM reranking**: `select_relevant_explanation_codes` called `_build_llm(fast=True)`, a name that was never imported/defined there, caught only by a broad `except Exception` fallback to raw vector-search results. Fixed by importing the shared `build_llm()`.
+- **`GET /health` returned 500**: `SERVICE_NAME: Final[str] = Field(...)` in `settings.py` made Pydantic v2 treat the field as a class constant, so `settings.SERVICE_NAME` returned a raw `FieldInfo` object instead of a string, breaking JSON serialization. Fixed by dropping the `Final` annotation.
+
+### Refactor (behavior-preserving)
+- **New `llm_client.py`**: `build_llm()`/`safe_parse_json()` extracted from `agent_tool_driven.py` — the only shared home for LLM construction, now used by both the agent tools and explanation-code search instead of being duplicated/missing.
+- **New `sql_extraction.py`** and **`plan_renderer.py`**: pulled the SQL-text-parsing helpers and the 11-section plan markdown renderer out of `agent_tool_driven.py`, which now holds only the four `@tool` definitions.
+- **New `graph.py`**: LangGraph ReAct agent compilation/lifecycle (`get_tool_driven_graph`, `close_checkpointer`, prompt loading) split out of the tool-definitions module.
+- **`agent_tool_driven.py` renamed to `tools.py`**: once the other seams above were extracted, the file held only the four `@tool` definitions — the old name described the pre-split architecture as a whole and was no longer accurate.
+- **New `session_store.py`**: the raw `sqlite3` chat-sessions sidebar CRUD (init/upsert/list/rename/pin/delete) extracted out of route handlers in `main.py`.
+- **New `api/routes/chat.py`** and **`api/routes/sessions.py`**: `main.py` is now just app creation, CORS, lifespan, and router includes.
+- Verified end-to-end: app imports cleanly, all routes register, `/health` returns 200, `/chat/stream` reaches the LLM call (previously died before that point on every request).
+
+### Files created
+`web/services/llm_client.py`, `web/services/sql_extraction.py`, `web/services/plan_renderer.py`, `web/services/graph.py`, `web/services/session_store.py`, `web/api/routes/chat.py`, `web/api/routes/sessions.py`
+
+### Files renamed
+`web/services/agent_tool_driven.py` → `web/services/tools.py`
+
+### Files modified
+`web/api/main.py`, `web/services/tools.py`, `web/services/explanation_code_search.py`, `web/services/settings.py`
+
+---
+
 ## [2026-08-10] feat: Standard Root Uvicorn Entrypoint (`app.py`) & Package Imports Fix
 
 ### What

@@ -18,6 +18,7 @@ from langchain_openai import OpenAIEmbeddings
 
 from services.aml_builder.web.services.oracle import run_readonly
 from services.aml_builder.web.services.settings import settings
+from services.aml_builder.web.services.llm_client import build_llm
 
 logger = logging.getLogger(__name__)
 
@@ -191,7 +192,7 @@ def select_relevant_explanation_codes(
     )
 
     try:
-        llm = _build_llm(fast=True)
+        llm = build_llm(fast=True)
         resp = llm.invoke(prompt)
         text = str(resp.content).strip()
 

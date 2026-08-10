@@ -1,23 +1,21 @@
 """
-Tool-Driven Agentic Architecture (Zero Routing Logic)
+The four autonomous tools exposed to the AML Scenario Builder's ReAct agent.
 
-Each pipeline capability is exposed as an autonomous @tool with rich docstrings.
-The central LLM receives a goal-oriented system prompt and decides tool invocation
-ordering, parameter passing, and user interaction autonomously.
+Each pipeline capability (intent extraction, plan generation, shadow testing,
+persistence) is an independent @tool with a rich docstring. The agent itself
+— compiled in graph.py — receives a goal-oriented system prompt and decides
+tool invocation ordering, parameter passing, and user interaction autonomously;
+there is no hardcoded routing here.
 
-Architecture decisions:
-- SQL generation is delegated to the PioTech AI text-to-SQL SSE service (same
-  production service used by the classic agent.py sql_bridge_node).
+Notes:
+- SQL generation is delegated to the external PioTech AI text-to-SQL SSE
+  service (see execute_oracle_dwh_shadow_test).
 - Persistence writes exclusively to PIO_AML_PRODUCTION_SCENARIOS via the
-  production_registry module — NOT the legacy QB engine tables.
-- The LangGraph ReAct graph is compiled with interrupt_after on the plan tool
-  to enforce a hard graph-level approval gate between plan generation and
-  shadow testing.
+  production_registry module.
 """
 
 import json
 import logging
-import re
 import uuid
 import httpx
 from datetime import datetime
@@ -25,7 +23,6 @@ from typing import Any, Dict, List, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
-from langchain_openai import ChatOpenAI
 
 from services.aml_builder.web.services.settings import settings
 from services.aml_builder.web.services.schemas import AMLIntent
@@ -35,142 +32,11 @@ from services.aml_builder.web.services.explanation_code_search import (
 )
 from services.aml_builder.web.services.oracle import run_readonly
 from services.aml_builder.web.services.production_registry import save_production_scenario
+from services.aml_builder.web.services.llm_client import build_llm, safe_parse_json
+from services.aml_builder.web.services.sql_extraction import extract_sql
+from services.aml_builder.web.services.plan_renderer import build_plan_markdown
 
 logger = logging.getLogger(__name__)
-
-
-def _load_prompt(filename: str) -> str:
-    """Load a system prompt from the prompts directory.
-
-    Args:
-        filename (str): Filename of the prompt markdown file.
-
-    Returns:
-        str: File contents as a string. Returns empty string on failure.
-    """
-    from pathlib import Path
-
-    prompt_path = Path(__file__).parent / "prompts" / filename
-    try:
-        return prompt_path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        logger.warning("[PROMPT] Not found: %s — using empty prompt.", filename)
-        return ""
-
-
-def _is_real_sql(candidate: str) -> bool:
-    """Helper to verify if a candidate string represents a genuine SQL query."""
-    candidate_upper = candidate.upper()
-    if "SELECT" not in candidate_upper or "FROM" not in candidate_upper:
-        return False
-    if candidate_upper.startswith("WITH"):
-        if not re.search(r"\bWITH\s+[a-zA-Z0-9_\"#]+\s+AS\b", candidate, re.IGNORECASE):
-            return False
-    return True
-
-
-def _extract_sql(text: str) -> str:
-    """Extract a clean SQL query from LLM response text.
-
-    Args:
-        text (str): Raw text response from PioTech AI.
-
-    Returns:
-        str: The extracted SQL query, or empty string if none found.
-    """
-    if not text or not isinstance(text, str):
-        return ""
-
-    # 1. Find all code blocks delimited by ```sql ... ``` or ``` ... ```
-    blocks = re.findall(r"```(?:sql)?\s*([\s\S]+?)```", text, re.IGNORECASE)
-    if blocks:
-        valid_blocks = []
-        for block in blocks:
-            block_clean = block.strip().rstrip(";").strip()
-            if re.search(r"\b(SELECT|WITH)\b", block_clean, re.IGNORECASE):
-                if _is_real_sql(block_clean):
-                    valid_blocks.append(block_clean)
-        if valid_blocks:
-            return valid_blocks[-1]
-
-    # 2. Fallback: if no code blocks found, extract raw WITH or SELECT statement
-    with_match = re.search(r"\bWITH\b", text, re.IGNORECASE)
-    select_match = re.search(r"\bSELECT\b", text, re.IGNORECASE)
-
-    start_idx = -1
-    if with_match and select_match:
-        start_idx = min(with_match.start(), select_match.start())
-    elif with_match:
-        start_idx = with_match.start()
-    elif select_match:
-        start_idx = select_match.start()
-
-    if start_idx != -1:
-        candidate = text[start_idx:].strip()
-        end_match = re.search(r";(?:\s*\n\s*\n|\s*$|\s*```)", candidate)
-        if end_match:
-            candidate = candidate[: end_match.start() + 1].strip()
-        else:
-            trailing_exp = re.search(r";\s*\n\s*[A-Za-z]{3,}\b", candidate)
-            if trailing_exp:
-                candidate = candidate[: trailing_exp.start() + 1].strip()
-
-        candidate_clean = candidate.rstrip(";").strip()
-        if _is_real_sql(candidate_clean):
-            return candidate_clean
-
-    return ""
-
-
-def _build_llm() -> ChatOpenAI:
-    """Instantiate a ChatOpenAI-compatible LLM from settings.
-
-    Supports two providers controlled by LLM_PROVIDER env var:
-    - 'openai'   : standard OpenAI endpoint (requires OPENAI_API_KEY).
-    - 'lmstudio' : local LM Studio server at LLM_BASE_URL (e.g. http://127.0.0.1:1234/v1).
-                   Uses a dummy api_key value since LM Studio does not enforce authentication.
-
-    Returns:
-        ChatOpenAI: Configured LLM instance.
-    """
-    kwargs: Dict[str, Any] = {
-        "model": settings.LLM_MODEL,
-        "temperature": settings.LLM_TEMPERATURE,
-    }
-    if settings.LLM_PROVIDER == "lmstudio":
-        kwargs["base_url"] = settings.LLM_BASE_URL or "http://127.0.0.1:1234/v1"
-        kwargs["api_key"] = (
-            "lm-studio"  # LM Studio ignores the key but langchain requires it
-        )
-    else:
-        kwargs["api_key"] = settings.OPENAI_API_KEY
-    return ChatOpenAI(**kwargs)
-
-
-def _safe_parse_json(text: str) -> dict:
-    """Parse JSON string with fallback repairs for common LLM formatting flaws."""
-    text = text.strip()
-    text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"\s*```$", "", text)
-
-    # 1. Direct parse attempt
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-
-    # 2. Extract substring between first '{' and last '}'
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    if match:
-        extracted = match.group(0)
-        try:
-            return json.loads(extracted)
-        except json.JSONDecodeError:
-            # Repair trailing commas before closing braces/brackets
-            repaired = re.sub(r",\s*([\}\]])", r"\1", extracted)
-            return json.loads(repaired)
-
-    raise ValueError(f"Could not parse valid JSON from text: {text[:100]}...")
 
 
 # =============================================================================
@@ -197,7 +63,7 @@ def analyze_intent_and_discover_explanation_codes(
     logger.info(
         "[TOOL: INTENT] Extracting scenario parameters and running vector search..."
     )
-    llm = _build_llm()
+    llm = build_llm()
 
     system_instruction = (
         "You are a Lead AML Domain Architect & Natural Language Intent Engineer for an Enterprise Financial Crime Platform.\n"
@@ -274,7 +140,7 @@ def analyze_intent_and_discover_explanation_codes(
                 {"error": "Sub-LLM returned empty response during intent extraction."}
             )
 
-        intent_dict = _safe_parse_json(raw_text)
+        intent_dict = safe_parse_json(raw_text)
         if "AMLIntent" in intent_dict and isinstance(intent_dict["AMLIntent"], dict):
             intent_dict = intent_dict["AMLIntent"]
         elif "aml_intent" in intent_dict and isinstance(
@@ -400,281 +266,6 @@ def analyze_intent_and_discover_explanation_codes(
         return json.dumps({"error": str(exc)})
 
 
-def _build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]) -> str:
-    """Deterministic markdown renderer that mirrors every AMLIntent field into a plan.
-
-    Builds the full Scenario Implementation Plan as a structured markdown document
-    directly from the parsed intent dict — no LLM involved. This guarantees consistent
-    structure regardless of which model is running and eliminates nonsense freeform output.
-
-    Args:
-        intent (dict): Parsed AMLIntent payload as a Python dict.
-        explanation_code_checkpoint (Optional[str]): Raw markdown table string of discovered
-            explanation codes. Rendered verbatim into the plan's explanation codes section.
-
-    Returns:
-        str: Full markdown plan string ready for frontend side panel rendering.
-    """
-    lines: list[str] = []
-
-    # ─────────────────────────────────────────
-    # STATUS BANNER
-    # ─────────────────────────────────────────
-    ready = intent.get("ready_for_handoff", True)
-    has_clarifications = bool(intent.get("clarifications") or intent.get("clarification_questions"))
-    if ready and not has_clarifications:
-        lines.append("> ✅ **Status: Ready for Handoff** — All required parameters are captured. Approve this plan to proceed to shadow testing.")
-    else:
-        lines.append("> ⚠️ **Status: Clarification Required** — One or more parameters are ambiguous. Resolve the open questions below before proceeding.")
-    lines.append("")
-
-    # ─────────────────────────────────────────
-    # SECTION 1 — SCENARIO OVERVIEW
-    # ─────────────────────────────────────────
-    lines.append("---")
-    lines.append("")
-    lines.append("## 1. Scenario Overview")
-    lines.append("")
-    lines.append("| Field | Value |")
-    lines.append("|---|---|")
-    lines.append(f"| **Scenario Name** | {intent.get('scenario_name', '—')} |")
-    lines.append(f"| **Scenario Type** | `{intent.get('scenario_type', '—')}` |")
-    tx_type = intent.get("transaction_type")
-    if tx_type:
-        lines.append(f"| **Transaction Type** | {tx_type} |")
-
-    segs = intent.get("customer_segments")
-    if segs:
-        lines.append(f"| **Customer Segments** | {', '.join(f'`{s}`' for s in segs)} |")
-
-    anchor = intent.get("anchor_date")
-    lines.append(f"| **Evaluation Mode** | {'🕐 Shadow Test — Anchor: `' + anchor + '`' if anchor else '🟢 Production (SYSDATE)'} |")
-    lines.append("")
-
-    # ─────────────────────────────────────────
-    # SECTION 2 — DETECTION LOGIC
-    # ─────────────────────────────────────────
-    lines.append("---")
-    lines.append("")
-    lines.append("## 2. Detection Logic")
-    lines.append("")
-    detection_logic = intent.get("detection_logic", "—")
-    lines.append(f"> {detection_logic}")
-    lines.append("")
-
-    # ─────────────────────────────────────────
-    # SECTION 3 — OBSERVATION WINDOW
-    # ─────────────────────────────────────────
-    lines.append("---")
-    lines.append("")
-    lines.append("## 3. Observation Window & Time Parameters")
-    lines.append("")
-    tw = intent.get("time_window")
-    if tw:
-        rolling_label = "Rolling (from SYSDATE)" if tw.get("is_rolling") else "Fixed Calendar Period"
-        provenance_tw = tw.get("provenance", "stated")
-        prov_badge = " *(assumed default)*" if provenance_tw == "assumed_default" else ""
-        lines.append(f"- **Window Size:** `{tw.get('value')} {tw.get('unit')}`{prov_badge}")
-        lines.append(f"- **Window Type:** {rolling_label}")
-    else:
-        lines.append("- **Window Size:** — *(not specified)*")
-    lines.append("")
-
-    bw = intent.get("baseline_window")
-    if bw:
-        lines.append("### Historical Baseline Window")
-        lines.append("")
-        lines.append("| Parameter | Value |")
-        lines.append("|---|---|")
-        lines.append(f"| **Duration** | `{bw.get('duration')} {bw.get('unit')}` |")
-        lines.append(f"| **Isolates Current Window** | `{bw.get('exclude_current_window', True)}` |")
-        lines.append(f"| **Offset Days** | `{bw.get('offset_days', '—')}` |")
-        if bw.get("description"):
-            lines.append(f"| **Description** | {bw.get('description')} |")
-        if bw.get("sql_date_formula"):
-            lines.append(f"| **SQL Formula** | `{bw.get('sql_date_formula')}` |")
-        lines.append("")
-
-    # ─────────────────────────────────────────
-    # SECTION 4 — AGGREGATION PROFILE
-    # ─────────────────────────────────────────
-    lines.append("---")
-    lines.append("")
-    lines.append("## 4. Aggregation Profile")
-    lines.append("")
-    agg = intent.get("aggregation")
-    if agg:
-        prov_agg = agg.get("provenance", "stated")
-        prov_badge = " *(assumed default)*" if prov_agg == "assumed_default" else ""
-        lines.append(f"- **Metric:** `{agg.get('metric', '—')}`{prov_badge}")
-        lines.append(f"- **Function:** `{agg.get('function', 'NONE')}`")
-        lines.append(f"- **Grain:** `{agg.get('grain', '—')}`")
-    else:
-        lines.append("- **Aggregation:** — *(per-row, no grouping)*")
-    lines.append("")
-
-    # ─────────────────────────────────────────
-    # SECTION 5 — THRESHOLDS & ALERT CONDITIONS
-    # ─────────────────────────────────────────
-    lines.append("---")
-    lines.append("")
-    lines.append("## 5. Thresholds & Alert Conditions")
-    lines.append("")
-    thresholds = intent.get("thresholds", [])
-    if thresholds:
-        detail_thresholds = [t for t in thresholds if t.get("target_scope") == "DETAIL"]
-        aggregate_thresholds = [t for t in thresholds if t.get("target_scope") == "AGGREGATE"]
-
-        if detail_thresholds:
-            lines.append("### 5.1 Detail-Level Filters *(SQL: `WHERE` clause)*")
-            lines.append("")
-            lines.append("| # | Field | Operator | Value | Provenance |")
-            lines.append("|---|---|---|---|---|")
-            for i, t in enumerate(detail_thresholds, 1):
-                val = f"`{t.get('value_from')}`"
-                if t.get("operator") == "BETWEEN" and t.get("value_to") is not None:
-                    val = f"`{t.get('value_from')}` — `{t.get('value_to')}`"
-                prov = t.get("provenance", "stated")
-                prov_label = "✅ Stated" if prov == "stated" else "⚙️ Assumed" if prov == "assumed_default" else "❓ Needs User"
-                lines.append(f"| {i} | `{t.get('field')}` | `{t.get('operator')}` | {val} | {prov_label} |")
-            lines.append("")
-
-        if aggregate_thresholds:
-            lines.append("### 5.2 Aggregate-Level Conditions *(SQL: `HAVING` clause)*")
-            lines.append("")
-            lines.append("| # | Field | Operator | Value | Provenance |")
-            lines.append("|---|---|---|---|---|")
-            for i, t in enumerate(aggregate_thresholds, 1):
-                val = f"`{t.get('value_from')}`"
-                if t.get("operator") == "BETWEEN" and t.get("value_to") is not None:
-                    val = f"`{t.get('value_from')}` — `{t.get('value_to')}`"
-                prov = t.get("provenance", "stated")
-                prov_label = "✅ Stated" if prov == "stated" else "⚙️ Assumed" if prov == "assumed_default" else "❓ Needs User"
-                lines.append(f"| {i} | `{t.get('field')}` | `{t.get('operator')}` | {val} | {prov_label} |")
-            lines.append("")
-    else:
-        lines.append("*No numeric thresholds extracted.*")
-        lines.append("")
-
-    # ─────────────────────────────────────────
-    # SECTION 6 — SEMANTIC CONDITIONS
-    # ─────────────────────────────────────────
-    semantic_conditions = intent.get("semantic_conditions", [])
-    if semantic_conditions:
-        lines.append("---")
-        lines.append("")
-        lines.append("## 6. Behavioral & Semantic Rules")
-        lines.append("")
-        lines.append("*Non-numeric rules, state transitions, and behavioral patterns captured from your description.*")
-        lines.append("")
-        lines.append("| # | Type | Subject | Business Rule |")
-        lines.append("|---|---|---|---|")
-        for i, sc in enumerate(semantic_conditions, 1):
-            type_badge = {
-                "STATE": "🔵 State",
-                "TRANSITION": "🔄 Transition",
-                "SEQUENCE": "📋 Sequence",
-                "BEHAVIORAL": "🧠 Behavioral",
-                "TEMPORAL": "⏱️ Temporal",
-                "OTHER": "📌 Other",
-            }.get(sc.get("logical_type", "OTHER"), "📌 Other")
-            lines.append(f"| {i} | {type_badge} | `{sc.get('subject', '—')}` | {sc.get('predicate', '—')} |")
-        lines.append("")
-
-    # ─────────────────────────────────────────
-    # SECTION 7 — EXCLUSIONS
-    # ─────────────────────────────────────────
-    exclusions = intent.get("exclusions")
-    if exclusions:
-        lines.append("---")
-        lines.append("")
-        lines.append("## 7. Exclusion Rules")
-        lines.append("")
-        for exc in exclusions:
-            lines.append(f"- 🚫 {exc}")
-        lines.append("")
-
-    # ─────────────────────────────────────────
-    # SECTION 8 — EXPLANATION CODES
-    # ─────────────────────────────────────────
-    expl_codes = intent.get("explanation_codes")
-    if expl_codes or explanation_code_checkpoint:
-        lines.append("---")
-        lines.append("")
-        lines.append("## 8. Explanation Codes")
-        lines.append("")
-        if expl_codes:
-            lines.append(f"**Selected Codes:** {', '.join(f'`{c}`' for c in expl_codes)}")
-            lines.append("")
-        if explanation_code_checkpoint:
-            lines.append("**Discovered Codes (from DWH catalog):**")
-            lines.append("")
-            lines.append(explanation_code_checkpoint)
-            lines.append("")
-
-    # ─────────────────────────────────────────
-    # SECTION 9 — APPLIED DEFAULTS
-    # ─────────────────────────────────────────
-    applied_defaults = intent.get("applied_defaults", [])
-    if applied_defaults:
-        lines.append("---")
-        lines.append("")
-        lines.append("## 9. Applied Defaults")
-        lines.append("")
-        lines.append("*The following parameters were not explicitly stated and were inferred by the system. Please confirm or correct them.*")
-        lines.append("")
-        for d in applied_defaults:
-            lines.append(f"- ⚙️ {d}")
-        lines.append("")
-
-    # ─────────────────────────────────────────
-    # SECTION 10 — OPEN CLARIFICATIONS
-    # ─────────────────────────────────────────
-    clarifications = intent.get("clarifications", [])
-    cq = intent.get("clarification_questions", [])
-    if clarifications or cq:
-        lines.append("---")
-        lines.append("")
-        lines.append("## 10. ⚠️ Open Clarifications Required")
-        lines.append("")
-        lines.append("*The following questions must be answered before this scenario can be built into SQL.*")
-        lines.append("")
-        if clarifications:
-            for i, c in enumerate(clarifications, 1):
-                lines.append(f"**{i}. {c.get('dimension', 'Ambiguity')}**")
-                lines.append(f"   - ❓ *{c.get('question', '')}*")
-                lines.append(f"   - 📌 Why it matters: {c.get('why_it_matters', '')}")
-                opts = c.get("options")
-                if opts:
-                    lines.append(f"   - Options: {', '.join(f'`{o}`' for o in opts)}")
-                lines.append("")
-        elif cq:
-            for i, q in enumerate(cq, 1):
-                lines.append(f"{i}. ❓ {q}")
-            lines.append("")
-
-    # ─────────────────────────────────────────
-    # SECTION 11 — SHADOW TESTING SCOPE
-    # ─────────────────────────────────────────
-    lines.append("---")
-    lines.append("")
-    lines.append("## 11. Shadow Testing Scope")
-    lines.append("")
-    if anchor:
-        lines.append(f"- **Mode:** 🕐 Historical Shadow Test")
-        lines.append(f"- **Anchor Date:** `{anchor}`")
-        lines.append(f"- **SQL Temporal Anchor:** `DATE '{anchor}'` *(replaces `TRUNC(SYSDATE)`)*")
-    else:
-        lines.append("- **Mode:** 🟢 Production (live data, `TRUNC(SYSDATE)`)")
-    exp_min = intent.get("expected_alert_range_min")
-    exp_max = intent.get("expected_alert_range_max")
-    if exp_min is not None and exp_max is not None:
-        lines.append(f"- **Expected Alert Range:** `{exp_min}` — `{exp_max}` alerts")
-    lines.append("")
-
-    return "\n".join(lines)
-
-
 @tool
 def generate_scenario_execution_plan(
     intent_json: str,
@@ -708,7 +299,7 @@ def generate_scenario_execution_plan(
         return json.dumps({"error": f"Invalid intent JSON: {exc}"})
 
     try:
-        plan_md = _build_plan_markdown(intent, explanation_code_checkpoint)
+        plan_md = build_plan_markdown(intent, explanation_code_checkpoint)
         logger.info("[TOOL: PLANNER] Plan artifact generated (%d chars).", len(plan_md))
 
         # Build plan_conditions dynamically from what is present in the intent
@@ -826,11 +417,11 @@ def execute_oracle_dwh_shadow_test(intent_json: str) -> str:
     # -----------------------------------------------------------
     sql = ""
     if final_answer_text and final_answer_text.strip():
-        sql = _extract_sql(final_answer_text)
+        sql = extract_sql(final_answer_text)
 
     if not sql:
         full_stream_text = "".join(collected_text).strip()
-        sql = _extract_sql(full_stream_text)
+        sql = extract_sql(full_stream_text)
 
     if not sql:
         logger.error("[TOOL: SQL_BRIDGE] PioTech AI did not return a valid SQL query.")
@@ -979,63 +570,3 @@ def persist_and_validate_scenario_in_dwh(intent_json: str, raw_sql: str) -> str:
     )
 
 
-_tool_graph = None
-_checkpointer_conn = None
-
-
-async def get_tool_driven_graph() -> Any:
-    """Return compiled LangGraph ReAct agent for tool-driven execution (with AsyncSqliteSaver checkpointer)."""
-    global _tool_graph, _checkpointer_conn
-    if _tool_graph is None:
-        import aiosqlite
-        from pathlib import Path
-        from langgraph.prebuilt import create_react_agent
-        from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-
-        checkpoint_path = settings.CHECKPOINT_DB_PATH
-        Path(checkpoint_path).parent.mkdir(parents=True, exist_ok=True)
-
-        _checkpointer_conn = await aiosqlite.connect(checkpoint_path)
-        checkpointer = AsyncSqliteSaver(_checkpointer_conn)
-
-        tools = [
-            analyze_intent_and_discover_explanation_codes,
-            generate_scenario_execution_plan,
-            execute_oracle_dwh_shadow_test,
-            persist_and_validate_scenario_in_dwh,
-        ]
-
-        llm = _build_llm()
-
-        goal_prompt = _load_prompt("tool_driven_system.md")
-        if not goal_prompt:
-            goal_prompt = (
-                "You are the autonomous AML Scenario Architect. Use your tools to extract scenario requirements, "
-                "discover vector-matched domain explanation codes, generate implementation plans, execute DWH shadow tests, "
-                "and persist validated scenarios in Oracle DWH."
-            )
-
-        _tool_graph = create_react_agent(
-            model=llm,
-            tools=tools,
-            prompt=goal_prompt,
-            checkpointer=checkpointer,
-        )
-        logger.info(
-            "[TOOL_AGENT] Compiled production ReAct graph with checkpointer ready."
-        )
-    return _tool_graph
-
-
-async def close_checkpointer() -> None:
-    """Close the SQLite checkpointer connection if open."""
-    global _checkpointer_conn
-    if _checkpointer_conn is not None:
-        try:
-            await _checkpointer_conn.close()
-            logger.info("[TOOL_AGENT] Checkpointer database connection closed.")
-        except Exception as exc:
-            logger.error(
-                "[TOOL_AGENT] Error closing checkpointer database connection: %s", exc
-            )
-        _checkpointer_conn = None

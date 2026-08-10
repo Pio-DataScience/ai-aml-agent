@@ -6,7 +6,7 @@ Never hardcode secrets or connection strings — per SOLID Dependency Inversion.
 """
 
 from functools import lru_cache
-from typing import Final, Optional
+from typing import Optional
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     )
 
     # ─── Service ──────────────────────────────────────────────────────────────
-    SERVICE_NAME: Final[str] = Field(
+    SERVICE_NAME: str = Field(
         default="aml-builder",
         description="Identifier used in logs and LangSmith traces.",
     )
@@ -39,10 +39,6 @@ class Settings(BaseSettings):
     DEBUG: bool = Field(
         default=False,
         description="Enables verbose debug logging when True.",
-    )
-    USE_TOOL_DRIVEN_AGENT: bool = Field(
-        default=False,
-        description="If True, route web API requests to the tool-driven agent.",
     )
 
     # ─── LLM ──────────────────────────────────────────────────────────────────
