@@ -5,6 +5,53 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-08-10] refactor: Remove Dead Legacy QB-Engine Remnants
+
+### What
+Removed all remaining code, config, and docs referencing the deleted multi-node graph's QB-engine
+tables (`PIO_AML_PARAMETERS`, `PIO_AML_COLUMNS`, `PIO_AML_SCENARIO`, `PIO_AML_RULES`,
+`PIO_AML_SCENARIO_RULES`, `PIO_AML_RULES_DETAILS`) and the `FILL_PIO_AML_CUSTOMERS` stored procedure.
+None of it was reachable from the current tool-driven agent (verified with repo-wide grep before
+removing each piece) — it was pure dead weight left over from the `agent.py` deletion.
+
+- **`schemas.py`**: removed the unused SQL-bridge/decomposer/validation/plan-layer model classes
+  (`SQLMetadata`, `QBScenario`, `QBRule`, `QBRuleDetail`, `QBScenarioRule`, `ScenarioParameters`,
+  `AlertSample`, `ValidationResult`, `PlanCondition`, `CatalogCreation`, `WriteVerification`,
+  `OrchestratorDecision`), plus a duplicate `ChatMessage` definition that was silently shadowed by
+  a second one. Kept the intent layer (`AMLIntent` and its nested models) and the API layer intact.
+- **`settings.py`**: removed 10 unused QB-engine default fields (`AML_DEFAULT_ACTIVE_FLAG`,
+  `AML_DEFAULT_VIOLATION_LEVEL`, `AML_DEFAULT_DEGREE_RISK_FLAG` + its validator, `AML_RUN_FLAG`,
+  `AML_APPROVAL_FLAG`, `AML_GROUP_BY_FLAG`, `AML_CLASS_CODE`, `AML_SCE_TYPE_CODE`,
+  `AML_CATEGORY_CODE`, `AML_TRANS_WITHOUTTRANS_FLAG`, `AML_RULE_TYPE`). Kept `AML_COUNTRY_CODE`,
+  `AML_INST_CODE`, `AML_CREATED_BY` — confirmed still read by `explanation_code_search.py` and
+  `tools.py`.
+- **`oracle.py`**: removed `get_next_numeric_code()` and `call_procedure()` — both unused, both
+  existed solely to serve the deleted QB-engine write/validate flow.
+- **`CLAUDE.md`**: rewrote the Architecture section (was still describing the deleted multi-node
+  graph topology, `agent.py`, and the QB tables as if current) to match the actual tool-driven
+  architecture; removed the now-moot Known Issues entries.
+- **Docs cleanup**: deleted `Docs/database/{main tables.sql, metadata_schema.md, RULES.sql,
+  RULES_DETAILS.sql, SCENARIO.sql, SCENARIO_RULES.sql}` (pure QB-table reference dumps) and
+  `Docs/Implementaion_team_notes.md` / `Docs/Notes.md` (legacy decomposer planning notes). Trimmed
+  the `FILL_PIO_AML_CUSTOMERS`-specific section out of `Docs/known_issues.md`, leaving the unrelated
+  DWH-service entries (sections 1–6) intact. Kept `Docs/database/PIO_AML_PRODUCTION_SCENARIOS.sql`
+  and `Docs/database/DB QUERIES.sql` — both describe/use tables the current system actually touches.
+
+### Verification
+`py_compile` on every edited file, and a full `import app` + route-registration check with dummy
+Oracle/OpenAI credentials — both clean, same as the prior pass.
+
+### Files deleted
+`Docs/database/main tables.sql`, `Docs/database/metadata_schema.md`, `Docs/database/RULES.sql`,
+`Docs/database/RULES_DETAILS.sql`, `Docs/database/SCENARIO.sql`, `Docs/database/SCENARIO_RULES.sql`,
+`Docs/Implementaion_team_notes.md`, `Docs/Notes.md`
+
+### Files modified
+`CLAUDE.md`, `Docs/known_issues.md`, `services/aml_builder/web/services/schemas.py`,
+`services/aml_builder/web/services/settings.py`, `services/aml_builder/web/services/oracle.py`
+
+---
+
 ## [2026-08-10] fix+refactor: Restore `/chat/stream`, Split Agent & API Modules by Responsibility
 
 ### Bug fixes

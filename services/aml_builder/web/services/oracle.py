@@ -7,7 +7,7 @@ connection pool — the same proven pattern as the PioTech AI services.
 
 import logging
 from contextlib import contextmanager
-from typing import Generator, List, Optional, Tuple, Any
+from typing import Generator, List, Optional, Tuple
 
 import oracledb
 
@@ -138,50 +138,6 @@ def atomic_connection() -> Generator[oracledb.Connection, None, None]:
         _pool.release(conn)
 
 
-def get_next_numeric_code(table: str, code_column: str, where_clause: str = "") -> str:
-    """Generate the next sequential numeric code for a catalog table.
-
-    Queries MAX of the code column (filtering to purely numeric values via
-    REGEXP_LIKE) and returns max+1 as a string. Falls back to '1000' if no
-    numeric rows exist.
-
-    Args:
-        table (str): Oracle table name (e.g., 'PIO_AML_PARAMETERS').
-        code_column (str): Column name holding the current codes.
-        where_clause (str): Optional additional filter (without the WHERE keyword).
-
-    Returns:
-        str: The next available numeric code as a string.
-
-    Raises:
-        oracledb.Error: On Oracle execution error.
-    """
-    where_parts = [f"REGEXP_LIKE({code_column}, '^[0-9]+$')"]
-    if where_clause:
-        where_parts.append(where_clause)
-    full_where = " AND ".join(where_parts)
-    sql = (
-        f"SELECT MAX(TO_NUMBER({code_column})) "
-        f"FROM {table} "
-        f"WHERE {full_where}"
-    )
-    try:
-        with get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(sql, {})
-            row = cursor.fetchone()
-            current_max = row[0] if row and row[0] is not None else 999
-            return str(int(current_max) + 1)
-    except Exception as exc:
-        logger.warning(
-            "[ORACLE] Could not determine max code for %s.%s: %s — using fallback 1000.",
-            table,
-            code_column,
-            exc,
-        )
-        return "1000"
-
-
 def run_readonly(sql: str, params: Optional[dict] = None) -> Tuple[List[str], List[tuple]]:
     """Execute a read-only SELECT query and return column names + rows.
 
@@ -266,28 +222,3 @@ def run_write_many(sql: str, params_list: List[dict]) -> int:
         return affected
 
 
-def call_procedure(procedure_name: str, params: Optional[dict] = None) -> None:
-    """Execute an Oracle stored procedure and commit.
-
-    Used specifically to call FILL_PIO_AML_CUSTOMERS after scenario creation.
-
-    Args:
-        procedure_name (str): The procedure name (e.g., 'FILL_PIO_AML_CUSTOMERS').
-        params (Optional[dict]): Named bind parameters for the procedure.
-
-    Raises:
-        oracledb.Error: On execution error (triggers rollback).
-    """
-    pl_sql = f"BEGIN {procedure_name}; END;"
-    if params:
-        # Build parameterized block if needed
-        param_str = ", ".join(f":{k} => :{k}" for k in params)
-        pl_sql = f"BEGIN {procedure_name}({param_str}); END;"
-
-    logger.info("[ORACLE] Calling procedure: %s", procedure_name)
-
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute(pl_sql, params or {})
-        conn.commit()
-        logger.info("[ORACLE] Procedure '%s' completed successfully.", procedure_name)
