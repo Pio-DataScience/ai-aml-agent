@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from services.aml_builder.web.api.routes import chat, sessions
 from services.aml_builder.web.services.graph import get_tool_driven_graph, close_checkpointer
 from services.aml_builder.web.services.logging_config import setup_logging
-from services.aml_builder.web.services.oracle import close_pool, init_pool
+from services.aml_builder.web.services.oracle import close_pool, close_shadow_pool, init_pool, init_shadow_pool
 from services.aml_builder.web.services.session_store import init_session_db
 from services.aml_builder.web.services.settings import settings
 
@@ -46,9 +46,10 @@ async def lifespan(app: FastAPI):
     # Init sessions metadata table
     init_session_db()
 
-    # Initialize Oracle pool
+    # Initialize Oracle pools (Primary & Shadow test DB)
     try:
         init_pool()
+        init_shadow_pool()
     except Exception as exc:
         logger.error("[STARTUP] Oracle pool init failed: %s", exc)
         # Non-fatal — service can still run and return meaningful errors
@@ -69,8 +70,9 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.error("[SHUTDOWN] Error closing checkpointer: %s", exc)
 
-    logger.info("[SHUTDOWN] Closing Oracle pool.")
+    logger.info("[SHUTDOWN] Closing Oracle pools.")
     close_pool()
+    close_shadow_pool()
     logger.info("[SHUTDOWN] AML Builder service stopped.")
 
 

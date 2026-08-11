@@ -5,6 +5,27 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-08-10] feat: Dedicated Shadow Oracle DB Connection for High-Volume Test Execution
+
+### Feature & Architectural Enhancements
+- **Isolated Shadow Testing Connection**: Added configuration and pool management for a dedicated secondary Oracle DB connection (`SHADOW_ORACLE_*`), allowing live shadow tests to run against high-volume test databases (e.g. 5M+ `PIO_TRANSACTIONS` records) while keeping all control-plane operations (scenario persistence, parameter decomposer, catalog search) on the primary DB.
+- **Environment Variables Added**: Added `SHADOW_ORACLE_DSN`, `SHADOW_ORACLE_USER`, `SHADOW_ORACLE_PASSWORD`, `SHADOW_ORACLE_POOL_MIN`, and `SHADOW_ORACLE_POOL_MAX` to [`.env`](file:///c:/Users/abura/Development/AI_AML_AGENT/.env). If left blank, automatically falls back to primary `ORACLE_*` parameters.
+- **Isolated Tool Scope**: Updated `execute_oracle_dwh_shadow_test` in [`tools.py`](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/tools.py#L394) to execute queries via `run_shadow_readonly()`. All other tools remain 100% untouched.
+- **Files modified**: [`.env`](file:///c:/Users/abura/Development/AI_AML_AGENT/.env), [`settings.py`](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/settings.py), [`oracle.py`](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/oracle.py), [`tools.py`](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/tools.py), [`main.py`](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/api/main.py)
+
+---
+
+## [2026-08-10] refactor: Externalize Intent Extraction System Prompt to Markdown Catalog
+
+### Refactor & Fixes
+- **Restored Missing Import**: Fixed `NameError: name 'build_plan_markdown' is not defined` in `generate_scenario_execution_plan` by restoring `from services.aml_builder.web.services.plan_renderer import build_plan_markdown` in [`tools.py`](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/tools.py).
+- **Prompt Externalization**: Migrated the 50+ line intent extraction system instruction out of `analyze_intent_and_discover_explanation_codes()` in `tools.py` into a clean markdown document [`intent_extraction.md`](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/prompts/intent_extraction.md) inside `web/services/prompts/`.
+- **Centralized Prompt Loader**: Created [`loader.py`](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/prompts/loader.py) in `web/services/prompts/` to provide a unified `load_prompt(filename)` loader used across both `graph.py` and `tools.py`.
+- **Files created**: `web/services/prompts/intent_extraction.md`, `web/services/prompts/loader.py`
+- **Files modified**: `web/services/tools.py`, `web/services/graph.py`
+
+---
+
 ## [2026-08-10] fix: Clean interactive prompt lines from Section 8 in Scenario Plan Renderer
 
 ### Bug fixes

@@ -71,7 +71,7 @@ class Settings(BaseSettings):
         description="Max tokens per LLM response.",
     )
 
-    # ─── Oracle DB ────────────────────────────────────────────────────────────
+    # ─── Oracle DB (Primary) ──────────────────────────────────────────────────
     ORACLE_DSN: str = Field(
         ...,
         description="Oracle Data Source Name (e.g., 'host:port/service_name').",
@@ -91,6 +91,28 @@ class Settings(BaseSettings):
     ORACLE_POOL_MAX: int = Field(
         default=10,
         description="Maximum connections in the Oracle connection pool.",
+    )
+
+    # ─── Shadow Oracle DB (Test Data / Shadow Testing) ────────────────────────
+    SHADOW_ORACLE_DSN: Optional[str] = Field(
+        default=None,
+        description="Secondary Oracle DSN for shadow testing (5M+ test records). Falls back to ORACLE_DSN if unset.",
+    )
+    SHADOW_ORACLE_USER: Optional[str] = Field(
+        default=None,
+        description="Secondary Oracle username for shadow testing. Falls back to ORACLE_USER if unset.",
+    )
+    SHADOW_ORACLE_PASSWORD: Optional[str] = Field(
+        default=None,
+        description="Secondary Oracle password for shadow testing. Falls back to ORACLE_PASSWORD if unset.",
+    )
+    SHADOW_ORACLE_POOL_MIN: int = Field(
+        default=2,
+        description="Minimum connections in shadow Oracle connection pool.",
+    )
+    SHADOW_ORACLE_POOL_MAX: int = Field(
+        default=10,
+        description="Maximum connections in shadow Oracle connection pool.",
     )
 
     # ─── AML Domain Defaults ──────────────────────────────────────────────────

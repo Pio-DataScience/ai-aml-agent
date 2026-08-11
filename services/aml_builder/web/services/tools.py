@@ -30,11 +30,12 @@ from services.aml_builder.web.services.explanation_code_search import (
     select_relevant_explanation_codes,
     format_explanation_code_checkpoint,
 )
-from services.aml_builder.web.services.oracle import run_readonly
+from services.aml_builder.web.services.oracle import run_readonly, run_shadow_readonly
 from services.aml_builder.web.services.production_registry import save_production_scenario
 from services.aml_builder.web.services.llm_client import build_llm, safe_parse_json
 from services.aml_builder.web.services.sql_extraction import extract_sql
 from services.aml_builder.web.services.plan_renderer import build_plan_markdown
+from services.aml_builder.web.services.prompts.loader import load_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -65,58 +66,7 @@ def analyze_intent_and_discover_explanation_codes(
     )
     llm = build_llm()
 
-    system_instruction = (
-        "You are a Lead AML Domain Architect & Natural Language Intent Engineer for an Enterprise Financial Crime Platform.\n"
-        "Your sole responsibility is to translate business scenario descriptions into a mathematically rigorous, disambiguated Intent Contract JSON.\n\n"
-        "Output ONLY a valid JSON object matching AMLIntent schema with mandatory root keys:\n"
-        "- scenario_name (str): descriptive title\n"
-        "- scenario_type (str): 'CUSTOMER', 'TRANSACTION', or 'ACCOUNT'\n"
-        "- transaction_type (str or null): explicit transaction type name e.g. 'CASH DEPOSIT'\n"
-        "- detection_logic (str): plain English summary of business logic\n"
-        "- thresholds (list of dicts with: field, operator, value_from, target_scope)\n"
-        "- time_window (dict with: unit, value, is_rolling)\n"
-        "- aggregation (dict with: metric, function, grain)\n"
-        "- customer_segments (list of str or null): e.g. ['CORPORATE'], ['RETAIL'], or null\n"
-        "- exclusions (list of str or null): e.g. ['Exclude payroll', 'Exclude employee accounts'], or null\n"
-        "- semantic_conditions (list of dicts with: raw_phrase, logical_type, subject, predicate)\n"
-        "- anchor_date (str or null): YYYY-MM-DD date or null\n"
-        "- explanation_codes (list of str or null)\n\n"
-        "[CORE EXTRACTION LAWS]\n\n"
-        "1. MANDATORY SCOPE CLASSIFICATION (target_scope):\n"
-        "   Every threshold in the 'thresholds' array MUST explicitly set 'target_scope' to either 'DETAIL' or 'AGGREGATE':\n"
-        "   - 'DETAIL': Applies to individual transaction records before aggregation (placed in SQL WHERE clause). Example: 'each deposit > 9,000' or 'transaction_amount > 50,000'.\n"
-        "   - 'AGGREGATE': Applies to summed, averaged, or counted metrics across a group/window (placed in SQL HAVING clause). Example: 'total monthly volume > 100,000' or 'cumulative_transaction_volume > 10,000'.\n\n"
-        "2. GRAIN & SCENARIO TYPE ALIGNMENT:\n"
-        "   - 'aggregation' MUST be a dictionary containing 'metric' (e.g. 'transaction_amount' or 'cumulative_transaction_volume'), 'function' ('SUM', 'COUNT', 'AVG', or 'NONE'), and 'grain' (e.g. 'PER CUSTOMER PER DAY').\n"
-        "   - If the scenario aggregates activity (SUM, COUNT, AVG) over time to flag an entity, 'scenario_type' MUST be 'CUSTOMER' or 'ACCOUNT' (NEVER 'TRANSACTION').\n"
-        "   - 'aggregation.grain' MUST explicitly state the grouping boundary (e.g., 'PER CUSTOMER PER DAY', 'PER CUSTOMER PER ROLLING 7 DAYS').\n"
-        "   - NEVER set 'aggregation.grain' to 'TRANSACTION' if a 'SUM', 'COUNT', or 'AVG' function is specified.\n\n"
-        "3. DUAL-WINDOW & THRESHOLD FIELD NAMING:\n"
-        "   - 'each transaction > X': threshold field = 'transaction_amount', target_scope = 'DETAIL'.\n"
-        "   - 'total/cumulative volume > X': threshold field = 'cumulative_transaction_volume', target_scope = 'AGGREGATE'.\n"
-        "   - NEGATIVE CONSTRAINT: For cumulative sum/volume scenarios, output ONLY ONE threshold object with target_scope: 'AGGREGATE'. NEVER output a duplicate threshold with target_scope: 'DETAIL' for the same amount!\n\n"
-        "4. 'BETWEEN' OPERATOR LOWER & UPPER BOUNDS:\n"
-        "   - When operator is 'BETWEEN', you MUST populate BOTH 'value_from' (lower bound float) AND 'value_to' (upper bound float). Example: 'between 8,000 and 9,999' -> value_from: 8000.0, value_to: 9999.0.\n\n"
-        "5. ALL PERCENTAGE & RATIO RULES MUST BE THRESHOLDS:\n"
-        "   - If the detection logic mentions a percentage or ratio (e.g. 'sends back 90%', '300% of average'), you MUST emit a corresponding entry in the 'thresholds' array with target_scope set to 'AGGREGATE' and convert percentage strings into clean floats in 'value_from' (e.g. '300% of average' -> value_from: 3.0; '90% of funds' -> value_from: 0.90).\n\n"
-        "6. MANDATORY BASELINE_WINDOW EMISSION:\n"
-        "   - Whenever a scenario mentions a historical baseline, prior average, or dormancy lookback (e.g. 'prior 180 days', '6-month baseline', 'dormant for 180 days'), you MUST populate the 'baseline_window' object (e.g. {'unit': 'DAYS', 'duration': 180, 'exclude_current_window': true, 'offset_days': 30}). Do not leave it null if historical data is referenced.\n\n"
-        "7. EXHAUSTIVE THRESHOLD & EXCLUSION EXTRACTION:\n"
-        "   - Do NOT drop secondary conditions! Extract all stated constraints into thresholds or semantic_conditions:\n"
-        "     * Distinct counts ('distinct_branch_count >= 3', 'distinct_beneficiary_count >= 3') -> AGGREGATE threshold.\n"
-        "     * Demographic/state filters ('customer_age < 25', 'risk_rating != LOW') -> DETAIL threshold or semantic_conditions.\n"
-        "     * Customer segments ('customer_segments': ['CORPORATE'] or ['RETAIL']).\n"
-        "     * Exclusions ('exclusions': ['Exclude payroll', 'Exclude employee accounts']).\n\n"
-        "8. EXPLANATION CODES RESOLUTION:\n"
-        "   - If the user selects, filters, or confirms specific explanation codes (e.g. 'first and second', 'use options 1 and 2', 'only code 660'), resolve them against Existing Intent Payload's discovered explanation codes and return the list of selected code strings in 'explanation_codes'.\n\n"
-        "9. HISTORICAL TEST ANCHOR (anchor_date):\n"
-        "   - If the user explicitly specifies a historical test date or snapshot date (e.g. 'test against 2024-01-04'), extract 'anchor_date': 'YYYY-MM-DD'. Otherwise set to null.\n\n"
-        "10. MANDATORY CUSTOMER_SEGMENTS EXTRACTION:\n"
-        "   - If the prompt references entity segments (e.g. 'corporate customers', 'retail accounts', 'individual clients'), you MUST extract them into 'customer_segments': ['CORPORATE'] or ['RETAIL']. Do not leave 'customer_segments' null if a segment is mentioned.\n\n"
-        "11. ZERO LOSS OF ATOMIC CONCEPTS (semantic_conditions):\n"
-        "   - EVERY micro-atomic concept, non-numeric rule, state transition ('dormant for 180 days then burst'), or complex behavioral rule ('returns 90% within 5 days') that cannot be a pure numeric threshold MUST be captured in 'semantic_conditions' as a dict with: 'raw_phrase', 'logical_type' ('STATE'|'TRANSITION'|'SEQUENCE'|'BEHAVIORAL'|'TEMPORAL'|'OTHER'), 'subject', and 'predicate'. ZERO USER CONCEPTS MAY BE OMITTED.\n\n"
-        "Do not wrap in markdown fences."
-    )
+    system_instruction = load_prompt("intent_extraction.md")
     if existing_intent_json:
         system_instruction += f"\n\nExisting Intent Payload:\n{existing_intent_json}\nPreserve existing stated fields."
 
@@ -441,7 +391,7 @@ def execute_oracle_dwh_shadow_test(intent_json: str) -> str:
     # -----------------------------------------------------------
     try:
         shadow_sql = f"SELECT COUNT(*) FROM ({sql}) shadow_query"
-        _, shadow_rows = run_readonly(shadow_sql)
+        _, shadow_rows = run_shadow_readonly(shadow_sql)
         header_count = shadow_rows[0][0] if shadow_rows else 0
 
         # Estimate transaction detail rows (4x matches QB engine output ratio)

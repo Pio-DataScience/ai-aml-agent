@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 # Module-level pool — created once at startup, shared across all requests
 _pool: Optional[oracledb.ConnectionPool] = None
+_shadow_pool: Optional[oracledb.ConnectionPool] = None
 
 
 def init_pool() -> None:
@@ -54,6 +55,48 @@ def init_pool() -> None:
     logger.info("[ORACLE] Connection pool initialized successfully.")
 
 
+def init_shadow_pool() -> None:
+    """Initialize the secondary/shadow Oracle connection pool used for shadow testing.
+
+    Uses SHADOW_ORACLE_* settings if provided; falls back to primary ORACLE_* settings.
+
+    Raises:
+        None: Logs error without failing if secondary pool connection fails.
+    """
+    global _shadow_pool
+    if _shadow_pool is not None:
+        logger.info("[ORACLE:SHADOW] Shadow pool already initialized — skipping.")
+        return
+
+    dsn = settings.SHADOW_ORACLE_DSN or settings.ORACLE_DSN
+    user = settings.SHADOW_ORACLE_USER or settings.ORACLE_USER
+    password = settings.SHADOW_ORACLE_PASSWORD or settings.ORACLE_PASSWORD
+
+    logger.info(
+        "[ORACLE:SHADOW] Initializing shadow connection pool: dsn=%s, user=%s, min=%d, max=%d",
+        dsn,
+        user,
+        settings.SHADOW_ORACLE_POOL_MIN,
+        settings.SHADOW_ORACLE_POOL_MAX,
+    )
+
+    try:
+        _shadow_pool = oracledb.create_pool(
+            user=user,
+            password=password,
+            dsn=dsn,
+            min=settings.SHADOW_ORACLE_POOL_MIN,
+            max=settings.SHADOW_ORACLE_POOL_MAX,
+            increment=1,
+            getmode=oracledb.POOL_GETMODE_WAIT,
+            timeout=30,
+        )
+        logger.info("[ORACLE:SHADOW] Shadow connection pool initialized successfully.")
+    except Exception as exc:
+        logger.error("[ORACLE:SHADOW] Failed to initialize shadow pool: %s", exc)
+        _shadow_pool = None
+
+
 def close_pool() -> None:
     """Gracefully close the Oracle connection pool.
 
@@ -64,6 +107,18 @@ def close_pool() -> None:
         _pool.close()
         _pool = None
         logger.info("[ORACLE] Connection pool closed.")
+
+
+def close_shadow_pool() -> None:
+    """Gracefully close the shadow Oracle connection pool."""
+    global _shadow_pool
+    if _shadow_pool is not None:
+        try:
+            _shadow_pool.close()
+            logger.info("[ORACLE:SHADOW] Shadow connection pool closed.")
+        except Exception as exc:
+            logger.error("[ORACLE:SHADOW] Error closing shadow pool: %s", exc)
+        _shadow_pool = None
 
 
 @contextmanager
@@ -220,5 +275,63 @@ def run_write_many(sql: str, params_list: List[dict]) -> int:
             "[ORACLE] Batch DML committed. Rows affected: %d", affected
         )
         return affected
+
+
+@contextmanager
+def get_shadow_connection() -> Generator[oracledb.Connection, None, None]:
+    """Acquire a connection from the shadow pool as a context manager.
+
+    If shadow pool is not initialized, falls back to the primary pool.
+
+    Yields:
+        oracledb.Connection: A live Oracle connection.
+    """
+    if _shadow_pool is None:
+        logger.warning("[ORACLE:SHADOW] Shadow pool not initialized — falling back to primary pool.")
+        with get_connection() as conn:
+            yield conn
+        return
+
+    conn = _shadow_pool.acquire()
+    try:
+        yield conn
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        _shadow_pool.release(conn)
+
+
+def run_shadow_readonly(sql: str, params: Optional[dict] = None) -> Tuple[List[str], List[tuple]]:
+    """Execute a read-only SELECT query against the shadow test database and return column names + rows.
+
+    Args:
+        sql (str): The SELECT query to execute. Must start with SELECT or WITH.
+        params (Optional[dict]): Named bind parameters for the query.
+
+    Returns:
+        Tuple[List[str], List[tuple]]:
+            - List of column names (lowercased).
+            - List of result rows as tuples.
+
+    Raises:
+        ValueError: If the query is not a SELECT/WITH statement.
+        oracledb.Error: On Oracle execution error.
+    """
+    import re
+
+    stripped = sql.strip()
+    if not re.match(r"^\s*(SELECT|WITH)\s+", stripped, re.IGNORECASE):
+        raise ValueError(
+            f"run_shadow_readonly only accepts SELECT queries. Got: {stripped[:60]}..."
+        )
+
+    with get_shadow_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(stripped, params or {})
+        columns = [col[0].lower() for col in cursor.description]
+        rows = cursor.fetchall()
+        return columns, rows
+
 
 

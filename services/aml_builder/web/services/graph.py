@@ -18,27 +18,12 @@ from services.aml_builder.web.services.tools import (
     persist_and_validate_scenario_in_dwh,
 )
 
+from services.aml_builder.web.services.prompts.loader import load_prompt
+
 logger = logging.getLogger(__name__)
 
 _tool_graph = None
 _checkpointer_conn = None
-
-
-def _load_prompt(filename: str) -> str:
-    """Load a system prompt from the prompts directory.
-
-    Args:
-        filename (str): Filename of the prompt markdown file.
-
-    Returns:
-        str: File contents as a string. Returns empty string on failure.
-    """
-    prompt_path = Path(__file__).parent / "prompts" / filename
-    try:
-        return prompt_path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        logger.warning("[PROMPT] Not found: %s — using empty prompt.", filename)
-        return ""
 
 
 async def get_tool_driven_graph() -> Any:
@@ -64,7 +49,7 @@ async def get_tool_driven_graph() -> Any:
 
         llm = build_llm()
 
-        goal_prompt = _load_prompt("tool_driven_system.md")
+        goal_prompt = load_prompt("tool_driven_system.md")
         if not goal_prompt:
             goal_prompt = (
                 "You are the autonomous AML Scenario Architect. Use your tools to extract scenario requirements, "
