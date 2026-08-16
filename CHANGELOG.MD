@@ -5,6 +5,72 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-08-11] feat: PIO_AML_SCENARIO Governance Metadata + Atomic Dual-Write Persistence
+
+### What
+Phase 2 of the Production Scenario Registry (see `Docs/PIO_AML_SCENARIO_schema_guide.md`): compliance
+officers must now supply governance metadata (risk degree, category, violation level, etc.) — sourced
+strictly from live Oracle lookup tables, never LLM-invented — before a scenario can be persisted.
+
+- **New `scenario_metadata.py`**: a declarative field registry (`SCENARIO_METADATA_FIELDS`) covering
+  every `PIO_AML_SCENARIO` column, with four population kinds (`system_default`, `derived`,
+  `static_enum`, `oracle_lookup`). `seed_scenario_metadata()` deterministically maps `AMLIntent` fields
+  (`time_window` → `PERIOD_TYPE`/`PERIOD_NUM`, `detection_logic` → `SCENARIO_DESC`) without ever
+  overwriting values already picked by the officer. `fetch_lookup_options()` queries live Oracle lookup
+  tables filtered by `COUNTRY_CODE`/`INST_CODE`. `validate_scenario_metadata()` is the single guard-rail
+  that must pass before any write — every mandatory field non-null, every governed value verified
+  against its live/static allowed-value set.
+- **Two new/changed tools** in `tools.py`: `analyze_intent_and_discover_explanation_codes` now seeds
+  `scenario_metadata` from turn one (new `existing_metadata_json` param preserves prior picks across
+  refinement turns). New `prepare_scenario_metadata_for_persistence` tool builds the live field catalog
+  (options fetched from Oracle) for the frontend side panel. `persist_and_validate_scenario_in_dwh` now
+  requires `metadata_json`, validates it first, and refuses to write anything on failure.
+- **Atomic dual-write** in `production_registry.py`: `save_production_scenario()` now writes
+  `PIO_AML_PRODUCTION_SCENARIOS` (RAW_SQL) and the new `PIO_AML_SCENARIO` (business metadata) table in
+  one Oracle transaction via the previously-unused `oracle.atomic_connection()` — both commit or both
+  roll back. Re-persisting an existing `SCENARIO_CODE` increments `PIO_AML_SCENARIO.VERSION_NUM`.
+- **New SSE event** `scenario_metadata_catalog`, wired in `routes/chat.py`, carries the field catalog
+  to the frontend side panel the same way `plan_artifact` already does.
+- **Prompt updated** (`tool_driven_system.md`): step 4 of the workflow is now "gather governance
+  metadata, relay any still-missing mandatory fields in chat as a fallback to the panel, never guess a
+  value" before the (renumbered) step 5 persist call.
+
+### Known placeholders — not yet confirmed
+The exact column names for the `PIO_AML_CATEGORY` and `PIO_AML_DEGREE_RISK` lookup tables are
+best-guess placeholders (`CATEG_CODE`/`DESC_ENG`, `DEGREE_CODE`/`DESC_ENG`), clearly marked `TODO
+(compliance)` at the top of `scenario_metadata.py`. Fixing them is a one-line `LookupTableConfig` edit,
+not a code change — the fetch/validate mechanism is fully generic. `VIOLATION_LEVEL` is implemented as
+a static `HIGH`/`MEDIUM`/`LOW` enum per the schema guide (no live table was named for it).
+
+### Verification
+`py_compile` across every new/modified file; full `import app` with dummy credentials (routes/graph
+unaffected); direct tool invocation test of `seed_scenario_metadata` → `prepare_scenario_metadata_for_persistence`
+→ `persist_and_validate_scenario_in_dwh`, confirming the validation gate correctly blocks persistence
+with clear error messages when lookup values can't be verified, while the static-enum field passes.
+
+### Files created
+`web/services/scenario_metadata.py`, `Docs/03_scenario_metadata_persistence.md`
+
+### Files modified
+`web/services/tools.py`, `web/services/graph.py`, `web/services/production_registry.py`,
+`web/services/schemas.py`, `web/api/routes/chat.py`, `web/services/prompts/tool_driven_system.md`,
+`CLAUDE.md`
+
+---
+
+## [2026-08-11] docs: Document Schema & DDL for 5 Core System Tables in Notes.md
+
+### Documentation
+- **Database Schema Documentation**: Documented column structure, data types, nullability, primary key constraints, and standard `CREATE TABLE` DDL statements for the 5 core tables driving the AML scenario creation and execution workflow:
+  1. [`PIO_AML_SCENARIO`](file:///c:/Users/abura/Development/AI_AML_AGENT/Docs/Notes.md#1-pio_aml_scenario): High-level scenario metadata and description table.
+  2. [`PIO_AML_PRODUCTION_SCENARIOS`](file:///c:/Users/abura/Development/AI_AML_AGENT/Docs/Notes.md#2-pio_aml_production_scenarios): Agent scenario registry table storing production SQL detection statements.
+  3. [`PIO_AML_CUSTOMERS`](file:///c:/Users/abura/Development/AI_AML_AGENT/Docs/Notes.md#3-pio_aml_customers): Customer alert header table generated from daily detection runs.
+  4. [`PIO_AML_CUSTOMERS_DET`](file:///c:/Users/abura/Development/AI_AML_AGENT/Docs/Notes.md#4-pio_aml_customers_det): Transaction detail breakdown table linked to parent alerts.
+  5. [`PIO_TRANSACTIONS`](file:///c:/Users/abura/Development/AI_AML_AGENT/Docs/Notes.md#5-pio_transactions): Core DWH financial transaction ledger table.
+- **Files modified**: [`Docs/Notes.md`](file:///c:/Users/abura/Development/AI_AML_AGENT/Docs/Notes.md)
+
+---
+
 ## [2026-08-10] feat: Dedicated Shadow Oracle DB Connection for High-Volume Test Execution
 
 ### Feature & Architectural Enhancements

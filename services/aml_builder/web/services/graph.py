@@ -15,6 +15,7 @@ from services.aml_builder.web.services.tools import (
     analyze_intent_and_discover_explanation_codes,
     generate_scenario_execution_plan,
     execute_oracle_dwh_shadow_test,
+    prepare_scenario_metadata_for_persistence,
     persist_and_validate_scenario_in_dwh,
 )
 
@@ -44,6 +45,7 @@ async def get_tool_driven_graph() -> Any:
             analyze_intent_and_discover_explanation_codes,
             generate_scenario_execution_plan,
             execute_oracle_dwh_shadow_test,
+            prepare_scenario_metadata_for_persistence,
             persist_and_validate_scenario_in_dwh,
         ]
 

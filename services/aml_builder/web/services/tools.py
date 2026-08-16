@@ -36,6 +36,11 @@ from services.aml_builder.web.services.llm_client import build_llm, safe_parse_j
 from services.aml_builder.web.services.sql_extraction import extract_sql
 from services.aml_builder.web.services.plan_renderer import build_plan_markdown
 from services.aml_builder.web.services.prompts.loader import load_prompt
+from services.aml_builder.web.services.scenario_metadata import (
+    seed_scenario_metadata,
+    build_metadata_catalog,
+    validate_scenario_metadata,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -49,17 +54,24 @@ logger = logging.getLogger(__name__)
 def analyze_intent_and_discover_explanation_codes(
     user_prompt: str,
     existing_intent_json: Optional[str] = None,
+    existing_metadata_json: Optional[str] = None,
 ) -> str:
     """Analyze the user's compliance scenario prompt, extract structured scenario parameters (AMLIntent),
 
-    and run vector similarity search against the domain explanation codes catalog (top 70% relative cutoff).
+    run vector similarity search against the domain explanation codes catalog (top 70% relative
+    cutoff), and deterministically seed the PIO_AML_SCENARIO governance metadata (period, country/
+    institution codes, description, etc.) that will later be needed at persistence time.
 
     Args:
         user_prompt (str): Plain English scenario description or modification request from user.
         existing_intent_json (Optional[str]): Serialized JSON string of prior AMLIntent payload if refining.
+        existing_metadata_json (Optional[str]): Serialized JSON string of the scenario metadata
+            accumulated so far (side panel clicks, prior turns). Already-set values are never
+            overwritten by re-seeding — pass this on every refinement turn so officer picks persist.
 
     Returns:
-        str: JSON object containing 'enriched_intent' dict and 'explanation_code_checkpoint' markdown table.
+        str: JSON object containing 'enriched_intent' dict, 'explanation_code_checkpoint' markdown
+             table, and 'scenario_metadata' dict (PIO_AML_SCENARIO field values seeded so far).
     """
     logger.info(
         "[TOOL: INTENT] Extracting scenario parameters and running vector search..."
@@ -202,11 +214,23 @@ def analyze_intent_and_discover_explanation_codes(
                 )
 
         intent = AMLIntent(**intent_dict)
+
+        existing_metadata: Optional[Dict[str, Any]] = None
+        if existing_metadata_json:
+            try:
+                existing_metadata = json.loads(existing_metadata_json)
+            except json.JSONDecodeError:
+                logger.warning(
+                    "[TOOL: INTENT] Could not parse existing_metadata_json — seeding fresh."
+                )
+        scenario_metadata = seed_scenario_metadata(intent.model_dump(), existing_metadata)
+
         return json.dumps(
             {
                 "enriched_intent": intent.model_dump(),
                 "explanation_code_checkpoint": expl_checkpoint,
                 "discovered_explanation_codes": discovered_codes,
+                "scenario_metadata": scenario_metadata,
             },
             ensure_ascii=False,
             indent=2,
@@ -435,24 +459,79 @@ def execute_oracle_dwh_shadow_test(intent_json: str) -> str:
 
 
 @tool
-def persist_and_validate_scenario_in_dwh(intent_json: str, raw_sql: str) -> str:
-    """Persist the confirmed, shadow-tested AML scenario into PIO_AML_PRODUCTION_SCENARIOS
-    for consumption by the automated daily ETL runner.
+def prepare_scenario_metadata_for_persistence(metadata_json: str) -> str:
+    """Build the live PIO_AML_SCENARIO governance field catalog for the side panel / chat fallback.
 
-    Performs an idempotent INSERT-or-UPDATE: if the scenario_id already exists it updates
-    the record and reactivates it (IS_ACTIVE=1). Only call after shadow test results have
-    been reviewed and the user confirms they want to save the scenario to production.
+    Call this ONLY after the user has approved the shadow test results and before calling
+    persist_and_validate_scenario_in_dwh. It attaches the currently valid options for every
+    lookup-driven field (e.g. risk degree, category) by querying Oracle live, and reports which
+    mandatory fields are still missing.
+
+    If 'ready_for_persistence' is False in the response, present the missing mandatory fields
+    to the user in chat as a fallback to the side panel — list each field's description and its
+    valid options. NEVER invent or guess a value for a mandatory field yourself; only the officer's
+    explicit pick (via panel click or chat) may fill it. Re-call this tool whenever the user
+    supplies new field values in chat, passing the merged metadata_json back in.
+
+    Args:
+        metadata_json (str): Serialized JSON of the scenario metadata accumulated so far (from
+            the 'scenario_metadata' field of analyze_intent_and_discover_explanation_codes, merged
+            with any side panel clicks or chat-provided values).
+
+    Returns:
+        str: JSON containing 'metadata' (current values), 'fields' (full catalog with live
+             lookup options), 'missing_mandatory_fields', and 'ready_for_persistence'.
+    """
+    logger.info("[TOOL: METADATA] Building PIO_AML_SCENARIO field catalog...")
+
+    try:
+        metadata = json.loads(metadata_json) if metadata_json else {}
+    except json.JSONDecodeError as exc:
+        logger.error("[TOOL: METADATA] Invalid metadata_json: %s", exc)
+        return json.dumps({"error": f"Invalid metadata JSON: {exc}"})
+
+    try:
+        catalog = build_metadata_catalog(metadata)
+        logger.info(
+            "[TOOL: METADATA] Catalog built. missing=%s ready=%s",
+            catalog["missing_mandatory_fields"],
+            catalog["ready_for_persistence"],
+        )
+        return json.dumps(catalog, ensure_ascii=False, indent=2, default=str)
+    except Exception as exc:
+        logger.error("[TOOL: METADATA] Catalog build failed: %s", exc)
+        return json.dumps({"error": str(exc)})
+
+
+@tool
+def persist_and_validate_scenario_in_dwh(intent_json: str, raw_sql: str, metadata_json: str) -> str:
+    """Persist the confirmed, shadow-tested AML scenario atomically into both
+    PIO_AML_PRODUCTION_SCENARIOS (for the automated daily ETL runner) and
+    PIO_AML_SCENARIO (business metadata for downstream compliance UI/workflow modules).
+
+    Performs an idempotent INSERT-or-UPDATE on both tables in a single Oracle transaction:
+    if the scenario_id already exists it updates the record and reactivates it (IS_ACTIVE=1),
+    incrementing PIO_AML_SCENARIO.VERSION_NUM. Only call after shadow test results have been
+    reviewed AND prepare_scenario_metadata_for_persistence reports ready_for_persistence=True
+    (or the user explicitly confirms proceeding despite missing fields).
+
+    Every mandatory PIO_AML_SCENARIO field is re-validated here against its live lookup table
+    or allowed-value set before anything is written — if validation fails, NOTHING is written
+    to either table and the problems are returned for you to relay to the user.
 
     Args:
         intent_json (str): Serialized AMLIntent payload dictionary JSON string.
         raw_sql (str): Production-grade Oracle SQL statement from the shadow test.
+        metadata_json (str): Serialized PIO_AML_SCENARIO metadata JSON — the merged output of
+            prepare_scenario_metadata_for_persistence plus any officer picks.
 
     Returns:
         str: JSON containing 'scenario_id', 'scenario_name', 'write_success',
-             'write_verification', and 'created_at'.
+             'write_verification', and 'created_at' on success, or 'validation_errors'
+             (list of str) and 'write_success': false if the metadata failed validation.
     """
     logger.info(
-        "[TOOL: PERSISTER] Writing confirmed scenario to PIO_AML_PRODUCTION_SCENARIOS..."
+        "[TOOL: PERSISTER] Writing confirmed scenario to PIO_AML_PRODUCTION_SCENARIOS + PIO_AML_SCENARIO..."
     )
 
     try:
@@ -460,6 +539,24 @@ def persist_and_validate_scenario_in_dwh(intent_json: str, raw_sql: str) -> str:
     except json.JSONDecodeError as exc:
         logger.error("[TOOL: PERSISTER] Invalid intent JSON: %s", exc)
         return json.dumps({"error": f"Invalid intent JSON: {exc}"})
+
+    try:
+        metadata_dict = json.loads(metadata_json) if metadata_json else {}
+    except json.JSONDecodeError as exc:
+        logger.error("[TOOL: PERSISTER] Invalid metadata JSON: %s", exc)
+        return json.dumps({"error": f"Invalid metadata JSON: {exc}"})
+
+    is_valid, problems = validate_scenario_metadata(metadata_dict)
+    if not is_valid:
+        logger.warning("[TOOL: PERSISTER] Metadata validation failed: %s", problems)
+        return json.dumps(
+            {
+                "write_success": False,
+                "validation_errors": problems,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
 
     scenario_name: str = intent_dict.get("scenario_name", "AML Detection Scenario")
     scenario_type: str = intent_dict.get("scenario_type", "CUSTOMER")
@@ -474,7 +571,7 @@ def persist_and_validate_scenario_in_dwh(intent_json: str, raw_sql: str) -> str:
         tw_value * unit_to_days.get(tw_unit, 1) if tw_value else None
     )
 
-    # Generate a human-readable unique scenario ID
+    # Generate a human-readable unique scenario ID — shared as SCENARIO_CODE on PIO_AML_SCENARIO
     scenario_id = f"PRD_{uuid.uuid4().hex[:8].upper()}"
     created_at = datetime.utcnow().isoformat()
 
@@ -484,6 +581,7 @@ def persist_and_validate_scenario_in_dwh(intent_json: str, raw_sql: str) -> str:
         scenario_type=scenario_type,
         detection_logic=detection_logic,
         raw_sql=raw_sql,
+        scenario_metadata=metadata_dict,
         time_window_days=time_window_days,
         created_by=settings.AML_CREATED_BY,
     )
@@ -509,8 +607,9 @@ def persist_and_validate_scenario_in_dwh(intent_json: str, raw_sql: str) -> str:
             "raw_sql_preview": raw_sql[:200] if raw_sql else "",
             "write_success": success,
             "write_verification": {
-                "table": "PIO_AML_PRODUCTION_SCENARIOS",
-                "rows_written": 1 if success else 0,
+                "production_scenarios_table": "PIO_AML_PRODUCTION_SCENARIOS",
+                "scenario_metadata_table": "PIO_AML_SCENARIO",
+                "rows_written": 2 if success else 0,
                 "is_active": 1,
             },
             "created_at": created_at,

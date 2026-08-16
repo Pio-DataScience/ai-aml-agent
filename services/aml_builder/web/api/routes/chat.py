@@ -32,13 +32,14 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
     back to the client.
 
     SSE event types emitted:
-    - ``tool_call``        — when a tool is being invoked
-    - ``thinking``         — intermediate processing status
-    - ``content``          — streaming text chunks
-    - ``plan_artifact``    — structured markdown execution plan (side panel)
-    - ``scenario_result``  — structured scenario + validation data (JSON)
-    - ``error``            — error details
-    - ``done``             — stream termination signal
+    - ``tool_call``                  — when a tool is being invoked
+    - ``thinking``                   — intermediate processing status
+    - ``content``                    — streaming text chunks
+    - ``plan_artifact``              — structured markdown execution plan (side panel)
+    - ``scenario_metadata_catalog``  — PIO_AML_SCENARIO field catalog + live lookup options (side panel)
+    - ``scenario_result``            — structured scenario + validation data (JSON)
+    - ``error``                      — error details
+    - ``done``                       — stream termination signal
 
     Args:
         request (ChatRequest): The incoming chat request with messages and metadata.
@@ -125,6 +126,19 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                                         logger.info("[API] Emitted plan_artifact SSE from tool output (%d chars).", len(plan_md))
                                 except Exception as exc:
                                     logger.warning("[API] Could not parse plan_artifact from ToolMessage: %s", exc)
+
+                            elif tool_name == "prepare_scenario_metadata_for_persistence":
+                                # Emit the PIO_AML_SCENARIO field catalog to the side panel
+                                try:
+                                    payload = json.loads(getattr(m, "content", "{}"))
+                                    if "fields" in payload:
+                                        yield _sse(SSEEvent(type="scenario_metadata_catalog", data=payload))
+                                        logger.info(
+                                            "[API] Emitted scenario_metadata_catalog SSE. missing=%s",
+                                            payload.get("missing_mandatory_fields"),
+                                        )
+                                except Exception as exc:
+                                    logger.warning("[API] Could not parse scenario_metadata_catalog from ToolMessage: %s", exc)
 
                             elif tool_name == "persist_and_validate_scenario_in_dwh":
                                 # Emit scenario result confirmation card

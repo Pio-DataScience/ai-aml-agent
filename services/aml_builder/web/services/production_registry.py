@@ -1,16 +1,23 @@
 """
 Production Scenario Registry Module.
 
-Manages creation and insertion of confirmed production-grade AML scenarios into the
-PIO_AML_PRODUCTION_SCENARIOS table for consumption by the automated daily ETL runner.
+Manages creation and insertion of confirmed production-grade AML scenarios into
+two tables, written atomically in a single transaction:
+  - PIO_AML_PRODUCTION_SCENARIOS: the RAW_SQL consumed by the automated daily
+    ETL runner.
+  - PIO_AML_SCENARIO: business metadata (risk degree, category, period, etc.)
+    consumed by downstream compliance UI/workflow modules — see
+    Docs/PIO_AML_SCENARIO_schema_guide.md.
+
+Both tables share the same SCENARIO_CODE/SCENARIO_ID as their key, so a
+consumer can always join one to the other.
 """
 
 import logging
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from services.aml_builder.web.services.settings import settings
-from services.aml_builder.web.services.oracle import run_readonly, run_write
+from services.aml_builder.web.services.oracle import run_readonly, run_write, atomic_connection
 
 logger = logging.getLogger(__name__)
 
@@ -59,94 +66,223 @@ def init_production_scenarios_table() -> None:
         )
 
 
+def init_scenario_metadata_table() -> None:
+    """Initialize the PIO_AML_SCENARIO table in Oracle if it does not exist.
+
+    See Docs/PIO_AML_SCENARIO_schema_guide.md for the field-by-field
+    rationale — this table is the business metadata registry consumed by
+    downstream compliance UI/workflow modules, not by SQL generation.
+    """
+    try:
+        _, rows = run_readonly(
+            """
+            SELECT TABLE_NAME FROM ALL_TABLES
+            WHERE UPPER(TABLE_NAME) = 'PIO_AML_SCENARIO'
+              AND OWNER = UPPER(:owner)
+            """,
+            {"owner": settings.ORACLE_USER},
+        )
+        if not rows:
+            logger.info("[PRODUCTION_REGISTRY] Creating table PIO_AML_SCENARIO...")
+            create_sql = """
+            CREATE TABLE PIO_AML_SCENARIO (
+                COUNTRY_CODE   NUMBER NOT NULL,
+                INST_CODE      NUMBER NOT NULL,
+                SCENARIO_CODE  VARCHAR2(40) NOT NULL,
+                SCENARIO_DESC  VARCHAR2(400),
+                CATEG_CODE     VARCHAR2(40),
+                SCENARIO_STATE VARCHAR2(40),
+                PERIOD_TYPE    VARCHAR2(40),
+                PERIOD_NUM     NUMBER,
+                RISK_DEGREE    VARCHAR2(40),
+                VIOLATION_LEVEL VARCHAR2(40),
+                CREATED_BY     NUMBER,
+                ACTIVE_FLAG    VARCHAR2(40),
+                SYS_DATE       DATE,
+                VERSION_NUM    NUMBER,
+                USER_NAME      VARCHAR2(400),
+                PRIMARY KEY (COUNTRY_CODE, INST_CODE, SCENARIO_CODE)
+            )
+            """
+            run_write(create_sql)
+            logger.info("[PRODUCTION_REGISTRY] Table PIO_AML_SCENARIO created successfully.")
+        else:
+            logger.info("[PRODUCTION_REGISTRY] Table PIO_AML_SCENARIO verified.")
+    except Exception as exc:
+        logger.error(
+            "[PRODUCTION_REGISTRY] Failed to initialize PIO_AML_SCENARIO table: %s",
+            exc,
+            exc_info=True,
+        )
+
+
 def save_production_scenario(
     scenario_id: str,
     scenario_name: str,
     scenario_type: str,
     detection_logic: str,
     raw_sql: str,
+    scenario_metadata: Dict[str, Any],
     time_window_days: Optional[int] = None,
     created_by: str = "COMPLIANCE_OFFICER",
 ) -> bool:
-    """Insert or update a confirmed scenario in PIO_AML_PRODUCTION_SCENARIOS.
+    """Insert or update a confirmed scenario across both registry tables atomically.
+
+    Writes PIO_AML_PRODUCTION_SCENARIOS (the RAW_SQL) and PIO_AML_SCENARIO
+    (business metadata) in a single Oracle transaction — either both succeed
+    and commit, or both roll back. `scenario_metadata` must already have
+    passed `scenario_metadata.validate_scenario_metadata()`; this function
+    does not re-validate it.
 
     Args:
-        scenario_id (str): Unique identifier for the scenario.
+        scenario_id (str): Unique identifier, shared as SCENARIO_ID on
+            PIO_AML_PRODUCTION_SCENARIOS and SCENARIO_CODE on PIO_AML_SCENARIO.
         scenario_name (str): Human readable scenario name.
         scenario_type (str): Category (e.g. CUSTOMER, ACCOUNT, TRANSACTION).
         detection_logic (str): Plain English logic summary.
         raw_sql (str): Production-grade ANSI Oracle SQL query from Service B.
+        scenario_metadata (Dict[str, Any]): Validated PIO_AML_SCENARIO field
+            values — see scenario_metadata.SCENARIO_METADATA_FIELDS for the
+            expected keys (COUNTRY_CODE, INST_CODE, CATEG_CODE, RISK_DEGREE, etc.).
         time_window_days (Optional[int]): Observation window size in days.
-        created_by (str): User identifier who confirmed activation.
+        created_by (str): User identifier written to PIO_AML_PRODUCTION_SCENARIOS.CREATED_BY.
 
     Returns:
-        bool: True if insert/update succeeded, False otherwise.
+        bool: True if both writes succeeded and were committed, False if the
+            transaction failed and was rolled back on both tables.
     """
     init_production_scenarios_table()
+    init_scenario_metadata_table()
+
     try:
-        # Check if scenario exists
-        _, existing = run_readonly(
-            "SELECT SCENARIO_ID FROM PIO_AML_PRODUCTION_SCENARIOS WHERE SCENARIO_ID = :sid",
-            {"sid": scenario_id},
+        with atomic_connection() as conn:
+            cursor = conn.cursor()
+
+            # ---- 1. PIO_AML_PRODUCTION_SCENARIOS (RAW_SQL) ----
+            cursor.execute(
+                "SELECT SCENARIO_ID FROM PIO_AML_PRODUCTION_SCENARIOS WHERE SCENARIO_ID = :sid",
+                {"sid": scenario_id},
+            )
+            existing_prod = cursor.fetchone()
+
+            prod_params = {
+                "sid": scenario_id,
+                "sname": scenario_name[:250],
+                "stype": scenario_type[:50],
+                "logic": detection_logic,
+                "sql": raw_sql,
+                "twd": time_window_days,
+                "cby": created_by[:100],
+            }
+            if existing_prod:
+                cursor.execute(
+                    """
+                    UPDATE PIO_AML_PRODUCTION_SCENARIOS
+                    SET SCENARIO_NAME = :sname,
+                        SCENARIO_TYPE = :stype,
+                        DETECTION_LOGIC = :logic,
+                        RAW_SQL = :sql,
+                        TIME_WINDOW_DAYS = :twd,
+                        CREATED_BY = :cby,
+                        CREATED_AT = SYSTIMESTAMP,
+                        IS_ACTIVE = 1
+                    WHERE SCENARIO_ID = :sid
+                    """,
+                    prod_params,
+                )
+            else:
+                cursor.execute(
+                    """
+                    INSERT INTO PIO_AML_PRODUCTION_SCENARIOS (
+                        SCENARIO_ID, SCENARIO_NAME, SCENARIO_TYPE, DETECTION_LOGIC,
+                        RAW_SQL, TIME_WINDOW_DAYS, CREATED_BY, CREATED_AT, IS_ACTIVE
+                    ) VALUES (
+                        :sid, :sname, :stype, :logic, :sql, :twd, :cby, SYSTIMESTAMP, 1
+                    )
+                    """,
+                    prod_params,
+                )
+
+            # ---- 2. PIO_AML_SCENARIO (business metadata) ----
+            country_code = scenario_metadata.get("COUNTRY_CODE")
+            inst_code = scenario_metadata.get("INST_CODE")
+
+            cursor.execute(
+                """
+                SELECT VERSION_NUM FROM PIO_AML_SCENARIO
+                WHERE COUNTRY_CODE = :cc AND INST_CODE = :ic AND SCENARIO_CODE = :sid
+                """,
+                {"cc": country_code, "ic": inst_code, "sid": scenario_id},
+            )
+            existing_scenario = cursor.fetchone()
+
+            scenario_params = {
+                "cc": country_code,
+                "ic": inst_code,
+                "sid": scenario_id,
+                "desc": scenario_metadata.get("SCENARIO_DESC"),
+                "categ": scenario_metadata.get("CATEG_CODE"),
+                "state": scenario_metadata.get("SCENARIO_STATE"),
+                "ptype": scenario_metadata.get("PERIOD_TYPE"),
+                "pnum": scenario_metadata.get("PERIOD_NUM"),
+                "risk": scenario_metadata.get("RISK_DEGREE"),
+                "viol": scenario_metadata.get("VIOLATION_LEVEL"),
+                "cby": (
+                    int(scenario_metadata["CREATED_BY"])
+                    if scenario_metadata.get("CREATED_BY") is not None
+                    else None
+                ),
+                "active": scenario_metadata.get("ACTIVE_FLAG"),
+                "uname": scenario_metadata.get("USER_NAME"),
+            }
+
+            if existing_scenario:
+                scenario_params["version"] = int(existing_scenario[0] or 0) + 1
+                cursor.execute(
+                    """
+                    UPDATE PIO_AML_SCENARIO
+                    SET SCENARIO_DESC = :desc,
+                        CATEG_CODE = :categ,
+                        SCENARIO_STATE = :state,
+                        PERIOD_TYPE = :ptype,
+                        PERIOD_NUM = :pnum,
+                        RISK_DEGREE = :risk,
+                        VIOLATION_LEVEL = :viol,
+                        CREATED_BY = :cby,
+                        ACTIVE_FLAG = :active,
+                        SYS_DATE = SYSDATE,
+                        VERSION_NUM = :version,
+                        USER_NAME = :uname
+                    WHERE COUNTRY_CODE = :cc AND INST_CODE = :ic AND SCENARIO_CODE = :sid
+                    """,
+                    scenario_params,
+                )
+            else:
+                scenario_params["version"] = 1
+                cursor.execute(
+                    """
+                    INSERT INTO PIO_AML_SCENARIO (
+                        COUNTRY_CODE, INST_CODE, SCENARIO_CODE, SCENARIO_DESC, CATEG_CODE,
+                        SCENARIO_STATE, PERIOD_TYPE, PERIOD_NUM, RISK_DEGREE, VIOLATION_LEVEL,
+                        CREATED_BY, ACTIVE_FLAG, SYS_DATE, VERSION_NUM, USER_NAME
+                    ) VALUES (
+                        :cc, :ic, :sid, :desc, :categ, :state, :ptype, :pnum, :risk, :viol,
+                        :cby, :active, SYSDATE, :version, :uname
+                    )
+                    """,
+                    scenario_params,
+                )
+
+        logger.info(
+            "[PRODUCTION_REGISTRY] Persisted scenario SCENARIO_CODE=%s atomically across "
+            "PIO_AML_PRODUCTION_SCENARIOS and PIO_AML_SCENARIO (version=%s).",
+            scenario_id,
+            scenario_params.get("version"),
         )
-        if existing:
-            update_sql = """
-            UPDATE PIO_AML_PRODUCTION_SCENARIOS
-            SET SCENARIO_NAME = :sname,
-                SCENARIO_TYPE = :stype,
-                DETECTION_LOGIC = :logic,
-                RAW_SQL = :sql,
-                TIME_WINDOW_DAYS = :twd,
-                CREATED_BY = :cby,
-                CREATED_AT = SYSTIMESTAMP,
-                IS_ACTIVE = 1
-            WHERE SCENARIO_ID = :sid
-            """
-            run_write(
-                update_sql,
-                {
-                    "sid": scenario_id,
-                    "sname": scenario_name[:250],
-                    "stype": scenario_type[:50],
-                    "logic": detection_logic,
-                    "sql": raw_sql,
-                    "twd": time_window_days,
-                    "cby": created_by[:100],
-                },
-            )
-            logger.info(
-                "[PRODUCTION_REGISTRY] Updated production scenario SCENARIO_ID=%s",
-                scenario_id,
-            )
-        else:
-            insert_sql = """
-            INSERT INTO PIO_AML_PRODUCTION_SCENARIOS (
-                SCENARIO_ID, SCENARIO_NAME, SCENARIO_TYPE, DETECTION_LOGIC,
-                RAW_SQL, TIME_WINDOW_DAYS, CREATED_BY, CREATED_AT, IS_ACTIVE
-            ) VALUES (
-                :sid, :sname, :stype, :logic, :sql, :twd, :cby, SYSTIMESTAMP, 1
-            )
-            """
-            run_write(
-                insert_sql,
-                {
-                    "sid": scenario_id,
-                    "sname": scenario_name[:250],
-                    "stype": scenario_type[:50],
-                    "logic": detection_logic,
-                    "sql": raw_sql,
-                    "twd": time_window_days,
-                    "cby": created_by[:100],
-                },
-            )
-            logger.info(
-                "[PRODUCTION_REGISTRY] Inserted production scenario SCENARIO_ID=%s",
-                scenario_id,
-            )
         return True
     except Exception as exc:
         logger.error(
-            "[PRODUCTION_REGISTRY] Error saving production scenario %s: %s",
+            "[PRODUCTION_REGISTRY] Atomic write failed for scenario %s — both tables rolled back: %s",
             scenario_id,
             exc,
             exc_info=True,

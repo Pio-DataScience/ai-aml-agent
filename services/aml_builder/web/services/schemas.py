@@ -445,7 +445,8 @@ class SSEEvent(BaseModel):
 
     type: Literal[
         "tool_call", "thinking", "content", "final_answer",
-        "scenario_result", "plan_artifact", "escalation_report", "error", "done"
+        "scenario_result", "plan_artifact", "scenario_metadata_catalog",
+        "escalation_report", "error", "done"
     ] = Field(..., description="SSE event type.")
     text: Optional[str] = Field(default=None, description="Text payload.")
     tool: Optional[str] = Field(default=None, description="Tool name (tool_call events).")
