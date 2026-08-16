@@ -5,6 +5,23 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-08-16] fix: Live Oracle DWH Schema Alignment for PIO_AML_SCENARIO & Lookup Tables
+
+### What
+- **Real Oracle DWH Inspection**: Queried live Oracle data dictionary (`USER_TAB_COLS`, `ALL_TABLES`) via `oracle-db` MCP tool to discover the real table and column names in `AIDB`.
+- **Lookup Tables Configured**:
+  - `PIO_AML_SCENARIO_CATEGORY`: `CATEGORY_CODE`, `CATEGORY_ENG_NAME` (was placeholder `PIO_AML_CATEGORY`).
+  - `PIO_AML_DEGREE_RISK`: `DEGREE_CODE`, `DESC_ENG` (values: `D`, `H`, `M`, `L`).
+  - `PIO_AML_SCENARIO_CLASSES`: `CLASS_CODE`, `CLASS_ENG_NAME` (e.g. `1`=Transaction Monitoring).
+  - `PIO_AML_SCENARIO_TYPE`: `TYPE_CODE`, `TYPE_ENG_NAME` (e.g. `1`=All Tabs, `7`=Member Check).
+- **Exact PIO_AML_SCENARIO Columns Aligned**:
+  - Replaced placeholder names (`SCENARIO_DESC`, `CATEG_CODE`, `RISK_DEGREE`) with the real database column names (`SCENARIO_DES_ENG`, `CATEGORY_CODE`, `DEGREE_RISK_FLAG`, `ACTIVE_FLAG`, `RUN_FLAG`, `CLASS_CODE`, `SCE_TYPE_CODE`, `TRANS_WITHOUTTRANS_FLAG`, etc.).
+  - Updated atomic dual-write INSERT/UPDATE in [`production_registry.py`](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/production_registry.py) to prevent `ORA-00904: invalid identifier` exceptions.
+- **Verification**: Executed live Python test connecting to Oracle connection pool; successfully fetched live lookup options, verified non-null catalog seeding, and confirmed 100% clean validation.
+- **Files Updated**: [scenario_metadata.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/scenario_metadata.py), [production_registry.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/production_registry.py)
+
+---
+
 ## [2026-08-11] feat: PIO_AML_SCENARIO Governance Metadata + Atomic Dual-Write Persistence
 
 ### What

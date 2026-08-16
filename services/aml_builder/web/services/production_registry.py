@@ -86,21 +86,31 @@ def init_scenario_metadata_table() -> None:
             logger.info("[PRODUCTION_REGISTRY] Creating table PIO_AML_SCENARIO...")
             create_sql = """
             CREATE TABLE PIO_AML_SCENARIO (
-                COUNTRY_CODE   NUMBER NOT NULL,
-                INST_CODE      NUMBER NOT NULL,
-                SCENARIO_CODE  VARCHAR2(40) NOT NULL,
-                SCENARIO_DESC  VARCHAR2(400),
-                CATEG_CODE     VARCHAR2(40),
-                SCENARIO_STATE VARCHAR2(40),
-                PERIOD_TYPE    VARCHAR2(40),
-                PERIOD_NUM     NUMBER,
-                RISK_DEGREE    VARCHAR2(40),
-                VIOLATION_LEVEL VARCHAR2(40),
-                CREATED_BY     NUMBER,
-                ACTIVE_FLAG    VARCHAR2(40),
-                SYS_DATE       DATE,
-                VERSION_NUM    NUMBER,
-                USER_NAME      VARCHAR2(400),
+                COUNTRY_CODE               NUMBER NOT NULL,
+                INST_CODE                  NUMBER NOT NULL,
+                SCENARIO_CODE              VARCHAR2(40) NOT NULL,
+                SCENARIO_DES_ENG           VARCHAR2(400),
+                SCENARIO_DES_NAT_LAN       VARCHAR2(400),
+                ACTIVE_FLAG                VARCHAR2(40) DEFAULT '1',
+                EXCLUDE_EXPL_FLAG          VARCHAR2(40) DEFAULT '0',
+                USE_WATCHLIST_FLAG         VARCHAR2(40) DEFAULT '0',
+                VIOLATION_LEVEL            VARCHAR2(40) DEFAULT 'H',
+                DEGREE_RISK_FLAG           VARCHAR2(40) DEFAULT 'H',
+                DEFAULT_SCENARIO_FLAG      VARCHAR2(40) DEFAULT '0',
+                RUN_FLAG                   VARCHAR2(40) DEFAULT '1',
+                APPROVAL_FLAG              VARCHAR2(40) DEFAULT '1',
+                GROUP_BY_FLAG              VARCHAR2(40) DEFAULT '1',
+                USE_WORLDCHECK_FLAG        VARCHAR2(200) DEFAULT '0',
+                WORLDCHECK_GROUP_ID        VARCHAR2(200),
+                CREATED_BY                 NUMBER,
+                CREATED_DATE               DATE DEFAULT SYSDATE,
+                UPDATED_BY                 NUMBER,
+                UPDATED_DATE               DATE DEFAULT SYSDATE,
+                TRANS_WITHOUTTRANS_FLAG    VARCHAR2(40) DEFAULT '1',
+                CATEGORY_CODE              VARCHAR2(40) DEFAULT '999',
+                ACTIVE_THRESHOLD_CURR_FLAG VARCHAR2(40) DEFAULT '0',
+                SCE_TYPE_CODE              VARCHAR2(40) DEFAULT '1',
+                CLASS_CODE                 VARCHAR2(40) DEFAULT '1',
                 PRIMARY KEY (COUNTRY_CODE, INST_CODE, SCENARIO_CODE)
             )
             """
@@ -204,70 +214,104 @@ def save_production_scenario(
                 )
 
             # ---- 2. PIO_AML_SCENARIO (business metadata) ----
-            country_code = scenario_metadata.get("COUNTRY_CODE")
-            inst_code = scenario_metadata.get("INST_CODE")
+            country_code = int(scenario_metadata.get("COUNTRY_CODE") or settings.AML_COUNTRY_CODE)
+            inst_code = int(scenario_metadata.get("INST_CODE") or settings.AML_INST_CODE)
 
             cursor.execute(
                 """
-                SELECT VERSION_NUM FROM PIO_AML_SCENARIO
+                SELECT SCENARIO_CODE FROM PIO_AML_SCENARIO
                 WHERE COUNTRY_CODE = :cc AND INST_CODE = :ic AND SCENARIO_CODE = :sid
                 """,
                 {"cc": country_code, "ic": inst_code, "sid": scenario_id},
             )
             existing_scenario = cursor.fetchone()
 
+            des_eng = (
+                scenario_metadata.get("SCENARIO_DES_ENG")
+                or scenario_metadata.get("SCENARIO_DESC")
+                or scenario_name
+            )[:400]
+            des_nat = (
+                scenario_metadata.get("SCENARIO_DES_NAT_LAN")
+                or des_eng
+            )[:400]
+
+            viol_raw = str(scenario_metadata.get("VIOLATION_LEVEL") or "H").upper()
+            viol_map = {"HIGH": "H", "MEDIUM": "M", "LOW": "L"}
+            viol = viol_map.get(viol_raw, viol_raw[:1] if viol_raw else "H")
+
+            degree_risk = str(
+                scenario_metadata.get("DEGREE_RISK_FLAG")
+                or scenario_metadata.get("RISK_DEGREE")
+                or "H"
+            )[:40]
+            category_code = str(
+                scenario_metadata.get("CATEGORY_CODE")
+                or scenario_metadata.get("CATEG_CODE")
+                or "999"
+            )[:40]
+            class_code = str(scenario_metadata.get("CLASS_CODE") or "1")[:40]
+            sce_type = str(scenario_metadata.get("SCE_TYPE_CODE") or "1")[:40]
+            active_flag = str(scenario_metadata.get("ACTIVE_FLAG") or "1")[:40]
+            cby = int(scenario_metadata.get("CREATED_BY") or settings.AML_CREATED_BY or 999)
+
             scenario_params = {
                 "cc": country_code,
                 "ic": inst_code,
-                "sid": scenario_id,
-                "desc": scenario_metadata.get("SCENARIO_DESC"),
-                "categ": scenario_metadata.get("CATEG_CODE"),
-                "state": scenario_metadata.get("SCENARIO_STATE"),
-                "ptype": scenario_metadata.get("PERIOD_TYPE"),
-                "pnum": scenario_metadata.get("PERIOD_NUM"),
-                "risk": scenario_metadata.get("RISK_DEGREE"),
-                "viol": scenario_metadata.get("VIOLATION_LEVEL"),
-                "cby": (
-                    int(scenario_metadata["CREATED_BY"])
-                    if scenario_metadata.get("CREATED_BY") is not None
-                    else None
-                ),
-                "active": scenario_metadata.get("ACTIVE_FLAG"),
-                "uname": scenario_metadata.get("USER_NAME"),
+                "sid": scenario_id[:40],
+                "des_eng": des_eng,
+                "des_nat": des_nat,
+                "active": active_flag,
+                "viol": viol,
+                "degree_risk": degree_risk,
+                "category_code": category_code,
+                "class_code": class_code,
+                "sce_type": sce_type,
+                "cby": cby,
             }
 
             if existing_scenario:
-                scenario_params["version"] = int(existing_scenario[0] or 0) + 1
                 cursor.execute(
                     """
                     UPDATE PIO_AML_SCENARIO
-                    SET SCENARIO_DESC = :desc,
-                        CATEG_CODE = :categ,
-                        SCENARIO_STATE = :state,
-                        PERIOD_TYPE = :ptype,
-                        PERIOD_NUM = :pnum,
-                        RISK_DEGREE = :risk,
-                        VIOLATION_LEVEL = :viol,
-                        CREATED_BY = :cby,
+                    SET SCENARIO_DES_ENG = :des_eng,
+                        SCENARIO_DES_NAT_LAN = :des_nat,
                         ACTIVE_FLAG = :active,
-                        SYS_DATE = SYSDATE,
-                        VERSION_NUM = :version,
-                        USER_NAME = :uname
+                        RUN_FLAG = :active,
+                        VIOLATION_LEVEL = :viol,
+                        DEGREE_RISK_FLAG = :degree_risk,
+                        CATEGORY_CODE = :category_code,
+                        CLASS_CODE = :class_code,
+                        SCE_TYPE_CODE = :sce_type,
+                        UPDATED_BY = :cby,
+                        UPDATED_DATE = SYSDATE
                     WHERE COUNTRY_CODE = :cc AND INST_CODE = :ic AND SCENARIO_CODE = :sid
                     """,
                     scenario_params,
                 )
             else:
-                scenario_params["version"] = 1
                 cursor.execute(
                     """
                     INSERT INTO PIO_AML_SCENARIO (
-                        COUNTRY_CODE, INST_CODE, SCENARIO_CODE, SCENARIO_DESC, CATEG_CODE,
-                        SCENARIO_STATE, PERIOD_TYPE, PERIOD_NUM, RISK_DEGREE, VIOLATION_LEVEL,
-                        CREATED_BY, ACTIVE_FLAG, SYS_DATE, VERSION_NUM, USER_NAME
+                        COUNTRY_CODE, INST_CODE, SCENARIO_CODE,
+                        SCENARIO_DES_ENG, SCENARIO_DES_NAT_LAN,
+                        ACTIVE_FLAG, EXCLUDE_EXPL_FLAG, USE_WATCHLIST_FLAG,
+                        VIOLATION_LEVEL, DEGREE_RISK_FLAG,
+                        DEFAULT_SCENARIO_FLAG, RUN_FLAG, APPROVAL_FLAG, GROUP_BY_FLAG,
+                        USE_WORLDCHECK_FLAG, WORLDCHECK_GROUP_ID,
+                        CREATED_BY, CREATED_DATE, UPDATED_BY, UPDATED_DATE,
+                        TRANS_WITHOUTTRANS_FLAG, CATEGORY_CODE,
+                        ACTIVE_THRESHOLD_CURR_FLAG, SCE_TYPE_CODE, CLASS_CODE
                     ) VALUES (
-                        :cc, :ic, :sid, :desc, :categ, :state, :ptype, :pnum, :risk, :viol,
-                        :cby, :active, SYSDATE, :version, :uname
+                        :cc, :ic, :sid,
+                        :des_eng, :des_nat,
+                        :active, '0', '0',
+                        :viol, :degree_risk,
+                        '0', :active, '1', '1',
+                        '0', NULL,
+                        :cby, SYSDATE, :cby, SYSDATE,
+                        '1', :category_code,
+                        '0', :sce_type, :class_code
                     )
                     """,
                     scenario_params,
@@ -275,9 +319,8 @@ def save_production_scenario(
 
         logger.info(
             "[PRODUCTION_REGISTRY] Persisted scenario SCENARIO_CODE=%s atomically across "
-            "PIO_AML_PRODUCTION_SCENARIOS and PIO_AML_SCENARIO (version=%s).",
+            "PIO_AML_PRODUCTION_SCENARIOS and PIO_AML_SCENARIO.",
             scenario_id,
-            scenario_params.get("version"),
         )
         return True
     except Exception as exc:
