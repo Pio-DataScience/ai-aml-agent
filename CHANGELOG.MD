@@ -5,15 +5,6 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
-## [2026-08-17] fix: Support INDIVIDUAL Customer Segments & Mandatory Demographic Age Extraction
-
-### What
-- **Customer Segment Disambiguation**: Updated [`intent_extraction.md`](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/prompts/intent_extraction.md) Rule 10 to recognize `['INDIVIDUAL']` as a first-class customer segment. Strictly prohibited the LLM from overriding or substituting explicit `'INDIVIDUAL'` customer flags with `'RETAIL'`.
-- **Demographic Age Filter Extraction**: Updated Rule 7 to mandate emitting numeric `customer_age` thresholds (`target_scope: 'DETAIL'`) whenever scenarios reference demographic cohorts (e.g. "minors" -> `< 18`, "young adults" -> `<= 25`, "minors or young adults" -> `<= 25`, explicit age -> `< X`).
-- **Verification**: Verified intent extraction prompt rules and compatibility with `AMLIntent` Pydantic model.
-
----
-
 ## [2026-08-17] fix: History Metadata Rehydration, Resilient Deploy Thread Resolution & Next-Step Guidance
 
 ### What

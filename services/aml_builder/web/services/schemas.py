@@ -260,7 +260,7 @@ class AMLIntent(BaseModel):
         thresholds (list[Threshold]): All numeric conditions extracted from intent.
         time_window (Optional[TimeWindow]): Rolling or fixed observation period.
         baseline_window (Optional[BaselineWindow]): Dedicated non-overlapping baseline window.
-        customer_segments (Optional[list[str]]): Target segments (RETAIL, CORPORATE).
+        customer_segments (Optional[list[str]]): Target legal classifications (INDIVIDUAL, CORPORATE) or segments.
         exclusions (Optional[list[str]]): Explicit exclusion rules.
         clarification_needed (bool): True if the agent must ask the user something.
         clarification_questions (list[str]): Business questions for the user (NOT technical).
@@ -303,7 +303,7 @@ class AMLIntent(BaseModel):
     )
     customer_segments: Optional[List[str]] = Field(
         default=None,
-        description="Target customer segments, e.g. ['RETAIL', 'CORPORATE'].",
+        description="Target legal classifications (e.g. ['INDIVIDUAL'], ['CORPORATE']) or business segments.",
     )
     exclusions: Optional[List[str]] = Field(
         default=None,
