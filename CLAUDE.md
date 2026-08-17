@@ -7,28 +7,34 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ### Run the service (recommended)
+
 ```powershell
 .\run_dev.ps1
 ```
+
 This script sets `PYTHONPATH`, loads `.env`, creates `artifacts/` for SQLite checkpoints, and starts uvicorn on port 8005.
 
 ### Manual run (all platforms)
+
 ```powershell
 # PowerShell
 $env:PYTHONPATH = "services\aml_builder"
 uvicorn web.api.main:app --reload --port 8005 --host 0.0.0.0
 ```
+
 ```bash
 # Bash
 PYTHONPATH=services/aml_builder uvicorn web.api.main:app --reload --port 8005 --host 0.0.0.0
 ```
 
 ### Install dependencies
+
 ```bash
 pip install -r services/aml_builder/requirements.txt
 ```
 
 ### Run tests
+
 ```bash
 # All tests
 PYTHONPATH=services/aml_builder pytest
@@ -41,6 +47,7 @@ PYTHONPATH=services/aml_builder pytest --asyncio-mode=auto
 ```
 
 ### API docs
+
 `http://localhost:8005/docs` — available once service is running.
 
 ---
@@ -51,13 +58,13 @@ The service is a single autonomous **LangGraph ReAct tool-driven agent** exposed
 
 ### The five tools (`web/services/tools.py`)
 
-| Tool | Role |
-|------|------|
-| `analyze_intent_and_discover_explanation_codes` | Calls OpenAI to convert natural language into a structured `AMLIntent` JSON object; runs vector similarity search over `PIO_EXPLANATION_CODE` to discover domain explanation codes; seeds `PIO_AML_SCENARIO` governance metadata from the intent. |
-| `generate_scenario_execution_plan` | Deterministic (zero-LLM) markdown renderer producing the side-panel implementation plan. |
-| `execute_oracle_dwh_shadow_test` | Calls the **external PioTech AI DWH agent** (`PIOTECH_AI_URL`) via HTTP SSE to get production Oracle SQL, then shadow-tests it (`SELECT COUNT(*) FROM (...)`) against `BI_DWH` (via the dedicated shadow connection pool). |
-| `prepare_scenario_metadata_for_persistence` | Deterministic + live Oracle lookups: builds the `PIO_AML_SCENARIO` field catalog (risk degree, category, etc.) with currently valid options, reports missing mandatory fields. |
-| `persist_and_validate_scenario_in_dwh` | Validates the merged metadata, then atomically writes the confirmed scenario into `PIO_AML_PRODUCTION_SCENARIOS` (for the daily ETL runner) **and** `PIO_AML_SCENARIO` (business metadata for downstream compliance modules) in one transaction. |
+| Tool                                              | Role                                                                                                                                                                                                                                                      |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `analyze_intent_and_discover_explanation_codes` | Calls OpenAI to convert natural language into a structured`AMLIntent` JSON object; runs vector similarity search over `PIO_EXPLANATION_CODE` to discover domain explanation codes; seeds `PIO_AML_SCENARIO` governance metadata from the intent.    |
+| `generate_scenario_execution_plan`              | Deterministic (zero-LLM) markdown renderer producing the side-panel implementation plan.                                                                                                                                                                  |
+| `execute_oracle_dwh_shadow_test`                | Calls the**external PioTech AI DWH agent** (`PIOTECH_AI_URL`) via HTTP SSE to get production Oracle SQL, then shadow-tests it (`SELECT COUNT(*) FROM (...)`) against `BI_DWH` (via the dedicated shadow connection pool).                     |
+| `prepare_scenario_metadata_for_persistence`     | Deterministic + live Oracle lookups: builds the`PIO_AML_SCENARIO` field catalog (risk degree, category, etc.) with currently valid options, reports missing mandatory fields.                                                                           |
+| `persist_and_validate_scenario_in_dwh`          | Validates the merged metadata, then atomically writes the confirmed scenario into`PIO_AML_PRODUCTION_SCENARIOS` (for the daily ETL runner) **and** `PIO_AML_SCENARIO` (business metadata for downstream compliance modules) in one transaction. |
 
 ### Key modules
 
@@ -79,9 +86,11 @@ The service is a single autonomous **LangGraph ReAct tool-driven agent** exposed
 - **`web/services/prompts/`** — Markdown system prompt files loaded at runtime via `web/services/prompts/loader.py`'s `load_prompt()`.
 
 ### Thread isolation
+
 Each conversation is isolated by `thread_id = "{project_id}_{chat_id}_{user_id}"`, persisted via LangGraph's `AsyncSqliteSaver` at `artifacts/checkpoints.sqlite`.
 
 ### External dependency
+
 `execute_oracle_dwh_shadow_test` calls a **separate PioTech AI DWH service** (text-to-SQL agent) at `PIOTECH_AI_URL` (default `http://localhost:8001/chat/stream`). That service must be running independently for SQL generation to work.
 
 ---
@@ -89,18 +98,22 @@ Each conversation is isolated by `thread_id = "{project_id}_{chat_id}_{user_id}"
 ## Environment variables (`.env`)
 
 Required:
+
 - `ORACLE_USER`, `ORACLE_PASSWORD`, `ORACLE_DSN`
 - `OPENAI_API_KEY`
 
 Optional LLM:
+
 - `LLM_PROVIDER` — `openai` (default) or `lmstudio`
 - `LLM_MODEL` — default `gpt-4o`
 - `LLM_MODEL_FAST` — default `gpt-4o-mini`
 
 Optional AML domain defaults (all have production-safe defaults in `settings.py`):
+
 - `AML_COUNTRY_CODE`, `AML_INST_CODE`, `AML_CREATED_BY`
 
 Optional shadow-test DB (falls back to the primary `ORACLE_*` values if unset):
+
 - `SHADOW_ORACLE_DSN`, `SHADOW_ORACLE_USER`, `SHADOW_ORACLE_PASSWORD`, `SHADOW_ORACLE_POOL_MIN`, `SHADOW_ORACLE_POOL_MAX`
 
 ---

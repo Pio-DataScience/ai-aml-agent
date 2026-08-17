@@ -5,6 +5,18 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-08-17] feat: Phase 3 Standalone Daily AML Alert Execution Engine & Alert Populator
+
+### What
+- **Core Engine Module (`alert_engine.py`)**: Built the automated batch runner that discovers active scenarios in `PIO_AML_PRODUCTION_SCENARIOS` + `PIO_AML_SCENARIO`, runs production `RAW_SQL` on `BI_DWH`, and populates `PIO_AML_CUSTOMERS` (Header Alerts) and `PIO_AML_CUSTOMERS_DET` (Transaction Details).
+- **CLI Runner (`run_alert_engine.py`)**: Command-line entry point supporting automated daily batch runs and on-demand scenario testing (`--scenario-id`, `--date`).
+- **REST Endpoints (`routes/engine.py`)**: Added `POST /engine/run-scenarios` and `GET /engine/active-scenarios` to trigger and inspect engine executions via API.
+- **Robustness & Constraint Safety**: Dynamic sequence PK incrementing (`NVL(MAX(SEQ), 0) + 1`), DDL non-null fallbacks (`LINK_CUS_NUM`, `REL_TYPE`, `ENTITIY_SIGNATORY`), and atomic per-scenario transaction commits.
+- **Verification**: Executed live scenario `PRD_7EB9CBAD` against Oracle `BI_DWH` and verified successful insertion of header alert into `PIO_AML_CUSTOMERS` and transaction detail record into `PIO_AML_CUSTOMERS_DET`.
+- **Documentation**: Added [`Docs/04_standalone_alert_engine.md`](file:///c:/Users/abura/Development/AI_AML_AGENT/Docs/04_standalone_alert_engine.md).
+
+---
+
 ## [2026-08-16] fix: Live Oracle DWH Schema Alignment for PIO_AML_SCENARIO & Lookup Tables
 
 ### What
