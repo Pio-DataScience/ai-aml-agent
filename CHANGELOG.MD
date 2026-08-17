@@ -5,6 +5,17 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-08-17] fix: Enforce Mandatory 2-Tool Chaining for Intent Analysis & Plan Generation
+
+### What
+- **Root Cause Analysis**: When a scenario did not require multi-turn explanation code discovery, the ReAct agent called `analyze_intent_and_discover_explanation_codes` and stopped without calling `generate_scenario_execution_plan`, but hallucinated the confirmation phrase *"I've prepared the implementation plan — you can review it in the side panel"*.
+- **Fix Applied**:
+  - Updated [`tool_driven_system.md`](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/prompts/tool_driven_system.md) to define **Phase 1 as a mandatory 2-tool atomic chain in the same turn** (`analyze_intent_and_discover_explanation_codes` -> `generate_scenario_execution_plan`).
+  - Added explicit tool docstring directive in [`tools.py`](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/tools.py) instructing the agent to always chain `generate_scenario_execution_plan` immediately after intent extraction so the side panel artifact is guaranteed to be rendered.
+- **Verification**: Verified agent system prompt and Python compilation.
+
+---
+
 ## [2026-08-17] feat: Phase 3 Standalone Daily AML Alert Execution Engine & Alert Populator
 
 ### What

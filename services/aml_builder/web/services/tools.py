@@ -57,10 +57,12 @@ def analyze_intent_and_discover_explanation_codes(
     existing_metadata_json: Optional[str] = None,
 ) -> str:
     """Analyze the user's compliance scenario prompt, extract structured scenario parameters (AMLIntent),
-
     run vector similarity search against the domain explanation codes catalog (top 70% relative
     cutoff), and deterministically seed the PIO_AML_SCENARIO governance metadata (period, country/
     institution codes, description, etc.) that will later be needed at persistence time.
+
+    IMPORTANT: Always invoke `generate_scenario_execution_plan` immediately after this tool in the
+    same turn to render the implementation plan artifact in the side panel before responding to the user.
 
     Args:
         user_prompt (str): Plain English scenario description or modification request from user.
