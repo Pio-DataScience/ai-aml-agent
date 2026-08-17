@@ -422,9 +422,13 @@ class ChatRequest(BaseModel):
     messages: List[ChatMessage] = Field(
         ..., description="Conversation history (at minimum the latest user message)."
     )
-    metadata: Dict[str, str] = Field(
+    metadata: Dict[str, Any] = Field(
         default_factory=dict,
         description="Routing metadata: user_id, project_id, chat_id.",
+    )
+    metadata_json: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Officer-modified governance metadata from the side panel.",
     )
     reasoning_mode: Literal["instant", "thinking"] = Field(
         default="instant",

@@ -227,12 +227,16 @@ def analyze_intent_and_discover_explanation_codes(
                 )
         scenario_metadata = seed_scenario_metadata(intent.model_dump(), existing_metadata)
 
+        plan_md = build_plan_markdown(intent.model_dump(), expl_checkpoint)
+        logger.info("[TOOL: INTENT] Plan artifact generated alongside intent (%d chars).", len(plan_md))
+
         return json.dumps(
             {
                 "enriched_intent": intent.model_dump(),
                 "explanation_code_checkpoint": expl_checkpoint,
                 "discovered_explanation_codes": discovered_codes,
                 "scenario_metadata": scenario_metadata,
+                "plan_artifact": plan_md,
             },
             ensure_ascii=False,
             indent=2,
@@ -270,12 +274,21 @@ def generate_scenario_execution_plan(
 
     try:
         intent = json.loads(intent_json) if isinstance(intent_json, str) else intent_json
-    except json.JSONDecodeError as exc:
+        if isinstance(intent, dict):
+            # Unwrap if full tool result of analyze_intent_and_discover_explanation_codes was passed directly
+            if "enriched_intent" in intent and isinstance(intent["enriched_intent"], dict):
+                if not explanation_code_checkpoint and intent.get("explanation_code_checkpoint"):
+                    explanation_code_checkpoint = intent.get("explanation_code_checkpoint")
+                intent = intent["enriched_intent"]
+    except (json.JSONDecodeError, TypeError) as exc:
         logger.error("[TOOL: PLANNER] Failed to parse intent_json: %s", exc)
         return json.dumps({"error": f"Invalid intent JSON: {exc}"})
 
     try:
-        plan_md = build_plan_markdown(intent, explanation_code_checkpoint)
+        if not isinstance(intent, dict) or not intent:
+            logger.warning("[TOOL: PLANNER] Received empty or invalid intent dict: %s", intent)
+
+        plan_md = build_plan_markdown(intent if isinstance(intent, dict) else {}, explanation_code_checkpoint)
         logger.info("[TOOL: PLANNER] Plan artifact generated (%d chars).", len(plan_md))
 
         # Build plan_conditions dynamically from what is present in the intent
@@ -330,8 +343,16 @@ def execute_oracle_dwh_shadow_test(intent_json: str) -> str:
     # Step 1: Validate intent JSON
     # -----------------------------------------------------------
     try:
-        intent_dict = json.loads(intent_json)
-    except json.JSONDecodeError as exc:
+        intent_dict = json.loads(intent_json) if isinstance(intent_json, str) else intent_json
+        if isinstance(intent_dict, dict):
+            # Unwrap if wrapped under enriched_intent, AMLIntent, or intent
+            if "enriched_intent" in intent_dict and isinstance(intent_dict["enriched_intent"], dict):
+                intent_dict = intent_dict["enriched_intent"]
+            elif "AMLIntent" in intent_dict and isinstance(intent_dict["AMLIntent"], dict):
+                intent_dict = intent_dict["AMLIntent"]
+            elif "intent" in intent_dict and isinstance(intent_dict["intent"], dict):
+                intent_dict = intent_dict["intent"]
+    except (json.JSONDecodeError, TypeError) as exc:
         logger.error("[TOOL: SQL_BRIDGE] Invalid intent JSON: %s", exc)
         return json.dumps({"error": f"Invalid intent JSON: {exc}"})
 
@@ -475,6 +496,11 @@ def prepare_scenario_metadata_for_persistence(metadata_json: str) -> str:
     explicit pick (via panel click or chat) may fill it. Re-call this tool whenever the user
     supplies new field values in chat, passing the merged metadata_json back in.
 
+    CRITICAL WORKFLOW RULE: AFTER calling this tool, you MUST STOP and output a plain-text
+    conversational message to the user asking them to review/fill the governance fields in the side panel.
+    DO NOT call `persist_and_validate_scenario_in_dwh` in the same turn! Wait for the user's
+    explicit confirmation in a subsequent turn before calling persistence.
+
     Args:
         metadata_json (str): Serialized JSON of the scenario metadata accumulated so far (from
             the 'scenario_metadata' field of analyze_intent_and_discover_explanation_codes, merged
@@ -510,6 +536,10 @@ def persist_and_validate_scenario_in_dwh(intent_json: str, raw_sql: str, metadat
     """Persist the confirmed, shadow-tested AML scenario atomically into both
     PIO_AML_PRODUCTION_SCENARIOS (for the automated daily ETL runner) and
     PIO_AML_SCENARIO (business metadata for downstream compliance UI/workflow modules).
+
+    CRITICAL: ONLY call this tool when the user in a SUBSEQUENT turn explicitly instructs
+    you to persist/save the scenario after reviewing the governance metadata in the side panel.
+    NEVER call this tool autonomously immediately after prepare_scenario_metadata_for_persistence!
 
     Performs an idempotent INSERT-or-UPDATE on both tables in a single Oracle transaction:
     if the scenario_id already exists it updates the record and reactivates it (IS_ACTIVE=1),

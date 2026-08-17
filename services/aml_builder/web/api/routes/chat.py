@@ -69,6 +69,10 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
     tool_graph = await get_tool_driven_graph()
     config = {"configurable": {"thread_id": thread_id}}
     user_msg = request.messages[-1].content if request.messages else ""
+    if request.metadata_json:
+        metadata_str = json.dumps(request.metadata_json, ensure_ascii=False)
+        user_msg += f"\n\n[Active Scenario Governance Metadata from Sidebar]:\n{metadata_str}"
+
     inputs = {"messages": [HumanMessage(content=user_msg)]}
 
     async def event_generator():
@@ -116,14 +120,14 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                             tool_call_id = getattr(m, "tool_call_id", None)
                             tool_name = tool_call_id_to_name.get(tool_call_id, "")
 
-                            if tool_name == "generate_scenario_execution_plan":
+                            if tool_name in ("generate_scenario_execution_plan", "analyze_intent_and_discover_explanation_codes") or (isinstance(getattr(m, "content", None), str) and "plan_artifact" in m.content):
                                 # Emit plan to side panel
                                 try:
                                     payload = json.loads(getattr(m, "content", "{}"))
                                     plan_md = payload.get("plan_artifact", "")
                                     if plan_md:
                                         yield _sse(SSEEvent(type="plan_artifact", text=plan_md))
-                                        logger.info("[API] Emitted plan_artifact SSE from tool output (%d chars).", len(plan_md))
+                                        logger.info("[API] Emitted plan_artifact SSE from %s tool output (%d chars).", tool_name or "tool", len(plan_md))
                                 except Exception as exc:
                                     logger.warning("[API] Could not parse plan_artifact from ToolMessage: %s", exc)
 

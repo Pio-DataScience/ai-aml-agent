@@ -5,6 +5,61 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-08-17] fix: Direct Scenario Deployment Endpoint (`/scenario/deploy`) & Bidirectional Metadata State Sync
+
+### What
+- **Direct Deployment Endpoint (`/scenario/deploy`)**: Implemented `POST /scenario/deploy` in [`routes/deploy.py`](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/api/routes/deploy.py) to service the frontend "Deploy Scenario to Production" button. It retrieves the verified shadow-tested SQL and intent from the session checkpointer, validates officer governance metadata from the side panel, and commits atomic dual-table persistence to `PIO_AML_PRODUCTION_SCENARIOS` and `PIO_AML_SCENARIO`.
+- **Chat Metadata Injection**: Updated `ChatRequest` in [`schemas.py`](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/schemas.py) and [`chat.py`](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/api/routes/chat.py) to accept `metadata_json` forwarded by the frontend, so conversational persistence commands (`"persist the scenario"`) use the officer's exact sidebar selections instead of reverting to default parameters.
+- **Verification**: Verified compilation of `deploy.py`, `chat.py`, `schemas.py`, and `main.py`.
+
+---
+
+## [2026-08-17] fix: Enforce Mandatory Human-in-the-Loop Stop Gate Before Database Persistence
+
+### What
+- Updated [tool_driven_system.md](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/prompts/tool_driven_system.md) Phase 3 and Phase 4 rules:
+  - Mandated that immediately after calling `prepare_scenario_metadata_for_persistence`, the agent MUST stop calling tools and output a conversational response prompting the user to review the sidebar catalog.
+  - Strictly prohibited the agent from calling `persist_and_validate_scenario_in_dwh` in the same turn or autonomously without explicit user confirmation in a subsequent turn.
+- Updated tool docstrings for `prepare_scenario_metadata_for_persistence` and `persist_and_validate_scenario_in_dwh` in [tools.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/tools.py) to reinforce the human-in-the-loop confirmation requirement.
+
+### Why
+- Fixes an issue where the ReAct agent autonomously chained `prepare_scenario_metadata_for_persistence` -> `persist_and_validate_scenario_in_dwh` in the same turn, attempting to persist to Oracle DWH before the compliance officer had a chance to fill or review governance fields in the sidebar.
+
+### Verify
+- Verified tool docstrings, system prompt rules, and agent stopping constraints.
+
+---
+
+## [2026-08-17] fix: Enforce full verbatim enriched_intent payload to text-to-SQL shadow testing tool
+
+### What
+- Updated `execute_oracle_dwh_shadow_test` in [tools.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/tools.py) to automatically unwrap `enriched_intent`, `AMLIntent`, or `intent` wrapper keys before building the HTTP request payload sent to PioTech AI.
+- Updated [tool_driven_system.md](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/prompts/tool_driven_system.md) Phase 2 instructions to strictly mandate passing the full verbatim `enriched_intent` JSON (including `scenario_name`, `scenario_type`, `transaction_type`, `detection_logic`, `thresholds`, `time_window`, `aggregation`, `semantic_conditions`, etc.) and prohibit inventing dummy summary keys.
+
+### Why
+- Fixes an issue where the ReAct LLM passed a truncated, hallucinated dummy object (`{"AMLIntent": {"transaction_amount_threshold": 10000, ...}}`) to `execute_oracle_dwh_shadow_test` instead of the full `AMLIntent` contract extracted in Phase 1.
+
+### Verify
+- Verified tool argument handling, unwrapping logic, and PioTech AI payload structure.
+
+---
+
+## [2026-08-17] fix: Eliminate parallel tool call race condition by generating plan directly in intent extraction
+
+### What
+- **Direct Plan Generation**: Updated `analyze_intent_and_discover_explanation_codes` in [tools.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/tools.py) to generate `plan_artifact` directly via `build_plan_markdown()` and include it in its returned JSON payload.
+- **SSE Interception**: Updated [chat.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/api/routes/chat.py) and [sessions.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/api/routes/sessions.py) to stream `plan_artifact` SSE events from `analyze_intent_and_discover_explanation_codes`.
+- **Automatic Unwrapping**: Updated `generate_scenario_execution_plan` in [tools.py](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/tools.py) to automatically unwrap `enriched_intent` and `explanation_code_checkpoint` if a wrapped dictionary is passed.
+- **Prompt Simplification**: Updated [tool_driven_system.md](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/prompts/tool_driven_system.md) to eliminate parallel 2-tool chaining instructions.
+
+### Why
+- Fixes a race condition where the LLM generated parallel tool calls in the same turn (`analyze_intent_and_discover_explanation_codes` + `generate_scenario_execution_plan(intent_json="{}")`), causing the plan generator to run simultaneously with an empty placeholder before intent extraction completed.
+
+### Verify
+- Verified tool execution, SSE event streaming, and plan artifact generation.
+
+---
+
 ## [2026-08-17] fix: Enforce Mandatory 2-Tool Chaining for Intent Analysis & Plan Generation
 
 ### What
