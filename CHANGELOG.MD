@@ -5,6 +5,17 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-08-17] fix: Enforce Verbatim User Message Pass-Through to Intent Analysis Tool
+
+### What
+- **Root Cause Analysis**: The outer ReAct agent truncated multi-part user messages when calling `analyze_intent_and_discover_explanation_codes`, passing only the opening narrative line and cutting off explicit user rules (`Rules: customer intity type: Individual. customer age: (Age <= 20)...`).
+- **Fix Applied**:
+  - Updated [`tool_driven_system.md`](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/prompts/tool_driven_system.md) Phase 1 rules to strictly mandate passing the **FULL, VERBATIM user message** in `user_prompt` without summarizing or truncating.
+  - Updated [`tools.py`](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/tools.py) docstring for `analyze_intent_and_discover_explanation_codes` to instruct the LLM never to shorten the input.
+- **Verification**: Verified compilation and prompt instructions.
+
+---
+
 ## [2026-08-17] fix: History Metadata Rehydration, Resilient Deploy Thread Resolution & Next-Step Guidance
 
 ### What

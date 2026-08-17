@@ -65,7 +65,9 @@ def analyze_intent_and_discover_explanation_codes(
     same turn to render the implementation plan artifact in the side panel before responding to the user.
 
     Args:
-        user_prompt (str): Plain English scenario description or modification request from user.
+        user_prompt (str): The FULL, VERBATIM message or modification request from the user
+            (including all rules, constraints, entity types, demographic limits, thresholds, and
+            time periods). NEVER truncate or summarize the user's message.
         existing_intent_json (Optional[str]): Serialized JSON string of prior AMLIntent payload if refining.
         existing_metadata_json (Optional[str]): Serialized JSON string of the scenario metadata
             accumulated so far (side panel clicks, prior turns). Already-set values are never
