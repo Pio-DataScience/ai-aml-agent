@@ -9,8 +9,8 @@ Output ONLY a valid JSON object matching AMLIntent schema with mandatory root ke
 - thresholds (list of dicts with: field, operator, value_from, target_scope)
 - time_window (dict with: unit, value, is_rolling)
 - aggregation (dict with: metric, function, grain)
-- customer_segments (list of str or null): e.g. ['INDIVIDUAL'], ['CORPORATE'], ['RETAIL'], ['SME'], or null
-- exclusions (list of str or null): e.g. ['Exclude payroll', 'Exclude employee accounts'], or null
+- customer_segments (list of str or null): target segments or legal classifications (e.g. ['<SEGMENT_NAME>']), or null
+- exclusions (list of str or null): e.g. ['<EXCLUSION_RULE>'], or null
 - semantic_conditions (list of dicts with: raw_phrase, logical_type, subject, predicate)
 - anchor_date (str or null): YYYY-MM-DD date or null
 - explanation_codes (list of str or null)
@@ -19,53 +19,46 @@ Output ONLY a valid JSON object matching AMLIntent schema with mandatory root ke
 
 1. MANDATORY SCOPE CLASSIFICATION (target_scope):
    Every threshold in the 'thresholds' array MUST explicitly set 'target_scope' to either 'DETAIL' or 'AGGREGATE':
-   - 'DETAIL': Applies to individual transaction or entity records before aggregation (placed in SQL WHERE clause). Example: 'each deposit > 9,000', 'transaction_amount > 50,000', or 'customer_age < 18'.
-   - 'AGGREGATE': Applies to summed, averaged, or counted metrics across a group/window (placed in SQL HAVING clause). Example: 'total monthly volume > 100,000' or 'cumulative_transaction_volume > 10,000'.
+   - 'DETAIL': Applies to individual transaction or entity-level attributes evaluated before aggregation (placed in SQL WHERE clause). Example: '<FIELD_NAME> <OPERATOR> <VALUE>'.
+   - 'AGGREGATE': Applies to summed, averaged, or counted metrics across a group/window (placed in SQL HAVING clause). Example: '<AGGREGATE_METRIC> <OPERATOR> <VALUE>'.
 
 2. GRAIN & SCENARIO TYPE ALIGNMENT:
-   - 'aggregation' MUST be a dictionary containing 'metric' (e.g. 'transaction_amount' or 'cumulative_transaction_volume'), 'function' ('SUM', 'COUNT', 'AVG', or 'NONE'), and 'grain' (e.g. 'PER CUSTOMER PER DAY').
+   - 'aggregation' MUST be a dictionary containing 'metric' (e.g. '<METRIC_NAME>'), 'function' ('SUM', 'COUNT', 'AVG', or 'NONE'), and 'grain' (e.g. 'PER <ENTITY> PER <WINDOW>').
    - If the scenario aggregates activity (SUM, COUNT, AVG) over time to flag an entity, 'scenario_type' MUST be 'CUSTOMER' or 'ACCOUNT' (NEVER 'TRANSACTION').
-   - 'aggregation.grain' MUST explicitly state the grouping boundary (e.g., 'PER CUSTOMER PER DAY', 'PER CUSTOMER PER ROLLING 7 DAYS').
-   - NEVER set 'aggregation.grain' to 'TRANSACTION' if a 'SUM', 'COUNT', or 'AVG' function is specified.
+   - 'aggregation.grain' MUST explicitly state the grouping boundary (e.g. 'PER <ENTITY> PER <WINDOW>').
+   - NEVER set 'aggregation.grain' to 'TRANSACTION' if an aggregate function ('SUM', 'COUNT', 'AVG') is specified.
 
 3. DUAL-WINDOW & THRESHOLD FIELD NAMING:
-   - 'each transaction > X': threshold field = 'transaction_amount', target_scope = 'DETAIL'.
-   - 'total/cumulative volume > X': threshold field = 'cumulative_transaction_volume', target_scope = 'AGGREGATE'.
+   - 'each transaction > <X>': threshold field = 'transaction_amount', target_scope = 'DETAIL'.
+   - 'total/cumulative volume > <X>': threshold field = 'cumulative_transaction_volume', target_scope = 'AGGREGATE'.
    - NEGATIVE CONSTRAINT: For cumulative sum/volume scenarios, output ONLY ONE threshold object with target_scope: 'AGGREGATE'. NEVER output a duplicate threshold with target_scope: 'DETAIL' for the same amount!
 
 4. 'BETWEEN' OPERATOR LOWER & UPPER BOUNDS:
-   - When operator is 'BETWEEN', you MUST populate BOTH 'value_from' (lower bound float) AND 'value_to' (upper bound float). Example: 'between 8,000 and 9,999' -> value_from: 8000.0, value_to: 9999.0.
+   - When operator is 'BETWEEN', you MUST populate BOTH 'value_from' (lower bound float) AND 'value_to' (upper bound float).
 
 5. ALL PERCENTAGE & RATIO RULES MUST BE THRESHOLDS:
-   - If the detection logic mentions a percentage or ratio (e.g. 'sends back 90%', '300% of average'), you MUST emit a corresponding entry in the 'thresholds' array with target_scope set to 'AGGREGATE' and convert percentage strings into clean floats in 'value_from' (e.g. '300% of average' -> value_from: 3.0; '90% of funds' -> value_from: 0.90).
+   - If the detection logic mentions a percentage or ratio (e.g. '<PERCENTAGE>% of <METRIC>'), you MUST emit a corresponding entry in the 'thresholds' array with target_scope set to 'AGGREGATE' and convert percentage strings into normalized floats in 'value_from' (e.g. '300%' -> 3.0; '90%' -> 0.90).
 
 6. MANDATORY BASELINE_WINDOW EMISSION:
-   - Whenever a scenario mentions a historical baseline, prior average, or dormancy lookback (e.g. 'prior 180 days', '6-month baseline', 'dormant for 180 days'), you MUST populate the 'baseline_window' object (e.g. {'unit': 'DAYS', 'duration': 180, 'exclude_current_window': true, 'offset_days': 30}). Do not leave it null if historical data is referenced.
+   - Whenever a scenario mentions a historical baseline, prior average, or dormancy lookback (e.g. '<N_DAYS> baseline', '<N_MONTHS> lookback'), you MUST populate the 'baseline_window' object. Do not leave it null if historical data is referenced.
 
-7. EXHAUSTIVE THRESHOLD & DEMOGRAPHIC EXTRACTION:
-   - Do NOT drop secondary conditions! Extract all stated constraints into thresholds or semantic_conditions:
-     * Distinct counts ('distinct_branch_count >= 3', 'distinct_beneficiary_count >= 3') -> AGGREGATE threshold.
-     * Demographic age conditions: Whenever the scenario mentions 'minors', 'young adults', 'youth', 'students', or explicit ages, you MUST emit a numeric threshold with field 'customer_age' and target_scope 'DETAIL':
-       - 'minors' / 'underage' -> field: 'customer_age', operator: '<', value_from: 18.0, target_scope: 'DETAIL'.
-       - 'young adults' / 'youth' -> field: 'customer_age', operator: '<=', value_from: 25.0, target_scope: 'DETAIL'.
-       - 'minors or young adults' -> field: 'customer_age', operator: '<=', value_from: 25.0, target_scope: 'DETAIL'.
-       - Explicit age (e.g. 'under 21') -> field: 'customer_age', operator: '<', value_from: 21.0, target_scope: 'DETAIL'.
-     * Exclusions ('exclusions': ['Exclude payroll', 'Exclude employee accounts']).
+7. EXHAUSTIVE THRESHOLD & EXCLUSION EXTRACTION:
+   - Extract ALL stated constraints into 'thresholds' or 'semantic_conditions':
+     * Detail & demographic constraints (e.g. customer age, account state, transaction properties) -> 'target_scope': 'DETAIL'.
+     * Distinct counts (e.g. distinct branch count, distinct beneficiary count) -> 'target_scope': 'AGGREGATE'.
+     * Exclusions -> 'exclusions': ['<EXCLUSION_RULE>'].
 
 8. EXPLANATION CODES RESOLUTION:
-   - If the user selects, filters, or confirms specific explanation codes (e.g. 'first and second', 'use options 1 and 2', 'only code 660'), resolve them against Existing Intent Payload's discovered explanation codes and return the list of selected code strings in 'explanation_codes'.
+   - If the user selects, filters, or confirms specific explanation codes, resolve them against Existing Intent Payload's discovered explanation codes and return the list of selected code strings in 'explanation_codes'.
 
 9. HISTORICAL TEST ANCHOR (anchor_date):
-   - If the user explicitly specifies a historical test date or snapshot date (e.g. 'test against 2024-01-04'), extract 'anchor_date': 'YYYY-MM-DD'. Otherwise set to null.
+   - If the user explicitly specifies a historical test date or snapshot date, extract 'anchor_date': 'YYYY-MM-DD'. Otherwise set to null.
 
-10. MANDATORY CUSTOMER_SEGMENTS EXTRACTION:
-    - If the prompt references entity types or segments (e.g. 'individual customers', 'natural persons', 'corporate accounts', 'retail accounts', 'SME'):
-      * 'individual' / 'natural person' / 'individual client' -> customer_segments: ['INDIVIDUAL'].
-      * 'corporate' / 'commercial' / 'company' -> customer_segments: ['CORPORATE'].
-      * 'retail' / 'personal banking' -> customer_segments: ['RETAIL'].
-    - **CRITICAL**: If the user explicitly specifies 'INDIVIDUAL', NEVER substitute or overwrite it with 'RETAIL'. Always preserve the user's exact segment choice.
+10. VERBATIM CUSTOMER SEGMENT & LEGAL ENTITY EXTRACTION:
+    - Extract any requested customer classification, legal entity type (e.g. 'INDIVIDUAL' vs 'CORPORATE'), or business segment mentioned in the prompt verbatim into uppercase strings in 'customer_segments' (e.g. ['<SEGMENT_NAME>']).
+    - NEVER coerce, substitute, or force an officer's stated entity type or segment into a different category.
 
 11. ZERO LOSS OF ATOMIC CONCEPTS (semantic_conditions):
-    - EVERY micro-atomic concept, non-numeric rule, state transition ('dormant for 180 days then burst'), or complex behavioral rule ('returns 90% within 5 days') that cannot be a pure numeric threshold MUST be captured in 'semantic_conditions' as a dict with: 'raw_phrase', 'logical_type' ('STATE'|'TRANSITION'|'SEQUENCE'|'BEHAVIORAL'|'TEMPORAL'|'OTHER'), 'subject', and 'predicate'. ZERO USER CONCEPTS MAY BE OMITTED.
+    - EVERY micro-atomic concept, non-numeric rule, state transition, or complex behavioral rule that cannot be a pure numeric threshold MUST be captured in 'semantic_conditions' as a dict with: 'raw_phrase', 'logical_type' ('STATE'|'TRANSITION'|'SEQUENCE'|'BEHAVIORAL'|'TEMPORAL'|'OTHER'), 'subject', and 'predicate'. ZERO USER CONCEPTS MAY BE OMITTED.
 
 Do not wrap in markdown fences.
