@@ -5,6 +5,17 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-08-17] fix: History Metadata Rehydration, Resilient Deploy Thread Resolution & Next-Step Guidance
+
+### What
+- **History Rehydration (`sessions.py`)**: Added `scenario_metadata_catalog` to `ChatMessage` in [`schemas.py`](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/schemas.py) and updated `get_chat_history` in [`sessions.py`](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/api/routes/sessions.py) to extract and attach the governance catalog to history messages, ensuring the Governance & Metadata side-panel re-hydrates on browser refresh instead of reverting to blank.
+- **Deploy Button 400 Fix (`deploy.py`)**: Updated [`routes/deploy.py`](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/api/routes/deploy.py) to search candidate thread ID prefixes (`default_`, `no_project_`, raw) and added friendly value normalizations (`HIGH` -> `H`, `MEDIUM` -> `M`, `LOW` -> `L`) in [`scenario_metadata.py`](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/scenario_metadata.py) to eliminate 400 Bad Request deployment errors.
+- **Agent Next-Step Guidance & Conversational Edits (`tool_driven_system.md`)**:
+  - Instructed the agent to explicitly guide the user on next steps after shadow testing (prompting them to proceed to Governance & Metadata review).
+  - Added conversational metadata edit rule: if the user asks in chat to change a governance field (*"change risk to low"*), the agent updates `scenario_metadata` and re-calls `prepare_scenario_metadata_for_persistence` to immediately update the frontend sidebar dropdowns.
+
+---
+
 ## [2026-08-17] fix: Direct Scenario Deployment Endpoint (`/scenario/deploy`) & Bidirectional Metadata State Sync
 
 ### What

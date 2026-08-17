@@ -321,10 +321,33 @@ def validate_scenario_metadata(metadata: Dict[str, Any]) -> Tuple[bool, List[str
     """
     problems: List[str] = []
 
-    # Map friendly names to single char codes for VIOLATION_LEVEL if passed as words
-    viol_map = {"HIGH": "H", "MEDIUM": "M", "LOW": "L"}
-    if metadata.get("VIOLATION_LEVEL") in viol_map:
-        metadata["VIOLATION_LEVEL"] = viol_map[metadata["VIOLATION_LEVEL"]]
+    # Ensure system defaults exist
+    if not metadata.get("COUNTRY_CODE"):
+        metadata["COUNTRY_CODE"] = settings.AML_COUNTRY_CODE
+    if not metadata.get("INST_CODE"):
+        metadata["INST_CODE"] = settings.AML_INST_CODE
+    if not metadata.get("CREATED_BY"):
+        metadata["CREATED_BY"] = settings.AML_CREATED_BY
+    if not metadata.get("UPDATED_BY"):
+        metadata["UPDATED_BY"] = settings.AML_CREATED_BY
+
+    # Normalize friendly names for VIOLATION_LEVEL
+    viol_map = {"HIGH": "H", "MEDIUM": "M", "LOW": "L", "H": "H", "M": "M", "L": "L"}
+    viol_raw = str(metadata.get("VIOLATION_LEVEL") or "").strip().upper()
+    if viol_raw in viol_map:
+        metadata["VIOLATION_LEVEL"] = viol_map[viol_raw]
+
+    # Normalize friendly names for DEGREE_RISK_FLAG
+    risk_map = {"HIGH": "H", "MEDIUM": "M", "LOW": "L", "DIRECT": "D", "H": "H", "M": "M", "L": "L", "D": "D"}
+    risk_raw = str(metadata.get("DEGREE_RISK_FLAG") or "").strip().upper()
+    if risk_raw in risk_map:
+        metadata["DEGREE_RISK_FLAG"] = risk_map[risk_raw]
+
+    # Normalize ACTIVE_FLAG
+    active_map = {"ACTIVE": "1", "INACTIVE": "0", "1": "1", "0": "0"}
+    active_raw = str(metadata.get("ACTIVE_FLAG") or "1").strip().upper()
+    if active_raw in active_map:
+        metadata["ACTIVE_FLAG"] = active_map[active_raw]
 
     for spec in SCENARIO_METADATA_FIELDS:
         value = metadata.get(spec.name)

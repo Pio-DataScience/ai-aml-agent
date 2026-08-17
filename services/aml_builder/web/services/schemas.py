@@ -406,6 +406,7 @@ class ChatMessage(BaseModel):
     role: Literal["user", "assistant"] = Field(..., description="Message role.")
     content: str = Field(..., description="Message text content.")
     plan_artifact: Optional[str] = Field(default=None, description="The markdown execution plan")
+    scenario_metadata_catalog: Optional[Dict[str, Any]] = Field(default=None, description="Governance metadata catalog with live options")
     scenario_result: Optional[Dict[str, Any]] = Field(default=None, description="The scenario validation result")
     escalation_report: Optional[str] = Field(default=None, description="The markdown escalation report")
 

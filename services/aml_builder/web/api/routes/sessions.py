@@ -66,6 +66,7 @@ async def get_chat_history(project_id: str, chat_id: str, user_id: str):
             tool_call_id_to_name = {}
             pending_plan_artifact = None
             pending_scenario_result = None
+            pending_metadata_catalog = None
 
             for msg in messages_data:
                 msg_class = msg.__class__.__name__
@@ -86,10 +87,12 @@ async def get_chat_history(project_id: str, chat_id: str, user_id: str):
                     plan_art = None
                     val_res = None
                     esc_rep = None
+                    meta_cat = None
                     if hasattr(msg, "additional_kwargs") and isinstance(msg.additional_kwargs, dict):
                         plan_art = msg.additional_kwargs.get("plan_artifact")
                         esc_rep = msg.additional_kwargs.get("escalation_report")
                         val_res = msg.additional_kwargs.get("validation_result")
+                        meta_cat = msg.additional_kwargs.get("scenario_metadata_catalog")
 
                     # Fallback to pending artifacts extracted from preceding ToolMessages
                     if not plan_art and pending_plan_artifact:
@@ -98,15 +101,19 @@ async def get_chat_history(project_id: str, chat_id: str, user_id: str):
                     if not val_res and pending_scenario_result:
                         val_res = pending_scenario_result
                         pending_scenario_result = None
+                    if not meta_cat and pending_metadata_catalog:
+                        meta_cat = pending_metadata_catalog
+                        pending_metadata_catalog = None
 
                     # Skip if message is entirely empty (no text and no artifacts)
-                    if not content.strip() and not (plan_art or val_res or esc_rep):
+                    if not content.strip() and not (plan_art or val_res or esc_rep or meta_cat):
                         continue
 
                     chat_messages.append(ChatMessage(
                         role="assistant",
                         content=content,
                         plan_artifact=plan_art,
+                        scenario_metadata_catalog=meta_cat,
                         scenario_result=val_res,
                         escalation_report=esc_rep,
                         timestamp=msg.additional_kwargs.get("timestamp") if hasattr(msg, "additional_kwargs") else None
@@ -122,6 +129,13 @@ async def get_chat_history(project_id: str, chat_id: str, user_id: str):
                                 if tool_name == "generate_scenario_execution_plan" or "plan_artifact" in payload:
                                     if payload.get("plan_artifact"):
                                         pending_plan_artifact = payload.get("plan_artifact")
+                                elif tool_name == "prepare_scenario_metadata_for_persistence" or "fields" in payload:
+                                    pending_metadata_catalog = payload
+                                elif tool_name == "analyze_intent_and_discover_explanation_codes" and "scenario_metadata" in payload:
+                                    # Lazy build catalog from seeded metadata if not yet explicitly prepared
+                                    if not pending_metadata_catalog:
+                                        from services.aml_builder.web.services.scenario_metadata import build_metadata_catalog
+                                        pending_metadata_catalog = build_metadata_catalog(payload["scenario_metadata"])
                                 elif tool_name in ("persist_and_validate_scenario_in_dwh", "execute_oracle_dwh_shadow_test") or "write_success" in payload or "header_alert_count" in payload:
                                     pending_scenario_result = payload
                         except (json.JSONDecodeError, Exception):

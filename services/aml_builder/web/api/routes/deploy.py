@@ -66,34 +66,43 @@ async def deploy_scenario(request: DeployRequest):
             },
         )
 
-    # 2. Retrieve State from Checkpointer
-    proj = request.project_id if request.project_id not in ("0", "None") else "no_project"
-    thread_id = f"{proj}_{request.session_id}_{request.user_id}"
-    config = {"configurable": {"thread_id": thread_id}}
+    # 2. Retrieve State from Checkpointer (searching candidate thread prefixes)
+    candidate_thread_ids = [
+        f"{request.project_id}_{request.session_id}_{request.user_id}",
+        f"default_{request.session_id}_{request.user_id}",
+        f"no_project_{request.session_id}_{request.user_id}",
+        f"{request.session_id}_{request.user_id}",
+        request.session_id,
+    ]
 
     raw_sql = None
     intent_dict = {}
 
     try:
         graph = await get_tool_driven_graph()
-        state = await graph.aget_state(config)
-        messages = state.values.get("messages", []) if state else []
+        for t_id in candidate_thread_ids:
+            config = {"configurable": {"thread_id": t_id}}
+            state = await graph.aget_state(config)
+            messages = state.values.get("messages", []) if state else []
 
-        for m in reversed(messages):
-            # Check for shadow test tool output or intent output
-            if getattr(m, "type", None) == "tool" or m.__class__.__name__ == "ToolMessage":
-                content_str = getattr(m, "content", "")
-                if isinstance(content_str, str) and content_str.strip().startswith("{"):
-                    try:
-                        payload = json.loads(content_str)
-                        if "raw_sql" in payload and not raw_sql:
-                            raw_sql = payload.get("raw_sql")
-                        if "sql" in payload and not raw_sql:
-                            raw_sql = payload.get("sql")
-                        if "enriched_intent" in payload and not intent_dict:
-                            intent_dict = payload.get("enriched_intent", {})
-                    except Exception:
-                        pass
+            for m in reversed(messages):
+                # Check for shadow test tool output or intent output
+                if getattr(m, "type", None) == "tool" or m.__class__.__name__ == "ToolMessage":
+                    content_str = getattr(m, "content", "")
+                    if isinstance(content_str, str) and content_str.strip().startswith("{"):
+                        try:
+                            payload = json.loads(content_str)
+                            if "raw_sql" in payload and not raw_sql:
+                                raw_sql = payload.get("raw_sql")
+                            if "sql" in payload and not raw_sql:
+                                raw_sql = payload.get("sql")
+                            if "enriched_intent" in payload and not intent_dict:
+                                intent_dict = payload.get("enriched_intent", {})
+                        except Exception:
+                            pass
+            if raw_sql:
+                logger.info("[DEPLOY] Found verified SQL in checkpointer thread: %s", t_id)
+                break
     except Exception as exc:
         logger.error("[DEPLOY] Error retrieving session state from checkpointer: %s", exc)
 
