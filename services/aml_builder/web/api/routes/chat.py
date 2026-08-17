@@ -144,13 +144,13 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                                 except Exception as exc:
                                     logger.warning("[API] Could not parse scenario_metadata_catalog from ToolMessage: %s", exc)
 
-                            elif tool_name == "persist_and_validate_scenario_in_dwh":
-                                # Emit scenario result confirmation card
+                            elif tool_name in ("execute_oracle_dwh_shadow_test", "persist_and_validate_scenario_in_dwh"):
+                                # Emit shadow test results or scenario persistence confirmation card
                                 try:
                                     payload = json.loads(getattr(m, "content", "{}"))
-                                    if payload.get("write_success"):
+                                    if "raw_sql" in payload or payload.get("write_success") or "shadow_test_metrics" in payload:
                                         yield _sse(SSEEvent(type="scenario_result", data=payload))
-                                        logger.info("[API] Emitted scenario_result SSE. SCENARIO_ID=%s", payload.get("scenario_id"))
+                                        logger.info("[API] Emitted scenario_result SSE from %s.", tool_name)
                                 except Exception as exc:
                                     logger.warning("[API] Could not parse scenario_result from ToolMessage: %s", exc)
 
