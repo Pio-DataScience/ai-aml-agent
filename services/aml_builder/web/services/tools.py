@@ -31,7 +31,9 @@ from services.aml_builder.web.services.explanation_code_search import (
     format_explanation_code_checkpoint,
 )
 from services.aml_builder.web.services.oracle import run_readonly, run_shadow_readonly
-from services.aml_builder.web.services.production_registry import save_production_scenario
+from services.aml_builder.web.services.production_registry import (
+    save_production_scenario,
+)
 from services.aml_builder.web.services.llm_client import build_llm, safe_parse_json
 from services.aml_builder.web.services.sql_extraction import extract_sql
 from services.aml_builder.web.services.plan_renderer import build_plan_markdown
@@ -153,10 +155,11 @@ def analyze_intent_and_discover_explanation_codes(
                     if "operator" not in t or not t.get("operator"):
                         t["operator"] = ">"
                     if "value" in t and "value_from" not in t:
+                        val = t.pop("value")
                         try:
-                            t["value_from"] = float(t.pop("value"))
+                            t["value_from"] = float(val)
                         except (ValueError, TypeError):
-                            t["value_from"] = 10000.0
+                            t["value_from"] = str(val) if val is not None else None
         # Normalize time_window keys / case
         tw = intent_dict.get("time_window")
         if isinstance(tw, dict):
@@ -227,10 +230,15 @@ def analyze_intent_and_discover_explanation_codes(
                 logger.warning(
                     "[TOOL: INTENT] Could not parse existing_metadata_json — seeding fresh."
                 )
-        scenario_metadata = seed_scenario_metadata(intent.model_dump(), existing_metadata)
+        scenario_metadata = seed_scenario_metadata(
+            intent.model_dump(), existing_metadata
+        )
 
         plan_md = build_plan_markdown(intent.model_dump(), expl_checkpoint)
-        logger.info("[TOOL: INTENT] Plan artifact generated alongside intent (%d chars).", len(plan_md))
+        logger.info(
+            "[TOOL: INTENT] Plan artifact generated alongside intent (%d chars).",
+            len(plan_md),
+        )
 
         return json.dumps(
             {
@@ -275,12 +283,20 @@ def generate_scenario_execution_plan(
     logger.info("[TOOL: PLANNER] Generating implementation plan artifact...")
 
     try:
-        intent = json.loads(intent_json) if isinstance(intent_json, str) else intent_json
+        intent = (
+            json.loads(intent_json) if isinstance(intent_json, str) else intent_json
+        )
         if isinstance(intent, dict):
             # Unwrap if full tool result of analyze_intent_and_discover_explanation_codes was passed directly
-            if "enriched_intent" in intent and isinstance(intent["enriched_intent"], dict):
-                if not explanation_code_checkpoint and intent.get("explanation_code_checkpoint"):
-                    explanation_code_checkpoint = intent.get("explanation_code_checkpoint")
+            if "enriched_intent" in intent and isinstance(
+                intent["enriched_intent"], dict
+            ):
+                if not explanation_code_checkpoint and intent.get(
+                    "explanation_code_checkpoint"
+                ):
+                    explanation_code_checkpoint = intent.get(
+                        "explanation_code_checkpoint"
+                    )
                 intent = intent["enriched_intent"]
     except (json.JSONDecodeError, TypeError) as exc:
         logger.error("[TOOL: PLANNER] Failed to parse intent_json: %s", exc)
@@ -288,9 +304,13 @@ def generate_scenario_execution_plan(
 
     try:
         if not isinstance(intent, dict) or not intent:
-            logger.warning("[TOOL: PLANNER] Received empty or invalid intent dict: %s", intent)
+            logger.warning(
+                "[TOOL: PLANNER] Received empty or invalid intent dict: %s", intent
+            )
 
-        plan_md = build_plan_markdown(intent if isinstance(intent, dict) else {}, explanation_code_checkpoint)
+        plan_md = build_plan_markdown(
+            intent if isinstance(intent, dict) else {}, explanation_code_checkpoint
+        )
         logger.info("[TOOL: PLANNER] Plan artifact generated (%d chars).", len(plan_md))
 
         # Build plan_conditions dynamically from what is present in the intent
@@ -345,12 +365,18 @@ def execute_oracle_dwh_shadow_test(intent_json: str) -> str:
     # Step 1: Validate intent JSON
     # -----------------------------------------------------------
     try:
-        intent_dict = json.loads(intent_json) if isinstance(intent_json, str) else intent_json
+        intent_dict = (
+            json.loads(intent_json) if isinstance(intent_json, str) else intent_json
+        )
         if isinstance(intent_dict, dict):
             # Unwrap if wrapped under enriched_intent, AMLIntent, or intent
-            if "enriched_intent" in intent_dict and isinstance(intent_dict["enriched_intent"], dict):
+            if "enriched_intent" in intent_dict and isinstance(
+                intent_dict["enriched_intent"], dict
+            ):
                 intent_dict = intent_dict["enriched_intent"]
-            elif "AMLIntent" in intent_dict and isinstance(intent_dict["AMLIntent"], dict):
+            elif "AMLIntent" in intent_dict and isinstance(
+                intent_dict["AMLIntent"], dict
+            ):
                 intent_dict = intent_dict["AMLIntent"]
             elif "intent" in intent_dict and isinstance(intent_dict["intent"], dict):
                 intent_dict = intent_dict["intent"]
@@ -534,7 +560,9 @@ def prepare_scenario_metadata_for_persistence(metadata_json: str) -> str:
 
 
 @tool
-def persist_and_validate_scenario_in_dwh(intent_json: str, raw_sql: str, metadata_json: str) -> str:
+def persist_and_validate_scenario_in_dwh(
+    intent_json: str, raw_sql: str, metadata_json: str
+) -> str:
     """Persist the confirmed, shadow-tested AML scenario atomically into both
     PIO_AML_PRODUCTION_SCENARIOS (for the automated daily ETL runner) and
     PIO_AML_SCENARIO (business metadata for downstream compliance UI/workflow modules).
@@ -651,5 +679,3 @@ def persist_and_validate_scenario_in_dwh(intent_json: str, raw_sql: str, metadat
         ensure_ascii=False,
         indent=2,
     )
-
-

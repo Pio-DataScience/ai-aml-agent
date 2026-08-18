@@ -9,7 +9,7 @@ tool, and the HTTP/SSE request-response contracts for the FastAPI layer.
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -20,23 +20,27 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class Threshold(BaseModel):
-    """A single numeric threshold condition from the user's intent.
+    """A single numeric or relational threshold condition from the user's intent.
+
+    Supports both fixed numeric literals (e.g. 50000.0) and relational field-to-field
+    comparisons (e.g. comparing transaction_amount against customer_loan_amount).
 
     Args:
         field (str): Business field name (e.g., 'transaction_amount').
-        operator (str): Comparison operator: '>', '<', '>=', '<=', '=', 'BETWEEN'.
-        value_from (float): The primary or lower bound threshold value.
-        value_to (Optional[float]): Upper bound value, used only for BETWEEN.
+        operator (str): Comparison operator: '>', '<', '>=', '<=', '=', 'BETWEEN', 'IN'.
+        value_from (Optional[Union[float, str]]): Numeric threshold value or relational field name.
+        value_to (Optional[Union[float, str]]): Upper bound value, used only for BETWEEN.
     """
 
     field: str = Field(..., description="Business field name from the user's intent.")
     operator: Literal[">", "<", ">=", "<=", "=", "BETWEEN", "IN"] = Field(
         ..., description="Comparison operator."
     )
-    value_from: Optional[float] = Field(
-        default=None, description="Primary threshold value (or lower bound for BETWEEN)."
+    value_from: Optional[Union[float, str]] = Field(
+        default=None,
+        description="Primary numeric threshold value or relational field name (or lower bound for BETWEEN).",
     )
-    value_to: Optional[float] = Field(
+    value_to: Optional[Union[float, str]] = Field(
         default=None,
         description="Upper bound value — only populated for BETWEEN operator.",
     )
@@ -47,21 +51,21 @@ class Threshold(BaseModel):
         if isinstance(v, str):
             v_clean = v.strip()
             # Handle percentage strings like "300%", "90%" -> 3.0, 0.90
-            pct_match = re.search(r"(\d+(?:\.\d+)?)\s*%", v_clean)
+            pct_match = re.search(r"^(\d+(?:\.\d+)?)\s*%$", v_clean)
             if pct_match:
                 return float(pct_match.group(1)) / 100.0
             # Handle string multipliers like "3.0x", "3x"
             mult_match = re.search(r"^(\d+(?:\.\d+)?)\s*x$", v_clean, re.IGNORECASE)
             if mult_match:
                 return float(mult_match.group(1))
-            # Extract first float/int from string if raw numeric phrase
-            num_match = re.search(r"[-+]?\d*\.\d+|\d+", v_clean)
-            if num_match:
-                try:
-                    return float(num_match.group(0))
-                except ValueError:
-                    pass
+            # Try parsing direct float
+            try:
+                return float(v_clean)
+            except ValueError:
+                # Retain relational column name or expression string (e.g. 'customer_loan_amount')
+                return v_clean
         return v
+
     provenance: Literal["stated", "assumed_default", "needs_user"] = Field(
         default="stated",
         description=(
@@ -150,6 +154,7 @@ class BaselineWindow(BaseModel):
             }
             return unit_map.get(v_upper, v_upper)
         return v
+
     duration: int = Field(
         ..., description="Duration of historical baseline window in units."
     )
@@ -215,11 +220,19 @@ class SemanticCondition(BaseModel):
     """
 
     raw_phrase: str = Field(..., description="Verbatim user text this came from.")
-    logical_type: Literal["STATE", "TRANSITION", "SEQUENCE", "BEHAVIORAL", "TEMPORAL", "OTHER"] = Field(
-        ..., description="The nature of the logic (e.g. 'dormant to active' = TRANSITION)."
+    logical_type: Literal[
+        "STATE", "TRANSITION", "SEQUENCE", "BEHAVIORAL", "TEMPORAL", "OTHER"
+    ] = Field(
+        ...,
+        description="The nature of the logic (e.g. 'dormant to active' = TRANSITION).",
     )
-    subject: str = Field(..., description="Plain English entity noun (e.g. 'Customer', 'Transaction', 'Account'). No enums.")
-    predicate: str = Field(..., description="A single, atomic plain English business rule.")
+    subject: str = Field(
+        ...,
+        description="Plain English entity noun (e.g. 'Customer', 'Transaction', 'Account'). No enums.",
+    )
+    predicate: str = Field(
+        ..., description="A single, atomic plain English business rule."
+    )
     provenance: Literal["stated", "assumed_default", "needs_user"] = Field(
         default="stated"
     )
@@ -375,14 +388,25 @@ class AMLIntent(BaseModel):
         """
         if self.scenario_type in ["CUSTOMER", "ACCOUNT"] and self.aggregation:
             if self.aggregation.function in ["SUM", "COUNT"]:
-                aggregate_thresholds = [t for t in self.thresholds if t.target_scope == "AGGREGATE"]
-                detail_thresholds = [t for t in self.thresholds if t.target_scope == "DETAIL"]
+                aggregate_thresholds = [
+                    t for t in self.thresholds if t.target_scope == "AGGREGATE"
+                ]
+                detail_thresholds = [
+                    t for t in self.thresholds if t.target_scope == "DETAIL"
+                ]
 
                 if aggregate_thresholds and detail_thresholds:
-                    agg_values = {t.value_from for t in aggregate_thresholds if t.value_from is not None}
+                    agg_values = {
+                        t.value_from
+                        for t in aggregate_thresholds
+                        if t.value_from is not None
+                    }
                     self.thresholds = [
-                        t for t in self.thresholds
-                        if not (t.target_scope == "DETAIL" and t.value_from in agg_values)
+                        t
+                        for t in self.thresholds
+                        if not (
+                            t.target_scope == "DETAIL" and t.value_from in agg_values
+                        )
                     ]
         return self
 
@@ -405,10 +429,18 @@ class ChatMessage(BaseModel):
 
     role: Literal["user", "assistant"] = Field(..., description="Message role.")
     content: str = Field(..., description="Message text content.")
-    plan_artifact: Optional[str] = Field(default=None, description="The markdown execution plan")
-    scenario_metadata_catalog: Optional[Dict[str, Any]] = Field(default=None, description="Governance metadata catalog with live options")
-    scenario_result: Optional[Dict[str, Any]] = Field(default=None, description="The scenario validation result")
-    escalation_report: Optional[str] = Field(default=None, description="The markdown escalation report")
+    plan_artifact: Optional[str] = Field(
+        default=None, description="The markdown execution plan"
+    )
+    scenario_metadata_catalog: Optional[Dict[str, Any]] = Field(
+        default=None, description="Governance metadata catalog with live options"
+    )
+    scenario_result: Optional[Dict[str, Any]] = Field(
+        default=None, description="The scenario validation result"
+    )
+    escalation_report: Optional[str] = Field(
+        default=None, description="The markdown escalation report"
+    )
 
 
 class ChatRequest(BaseModel):
@@ -449,14 +481,27 @@ class SSEEvent(BaseModel):
     """
 
     type: Literal[
-        "tool_call", "thinking", "content", "final_answer",
-        "scenario_result", "plan_artifact", "scenario_metadata_catalog",
-        "escalation_report", "error", "done"
+        "tool_call",
+        "thinking",
+        "content",
+        "final_answer",
+        "scenario_result",
+        "plan_artifact",
+        "scenario_metadata_catalog",
+        "escalation_report",
+        "error",
+        "done",
     ] = Field(..., description="SSE event type.")
     text: Optional[str] = Field(default=None, description="Text payload.")
-    tool: Optional[str] = Field(default=None, description="Tool name (tool_call events).")
-    status: Optional[str] = Field(default=None, description="Status string (thinking events).")
-    data: Optional[Any] = Field(default=None, description="Structured payload (scenario_result).")
+    tool: Optional[str] = Field(
+        default=None, description="Tool name (tool_call events)."
+    )
+    status: Optional[str] = Field(
+        default=None, description="Status string (thinking events)."
+    )
+    data: Optional[Any] = Field(
+        default=None, description="Structured payload (scenario_result)."
+    )
 
 
 class ChatHistoryResponse(BaseModel):

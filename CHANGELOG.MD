@@ -5,6 +5,18 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-08-18] fix: Support Relational Field-to-Field Threshold Comparisons (`Union[float, str]`)
+
+### What
+- **Root Cause Analysis**: When a compliance scenario compares a transaction amount against another database column or customer metric (e.g. `transaction_amount > customer_loan_amount` or `transaction_amount > customer_monthly_salary`), Pydantic threw `float_parsing: unable to parse string 'customer_loan_amount' as a number` because `value_from` was strictly typed as `Optional[float]`.
+- **Fix Applied**:
+  - Updated `Threshold` schema in [`schemas.py`](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/schemas.py) so `value_from` and `value_to` are typed as `Optional[Union[float, str]] = None`.
+  - Updated validator `_normalize_numeric_value` to parse numeric strings and multipliers (`"50000"`, `"100 Million"`, `"300%"`) to `float`, while preserving relational field names (e.g. `'customer_loan_amount'`) as `str`.
+  - Updated [`tools.py`](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/tools.py) threshold normalization to retain relational column names instead of falling back to numeric literals.
+- **Verification**: Verified Pydantic validation across float, percentage, and string relational fields.
+
+---
+
 ## [2026-08-17] fix: Enforce Verbatim User Message Pass-Through to Intent Analysis Tool
 
 ### What
