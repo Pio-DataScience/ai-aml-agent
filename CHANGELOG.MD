@@ -5,6 +5,17 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-08-18] fix: OpenAI API Connection Resilience & Exponential Backoff Retries
+
+### What
+- **Root Cause Analysis**: The `openai.APIConnectionError: Connection error` occurs when the underlying `httpx` HTTP transport encounters a transient network glitch, TLS handshake reset, or temporary OpenAI edge latency spike while streaming LangGraph agent turns without sufficient retries or timeouts.
+- **Fix Applied**:
+  - Configured `max_retries=5` and `timeout=120.0` in [`llm_client.py`](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/llm_client.py) for all `ChatOpenAI` instances.
+  - Ensures the agent automatically recovers from transient network drops with exponential backoff instead of terminating the SSE stream.
+- **Verification**: Verified Python syntax and compilation.
+
+---
+
 ## [2026-08-18] fix: Support Relational Field-to-Field Threshold Comparisons (`Union[float, str]`)
 
 ### What

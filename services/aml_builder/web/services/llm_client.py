@@ -36,6 +36,8 @@ def build_llm(fast: bool = False) -> ChatOpenAI:
     kwargs: Dict[str, Any] = {
         "model": settings.LLM_MODEL_FAST if fast else settings.LLM_MODEL,
         "temperature": settings.LLM_TEMPERATURE,
+        "max_retries": 5,
+        "timeout": 120.0,
     }
     if settings.LLM_PROVIDER == "lmstudio":
         kwargs["base_url"] = settings.LLM_BASE_URL or "http://127.0.0.1:1234/v1"
