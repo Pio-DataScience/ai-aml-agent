@@ -91,12 +91,68 @@ If you are on Windows, `run_dev.ps1` automatically exports `.env` variables, set
 
 | Method     | Endpoint                                     | Description                                       |
 | ---------- | -------------------------------------------- | ------------------------------------------------- |
-| `GET`    | `/health`                                  | Service health check                              |
-| `POST`   | `/chat/stream`                             | SSE streaming chat endpoint for scenario building |
-| `GET`    | `/chat/{project}/{chat_id}/{user}/history` | Retrieves conversation history & artifacts        |
-| `GET`    | `/chat/{project}/{user}/sessions`          | Lists user chat sessions                          |
-| `PATCH`  | `/chat/session/title`                      | Renames a chat session                            |
-| `DELETE` | `/chat/{project}/{chat_id}/{user}`         | Deletes a chat session                            |
+| `GET`      | `/health`                                    | Service health check                              |
+| `POST`     | `/chat/stream`                               | SSE streaming chat endpoint for scenario building |
+| `POST`     | `/scenario/deploy`                           | Direct deployment of side-panel governance metadata|
+| `POST`     | `/engine/run-scenarios`                      | Trigger batch execution of active AML scenarios   |
+| `GET`      | `/engine/active-scenarios`                   | List all active persisted scenarios in Oracle DWH |
+| `GET`      | `/chat/{project}/{chat_id}/{user}/history`   | Retrieves conversation history & artifacts        |
+| `GET`      | `/chats/user/{user_id}/list`                 | Lists user chat sessions                          |
+| `PUT`      | `/chat/{project}/{chat_id}/{user}/rename`    | Renames a chat session                            |
+| `DELETE`   | `/chat/{project}/{chat_id}/{user}`           | Soft-deletes a chat session                       |
+
+---
+
+## ⚡ Standalone Daily AML Alert Execution Engine
+
+The **Alert Engine** evaluates all active production scenarios in `PIO_AML_PRODUCTION_SCENARIOS` against the Data Warehouse (`BI_DWH.PIO_TRANSACTIONS`) and populates compliant alerts into `PIO_AML_CUSTOMERS` (Header Alerts) and `PIO_AML_CUSTOMERS_DET` (Transaction Details).
+
+Detailed Architecture & Runbook: [`Docs/04_standalone_alert_engine.md`](file:///c:/Users/abura/Development/AI_AML_AGENT/Docs/04_standalone_alert_engine.md)
+
+### 1. CLI Execution (`run_alert_engine.py`)
+
+#### Run All Active Scenarios for Today (`SYSDATE`):
+```powershell
+.\.venv\Scripts\python.exe run_alert_engine.py
+```
+
+#### Run for a Specific Evaluation Date:
+```powershell
+.\.venv\Scripts\python.exe run_alert_engine.py --date 2026-08-11
+```
+
+#### Run a Single Specific Scenario by ID:
+```powershell
+.\.venv\Scripts\python.exe run_alert_engine.py --scenario-id PRD_50FC063C --date 2026-08-11
+```
+
+#### Dry-Run Mode (Queries DWH without writing to Alert tables):
+```powershell
+.\.venv\Scripts\python.exe run_alert_engine.py --date 2026-08-11 --dry-run
+```
+
+---
+
+### 2. Triggering via REST API (FastAPI)
+
+#### Run All Active Scenarios via API:
+```bash
+curl -X POST http://localhost:8005/engine/run-scenarios \
+  -H "Content-Type: application/json" \
+  -d '{"target_date": "2026-08-11"}'
+```
+
+#### Run a Specific Scenario via API:
+```bash
+curl -X POST http://localhost:8005/engine/run-scenarios \
+  -H "Content-Type: application/json" \
+  -d '{"scenario_id": "PRD_50FC063C", "target_date": "2026-08-11"}'
+```
+
+#### List All Active Persisted Scenarios:
+```bash
+curl http://localhost:8005/engine/active-scenarios
+```
 
 ---
 
@@ -105,21 +161,31 @@ If you are on Windows, `run_dev.ps1` automatically exports `.env` variables, set
 ```text
 AI_AML_AGENT/
 ├── .env                              # Environment configuration
-├── run_dev.ps1                       # Windows dev launcher script
+├── run_dev.ps1                       # Windows dev launcher script (FastAPI)
+├── run_alert_engine.py               # Standalone Daily Batch Alert Engine runner
 ├── README.md                         # This file
 ├── Docs/
-│   └── 01_architecture.md            # Complete architecture & design documentation
+│   ├── 01_architecture.md            # Complete architecture & design documentation
+│   └── 04_standalone_alert_engine.md # Alert Engine operational runbook & DDL specs
 └── services/
     └── aml_builder/
         └── web/
             ├── api/
-            │   └── main.py           # FastAPI routes & SSE streaming
+            │   ├── main.py           # FastAPI entrypoint
+            │   └── routes/
+            │       ├── chat.py       # SSE streaming chat routes
+            │       ├── sessions.py   # History & session CRUD
+            │       ├── deploy.py     # Direct side-panel deployment endpoint
+            │       └── engine.py     # Batch alert runner REST routes
             └── services/
-                ├── agent_tool_driven.py # Core ReAct agent & tools
-                ├── schemas.py        # Pydantic data contracts (AMLIntent)
+                ├── alert_engine.py   # Batch alert execution & Oracle populator
+                ├── graph.py          # LangGraph ReAct agent workflow
+                ├── tools.py          # Agent tools (Intent, Plan, Shadow, Persist)
+                ├── schemas.py        # Pydantic data contracts (AMLIntent, etc.)
+                ├── scenario_metadata.py # Live Oracle lookup catalog & validator
+                ├── production_registry.py # Atomic dual-table persistence writer
                 ├── explanation_code_search.py # Vector embedding RAG search
-                ├── oracle.py         # Oracle DB connection pool
-                └── production_registry.py # Production table writer
+                └── oracle.py         # Primary & Shadow Oracle connection pools
 ```
 
 ---
