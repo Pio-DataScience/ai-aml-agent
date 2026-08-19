@@ -5,6 +5,17 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-08-19] fix: Anti-Loop Stopping Rule for Registry Tool & Hard Recursion Limit
+
+### What
+- **Root Cause Analysis**: When stress-tested or given ambiguous queries about alert counts, the ReAct agent lacked an explicit stopping rule after registry tool execution, causing it to re-evaluate the prompt instruction and invoke `query_production_scenario_registry` repeatedly in an infinite loop.
+- **Fix Applied**:
+  - **Single Tool Call Stopping Rule**: Added strict rules in [`tool_driven_system.md`](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/prompts/tool_driven_system.md) mandating exactly ONE tool call per user query, followed by immediate final answer synthesis.
+  - **Hard Graph Safety Bound**: Configured `recursion_limit: 10` in [`chat.py`](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/api/routes/chat.py) to prevent any runaway agent loops.
+- **Verification**: Verified compilation and prompt instructions.
+
+---
+
 ## [2026-08-19] feat: Production Scenario Registry Search & Alert Intelligence Tool
 
 ### What

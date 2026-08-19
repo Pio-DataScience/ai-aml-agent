@@ -66,8 +66,10 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
         len(request.messages),
     )
 
-    tool_graph = await get_tool_driven_graph()
-    config = {"configurable": {"thread_id": thread_id}}
+    config = {
+        "configurable": {"thread_id": thread_id},
+        "recursion_limit": 10,
+    }
     user_msg = request.messages[-1].content if request.messages else ""
     if request.metadata_json:
         metadata_str = json.dumps(request.metadata_json, ensure_ascii=False)
