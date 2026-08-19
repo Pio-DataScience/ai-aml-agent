@@ -13,7 +13,13 @@ Usage:
 
 import json
 import sys
+from pathlib import Path
 from typing import Any, Dict, Optional
+
+# Ensure repository root is in sys.path
+_repo_root = str(Path(__file__).resolve().parents[3])
+if _repo_root not in sys.path:
+    sys.path.insert(0, _repo_root)
 
 from services.aml_builder.web.services.oracle import init_pool, close_pool
 from services.aml_builder.web.services.scenario_registry_analytics import (
