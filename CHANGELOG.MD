@@ -5,6 +5,65 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-08-19] feat: Production Scenario Registry Search & Alert Intelligence Tool
+
+### What
+New agent tool `query_production_scenario_registry` — answers compliance officer questions about
+**already-persisted** scenarios (as opposed to building a new one): inventory counts, natural-language
+search, full scenario detail, and live alert telemetry. Independent of the sequential scenario-creation
+workflow; callable at any point in the conversation.
+
+- **New `scenario_registry_analytics.py`**: four read-only functions backing the tool —
+  `search_scenarios_semantic`, `get_registry_statistics`, `get_alert_telemetry`,
+  `get_scenario_full_details`. Every query is scoped to `PIO_AML_PRODUCTION_SCENARIOS` (left-joined
+  to `PIO_AML_SCENARIO`/`PIO_AML_SCENARIO_CATEGORY` for governance metadata) so scenarios created by
+  other systems are never surfaced. Strictly `run_readonly` — no mutations.
+- **Semantic search computes embeddings live, per call — no persistent cache.** Considered and
+  rejected a cached embedding index (the originally spec'd design): at the scale scenarios exist at
+  (dozens to low hundreds, not thousands), a cache buys negligible latency while introducing real
+  correctness risk — staleness across multiple worker processes, and a new write-path dependency from
+  `production_registry.py` into the analytics module for invalidation. Fetching + embedding fresh on
+  every call is simpler and always correct.
+- **Alert telemetry is resilient by construction**: every Oracle call in `get_alert_telemetry`/
+  `get_scenario_full_details`/`get_registry_statistics` is independently wrapped, so one missing table
+  or empty result never blocks the others. Every alert-telemetry response carries a `note` explaining
+  that `PIO_AML_CUSTOMERS`/`PIO_AML_CUSTOMERS_DET` are populated by the Standalone Alert Execution
+  Engine on demand (not an automatic schedule) — the agent is instructed to relay this rather than
+  presenting a zero count as proof a scenario doesn't work.
+- **`tools.py`**: new `@tool query_production_scenario_registry` with a `Literal`-typed `query_type`
+  dispatch (`semantic_search` | `get_statistics` | `get_alert_metrics` | `get_scenario_detail`) —
+  LangChain's auto-derived Pydantic schema rejects an invalid mode before the function body even runs.
+  Registered in `graph.py`'s tool list.
+- **`tool_driven_system.md`**: new "REGISTRY AUDIT & ALERT INQUIRIES" section instructing the agent to
+  always call this tool for existing-scenario questions rather than answering from memory, and to
+  format results as markdown rather than dumping raw JSON.
+- **New `services/aml_builder/tests/test_registry_analytics.py`**: standalone integration script
+  exercising all 4 modes against a live Oracle connection, including negative-path checks (malformed
+  date, unknown scenario_id). **Not executed as part of this change — this environment has no live
+  Oracle connection.** Run manually once real data exists.
+
+### Deliberate scope note
+`risk_degree`/`category_code` filter params appeared in the original feature spec's outer tool
+signature but were never wired into any of the 4 modes' underlying query functions in that same spec.
+Dropped them from the implemented tool signature rather than ship silently-ignored parameters —
+precision over literal spec conformance where the spec was internally inconsistent.
+
+### Verification
+`py_compile` across every new/modified file; full `import app` with dummy credentials (all routes,
+including the concurrently-added `/engine/*` and `/scenario/deploy` routes, still register cleanly);
+direct tool invocation tests of all 4 query_type branches confirming graceful degradation with no
+Oracle pool (empty/None results, never a crash) and correct rejection of malformed dates and missing
+required parameters.
+
+### Files created
+`web/services/scenario_registry_analytics.py`, `services/aml_builder/tests/test_registry_analytics.py`
+
+### Files modified
+`web/services/tools.py`, `web/services/graph.py`, `web/services/prompts/tool_driven_system.md`,
+`CLAUDE.md`
+
+---
+
 ## [2026-08-18] fix: OpenAI API Connection Resilience & Exponential Backoff Retries
 
 ### What

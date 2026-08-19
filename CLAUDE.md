@@ -56,7 +56,7 @@ PYTHONPATH=services/aml_builder pytest --asyncio-mode=auto
 
 The service is a single autonomous **LangGraph ReAct tool-driven agent** exposed via a FastAPI SSE endpoint (`POST /chat/stream`). All source code lives under `services/aml_builder/` with `PYTHONPATH` set to that directory, so all imports are `web.*`. There is no multi-node graph and no routing logic in Python — the LLM decides tool invocation order via a goal-oriented system prompt. Full detail: [`Docs/01_architecture.md`](Docs/01_architecture.md) and [`Docs/02_module_layout_refactor.md`](Docs/02_module_layout_refactor.md).
 
-### The five tools (`web/services/tools.py`)
+### The six tools (`web/services/tools.py`)
 
 | Tool                                              | Role                                                                                                                                                                                                                                                      |
 | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -65,17 +65,20 @@ The service is a single autonomous **LangGraph ReAct tool-driven agent** exposed
 | `execute_oracle_dwh_shadow_test`                | Calls the**external PioTech AI DWH agent** (`PIOTECH_AI_URL`) via HTTP SSE to get production Oracle SQL, then shadow-tests it (`SELECT COUNT(*) FROM (...)`) against `BI_DWH` (via the dedicated shadow connection pool).                     |
 | `prepare_scenario_metadata_for_persistence`     | Deterministic + live Oracle lookups: builds the`PIO_AML_SCENARIO` field catalog (risk degree, category, etc.) with currently valid options, reports missing mandatory fields.                                                                           |
 | `persist_and_validate_scenario_in_dwh`          | Validates the merged metadata, then atomically writes the confirmed scenario into`PIO_AML_PRODUCTION_SCENARIOS` (for the daily ETL runner) **and** `PIO_AML_SCENARIO` (business metadata for downstream compliance modules) in one transaction. |
+| `query_production_scenario_registry`            | Read-only lookup over already-persisted scenarios: `semantic_search` (live per-query embeddings, no cache), `get_statistics`, `get_alert_metrics`, `get_scenario_detail`. Independent of the sequential creation workflow above.                        |
 
 ### Key modules
 
-- **`web/services/tools.py`** — the five `@tool` definitions above.
+- **`web/services/tools.py`** — the six `@tool` definitions above.
 - **`web/services/graph.py`** — compiles the ReAct agent (`get_tool_driven_graph`), manages the SQLite checkpointer lifecycle (`close_checkpointer`).
 - **`web/services/plan_renderer.py`** — the 11-section markdown plan builder.
 - **`web/services/scenario_metadata.py`** — `PIO_AML_SCENARIO` field registry: seeding from `AMLIntent`, live lookup-table fetching, and the final validation guard-rail before persistence (see `Docs/PIO_AML_SCENARIO_schema_guide.md`).
+- **`web/services/scenario_registry_analytics.py`** — read-only search/analytics over persisted scenarios backing `query_production_scenario_registry` (semantic search, statistics, alert telemetry, scenario detail).
 - **`web/services/sql_extraction.py`** — pulls clean SQL out of the PioTech AI SSE response text.
 - **`web/services/llm_client.py`** — shared `build_llm()`/`safe_parse_json()`.
 - **`web/services/explanation_code_search.py`** — vector similarity RAG search over `PIO_EXPLANATION_CODE`.
 - **`web/services/production_registry.py`** — atomic dual-writer for `PIO_AML_PRODUCTION_SCENARIOS` + `PIO_AML_SCENARIO`.
+- **`web/services/alert_engine.py`** — the Standalone Alert Execution Engine: executes each active scenario's `RAW_SQL` against `BI_DWH` and populates `PIO_AML_CUSTOMERS`/`PIO_AML_CUSTOMERS_DET`. Runs on demand via `run_alert_engine.py` (CLI) or `POST /engine/run-scenarios` — not on an automatic schedule. See `Docs/04_standalone_alert_engine.md`.
 - **`web/services/session_store.py`** — chat-sessions sidebar metadata (SQLite).
 - **`web/services/schemas.py`** — Pydantic contracts: `AMLIntent` and friends (intent layer), plus HTTP/SSE request-response models.
 - **`web/services/oracle.py`** — Oracle connection pool (`init_pool`/`close_pool`), `run_readonly`, `run_write`, `run_write_many`, `get_connection`, `atomic_connection`, plus a dedicated shadow-test pool (`init_shadow_pool`/`run_shadow_readonly`).
@@ -83,6 +86,8 @@ The service is a single autonomous **LangGraph ReAct tool-driven agent** exposed
 - **`web/api/main.py`** — FastAPI app, lifespan (pool init + graph warm-up), CORS, `/health`.
 - **`web/api/routes/chat.py`** — `POST /chat/stream` SSE streaming.
 - **`web/api/routes/sessions.py`** — chat history/list/rename/pin/delete endpoints.
+- **`web/api/routes/engine.py`** — `POST /engine/run-scenarios`, `GET /engine/active-scenarios` — triggers/inspects the alert execution engine.
+- **`web/api/routes/deploy.py`** — `POST /scenario/deploy` — frontend-facing scenario deployment endpoint.
 - **`web/services/prompts/`** — Markdown system prompt files loaded at runtime via `web/services/prompts/loader.py`'s `load_prompt()`.
 
 ### Thread isolation

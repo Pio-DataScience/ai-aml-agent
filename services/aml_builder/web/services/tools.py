@@ -1,17 +1,20 @@
 """
-The four autonomous tools exposed to the AML Scenario Builder's ReAct agent.
+The autonomous tools exposed to the AML Scenario Builder's ReAct agent.
 
 Each pipeline capability (intent extraction, plan generation, shadow testing,
-persistence) is an independent @tool with a rich docstring. The agent itself
-— compiled in graph.py — receives a goal-oriented system prompt and decides
-tool invocation ordering, parameter passing, and user interaction autonomously;
-there is no hardcoded routing here.
+governance metadata, persistence, registry lookup) is an independent @tool
+with a rich docstring. The agent itself — compiled in graph.py — receives a
+goal-oriented system prompt and decides tool invocation ordering, parameter
+passing, and user interaction autonomously; there is no hardcoded routing here.
 
 Notes:
 - SQL generation is delegated to the external PioTech AI text-to-SQL SSE
   service (see execute_oracle_dwh_shadow_test).
-- Persistence writes exclusively to PIO_AML_PRODUCTION_SCENARIOS via the
-  production_registry module.
+- Persistence writes atomically to PIO_AML_PRODUCTION_SCENARIOS and
+  PIO_AML_SCENARIO via the production_registry module.
+- query_production_scenario_registry answers questions about ALREADY-persisted
+  scenarios (inventory, search, detail, alert telemetry) — it is read-only and
+  independent of the sequential scenario-creation workflow above.
 """
 
 import json
@@ -19,7 +22,7 @@ import logging
 import uuid
 import httpx
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
@@ -42,6 +45,12 @@ from services.aml_builder.web.services.scenario_metadata import (
     seed_scenario_metadata,
     build_metadata_catalog,
     validate_scenario_metadata,
+)
+from services.aml_builder.web.services.scenario_registry_analytics import (
+    search_scenarios_semantic,
+    get_registry_statistics,
+    get_alert_telemetry,
+    get_scenario_full_details,
 )
 
 logger = logging.getLogger(__name__)
@@ -679,3 +688,96 @@ def persist_and_validate_scenario_in_dwh(
         ensure_ascii=False,
         indent=2,
     )
+
+
+@tool
+def query_production_scenario_registry(
+    query_type: Literal["semantic_search", "get_statistics", "get_alert_metrics", "get_scenario_detail"],
+    search_text: Optional[str] = None,
+    scenario_id: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    customer_number: Optional[str] = None,
+    limit: int = 5,
+) -> str:
+    """Query this agent's own persisted scenario registry — inventory, search, detail, and alert telemetry.
+
+    Use this tool whenever the compliance officer asks about EXISTING scenarios rather than building a
+    new one — e.g. "how many scenarios do we have?", "do we already have a rule for structuring?",
+    "show me scenario PRD_XXXX", "how many alerts has this scenario generated?". Never answer these
+    questions from memory or by guessing — always call this tool. This is independent of the sequential
+    scenario-creation workflow and can be called at any point in the conversation.
+
+    Four query_type modes:
+      - 'semantic_search': Natural language concept search over scenario name + detection logic
+        (e.g. "structuring under 10k", "minors with high turnover", "cash deposits"). Computes
+        embeddings fresh on every call against the live registry — always up to date, no stale
+        cache. Requires `search_text`.
+      - 'get_statistics': Deterministic inventory KPIs — total/active/inactive counts, breakdown by
+        risk degree and category, lifetime alert total. No parameters needed.
+      - 'get_alert_metrics': Live alert telemetry from PIO_AML_CUSTOMERS/PIO_AML_CUSTOMERS_DET —
+        per-scenario firing counts, alert volume by date, or (if `customer_number` is given) all
+        alerts for a specific customer. Optionally filter by `scenario_id` and/or `date_from`/
+        `date_to` ('YYYY-MM-DD'). IMPORTANT: these tables are populated by the Standalone Alert
+        Execution Engine, which runs on demand (not an automatic schedule) — a low or zero count
+        may mean no alerts were found, or that the engine simply hasn't been run yet for that
+        scenario/date. Always relay the response's 'note' field rather than presenting zero as
+        proof the scenario doesn't work.
+      - 'get_scenario_detail': Full record for one scenario — requires `scenario_id`
+        (e.g. 'PRD_50FC063C').
+
+    Args:
+        query_type (str): Which of the 4 modes to run.
+        search_text (Optional[str]): Natural language query — required for 'semantic_search'.
+        scenario_id (Optional[str]): Exact scenario identifier — required for 'get_scenario_detail',
+            optional filter for 'get_alert_metrics'.
+        date_from (Optional[str]): Inclusive lower bound 'YYYY-MM-DD', for 'get_alert_metrics'.
+        date_to (Optional[str]): Inclusive upper bound 'YYYY-MM-DD', for 'get_alert_metrics'.
+        customer_number (Optional[str]): Customer number to list individual alerts for, for
+            'get_alert_metrics'.
+        limit (int): Max results/rows to return (clamped to a sane range per mode). Default 5.
+
+    Returns:
+        str: JSON object with the mode-specific result, or {'error': ...} if the request was invalid.
+    """
+    logger.info("[TOOL: REGISTRY] query_type=%s", query_type)
+
+    try:
+        if query_type == "semantic_search":
+            if not search_text:
+                return json.dumps({"error": "search_text is required for query_type='semantic_search'."})
+            result: Any = search_scenarios_semantic(search_text, limit=limit or 5)
+
+        elif query_type == "get_statistics":
+            result = get_registry_statistics()
+
+        elif query_type == "get_alert_metrics":
+            result = get_alert_telemetry(
+                scenario_id=scenario_id,
+                date_from=date_from,
+                date_to=date_to,
+                customer_number=customer_number,
+                limit=limit or 10,
+            )
+
+        elif query_type == "get_scenario_detail":
+            if not scenario_id:
+                return json.dumps({"error": "scenario_id is required for query_type='get_scenario_detail'."})
+            detail = get_scenario_full_details(scenario_id)
+            result = (
+                detail
+                if detail is not None
+                else {"error": f"No scenario found with scenario_id='{scenario_id}'."}
+            )
+
+        else:
+            return json.dumps({"error": f"Unknown query_type: '{query_type}'."})
+
+        return json.dumps(result, ensure_ascii=False, indent=2, default=str)
+    except ValueError as exc:
+        # Bad date format, etc. — a client-correctable input error, not a system failure.
+        logger.warning("[TOOL: REGISTRY] Invalid input: %s", exc)
+        return json.dumps({"error": str(exc)})
+    except Exception as exc:
+        logger.error("[TOOL: REGISTRY] query_type=%s failed: %s", query_type, exc, exc_info=True)
+        return json.dumps({"error": str(exc)})

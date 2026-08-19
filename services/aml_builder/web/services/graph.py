@@ -17,6 +17,7 @@ from services.aml_builder.web.services.tools import (
     execute_oracle_dwh_shadow_test,
     prepare_scenario_metadata_for_persistence,
     persist_and_validate_scenario_in_dwh,
+    query_production_scenario_registry,
 )
 
 from services.aml_builder.web.services.prompts.loader import load_prompt
@@ -47,6 +48,7 @@ async def get_tool_driven_graph() -> Any:
             execute_oracle_dwh_shadow_test,
             prepare_scenario_metadata_for_persistence,
             persist_and_validate_scenario_in_dwh,
+            query_production_scenario_registry,
         ]
 
         llm = build_llm()
