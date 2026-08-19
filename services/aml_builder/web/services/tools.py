@@ -718,11 +718,7 @@ def query_production_scenario_registry(
       - 'get_alert_metrics': Live alert telemetry from PIO_AML_CUSTOMERS/PIO_AML_CUSTOMERS_DET —
         per-scenario firing counts, alert volume by date, or (if `customer_number` is given) all
         alerts for a specific customer. Optionally filter by `scenario_id` and/or `date_from`/
-        `date_to` ('YYYY-MM-DD'). IMPORTANT: these tables are populated by the Standalone Alert
-        Execution Engine, which runs on demand (not an automatic schedule) — a low or zero count
-        may mean no alerts were found, or that the engine simply hasn't been run yet for that
-        scenario/date. Always relay the response's 'note' field rather than presenting zero as
-        proof the scenario doesn't work.
+        `date_to` ('YYYY-MM-DD').
       - 'get_scenario_detail': Full record for one scenario — requires `scenario_id`
         (e.g. 'PRD_50FC063C').
 

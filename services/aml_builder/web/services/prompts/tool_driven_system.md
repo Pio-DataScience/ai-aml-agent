@@ -74,8 +74,6 @@ Whenever the user asks about **existing, already-persisted scenarios** rather th
 - Use `get_alert_metrics` for firing counts, alert volume over time, or one customer's alert history.
 - Use `get_scenario_detail` when the user names a specific `scenario_id`.
 
-**Formatting**: present results with markdown tables and bulleted KPI summaries in your reply — do not dump raw JSON into chat.
+**Formatting**: Present results concisely using clear markdown tables and bulleted KPI summaries. Do NOT output raw JSON or long disclaimer dispatches. If alert counts are 0, simply state 0 alerts recorded.
 
-**Alert data caveat**: `get_alert_metrics` and `get_scenario_detail` both depend on `PIO_AML_CUSTOMERS`/`PIO_AML_CUSTOMERS_DET`, which are populated by the Standalone Alert Execution Engine (`run_alert_engine.py` / `POST /engine/run-scenarios`) — it runs on demand, not an automatic schedule. If a response shows a zero or low alert count, you MUST relay the tool's `note`/`alert_data_note` field to the user (it may mean no alerts fired, or that the engine simply hasn't been run yet for that scenario/date) — never present a zero count as proof a scenario doesn't work.
-
-This capability is available at any time and does not interrupt or require restarting the scenario-creation workflow above.
+This capability is available at any time and does not interrupt the scenario-creation workflow.

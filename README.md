@@ -89,17 +89,17 @@ If you are on Windows, `run_dev.ps1` automatically exports `.env` variables, set
 
 ## 📡 API Endpoints Overview
 
-| Method     | Endpoint                                     | Description                                       |
-| ---------- | -------------------------------------------- | ------------------------------------------------- |
-| `GET`      | `/health`                                    | Service health check                              |
-| `POST`     | `/chat/stream`                               | SSE streaming chat endpoint for scenario building |
-| `POST`     | `/scenario/deploy`                           | Direct deployment of side-panel governance metadata|
-| `POST`     | `/engine/run-scenarios`                      | Trigger batch execution of active AML scenarios   |
-| `GET`      | `/engine/active-scenarios`                   | List all active persisted scenarios in Oracle DWH |
-| `GET`      | `/chat/{project}/{chat_id}/{user}/history`   | Retrieves conversation history & artifacts        |
-| `GET`      | `/chats/user/{user_id}/list`                 | Lists user chat sessions                          |
-| `PUT`      | `/chat/{project}/{chat_id}/{user}/rename`    | Renames a chat session                            |
-| `DELETE`   | `/chat/{project}/{chat_id}/{user}`           | Soft-deletes a chat session                       |
+| Method     | Endpoint                                     | Description                                         |
+| ---------- | -------------------------------------------- | --------------------------------------------------- |
+| `GET`    | `/health`                                  | Service health check                                |
+| `POST`   | `/chat/stream`                             | SSE streaming chat endpoint for scenario building   |
+| `POST`   | `/scenario/deploy`                         | Direct deployment of side-panel governance metadata |
+| `POST`   | `/engine/run-scenarios`                    | Trigger batch execution of active AML scenarios     |
+| `GET`    | `/engine/active-scenarios`                 | List all active persisted scenarios in Oracle DWH   |
+| `GET`    | `/chat/{project}/{chat_id}/{user}/history` | Retrieves conversation history & artifacts          |
+| `GET`    | `/chats/user/{user_id}/list`               | Lists user chat sessions                            |
+| `PUT`    | `/chat/{project}/{chat_id}/{user}/rename`  | Renames a chat session                              |
+| `DELETE` | `/chat/{project}/{chat_id}/{user}`         | Soft-deletes a chat session                         |
 
 ---
 
@@ -112,21 +112,25 @@ Detailed Architecture & Runbook: [`Docs/04_standalone_alert_engine.md`](file:///
 ### 1. CLI Execution (`run_alert_engine.py`)
 
 #### Run All Active Scenarios for Today (`SYSDATE`):
+
 ```powershell
 .\.venv\Scripts\python.exe run_alert_engine.py
 ```
 
 #### Run for a Specific Evaluation Date:
+
 ```powershell
 .\.venv\Scripts\python.exe run_alert_engine.py --date 2026-08-11
 ```
 
 #### Run a Single Specific Scenario by ID:
+
 ```powershell
 .\.venv\Scripts\python.exe run_alert_engine.py --scenario-id PRD_50FC063C --date 2026-08-11
 ```
 
 #### Dry-Run Mode (Queries DWH without writing to Alert tables):
+
 ```powershell
 .\.venv\Scripts\python.exe run_alert_engine.py --date 2026-08-11 --dry-run
 ```
@@ -136,6 +140,7 @@ Detailed Architecture & Runbook: [`Docs/04_standalone_alert_engine.md`](file:///
 ### 2. Triggering via REST API (FastAPI)
 
 #### Run All Active Scenarios via API:
+
 ```bash
 curl -X POST http://localhost:8005/engine/run-scenarios \
   -H "Content-Type: application/json" \
@@ -143,6 +148,7 @@ curl -X POST http://localhost:8005/engine/run-scenarios \
 ```
 
 #### Run a Specific Scenario via API:
+
 ```bash
 curl -X POST http://localhost:8005/engine/run-scenarios \
   -H "Content-Type: application/json" \
@@ -150,6 +156,7 @@ curl -X POST http://localhost:8005/engine/run-scenarios \
 ```
 
 #### List All Active Persisted Scenarios:
+
 ```bash
 curl http://localhost:8005/engine/active-scenarios
 ```

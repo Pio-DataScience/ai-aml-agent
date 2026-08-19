@@ -161,7 +161,11 @@ def search_scenarios_semantic(query: str, limit: int = 5) -> Dict[str, Any]:
     texts = [f"{s['scenario_name']}. {s['detection_logic']}".strip() for s in scenario_rows]
 
     try:
-        embeddings = OpenAIEmbeddings(api_key=settings.OPENAI_API_KEY)
+        embeddings = OpenAIEmbeddings(
+            api_key=settings.OPENAI_API_KEY,
+            max_retries=5,
+            request_timeout=60.0,
+        )
         doc_vectors = np.array(embeddings.embed_documents(texts), dtype=np.float32)
         query_vector = np.array(embeddings.embed_query(query), dtype=np.float32)
     except Exception as exc:
@@ -234,7 +238,6 @@ def get_registry_statistics() -> Dict[str, Any]:
         "risk_degree_breakdown": [],
         "category_breakdown": [],
         "lifetime_total_alerts": None,
-        "alert_data_note": _ALERT_DATA_NOTE,
     }
 
     try:
@@ -376,7 +379,6 @@ def get_alert_telemetry(
         "alert_volume_by_date": [],
         "customer_alerts": None,
         "data_available": False,
-        "note": _ALERT_DATA_NOTE,
     }
 
     try:
@@ -527,7 +529,6 @@ def get_scenario_full_details(scenario_id: str) -> Optional[Dict[str, Any]]:
         "category_name": r[11] or r[10],
         "violation_level": r[12],
         "total_alerts_fired": None,
-        "alert_data_note": _ALERT_DATA_NOTE,
     }
 
     try:
