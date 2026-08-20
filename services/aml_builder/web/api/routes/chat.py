@@ -66,6 +66,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
         len(request.messages),
     )
 
+    tool_graph = await get_tool_driven_graph()
     config = {
         "configurable": {"thread_id": thread_id},
         "recursion_limit": 10,
