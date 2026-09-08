@@ -5,6 +5,39 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-09-08] feat: Multi-Transaction Type Schema Support, Multi-Type Vector Search & Deterministic Channel-to-Code Binding
+
+### What
+- **Contract Schema Upgrade (`schemas.py`)**: 
+  - Added `transaction_types: Optional[List[str]]` and `explanation_codes_by_type: Optional[Dict[str, List[str]]]` to `AMLIntent`.
+  - Added `transaction_type: Optional[str]` and `explanation_codes: Optional[List[str]]` directly to `Threshold` and `SemanticCondition` contracts to bind each specific threshold condition to its matching transaction channel and explanation codes.
+  - Added automatic bidirectional normalization between `transaction_type` and `transaction_types`.
+- **Multi-Type Vector Discovery & Deduplication (`explanation_code_search.py`)**: Updated `select_relevant_explanation_codes` and `format_explanation_code_checkpoint` to accept single or multiple transaction types (`Union[str, List[str]]`), execute parallel vector similarity searches across `PIO_EXPLANATION_CODE`, perform sub-LLM ranking per type with origin tagging (`[OUTWARD TRANSFER]`, `[CASH DEPOSIT]`), and deduplicate matching codes across channels.
+- **Deterministic Channel-to-Code Binding (`tools.py`)**: Built `_bind_channels_and_codes_to_intent` in `analyze_intent_and_discover_explanation_codes` to automatically map discovered explanation codes to their corresponding thresholds and semantic conditions based on channel names and conditions.
+- **Intent Prompt Enhancement (`intent_extraction.md`)**: Added `transaction_types` and `explanation_codes_by_type` to the root contract schema and established Law 13 (`MULTIPLE TRANSACTION TYPES EXTRACTION`) instructing the intent analyst model to capture all channels and bind `transaction_type` on each threshold.
+- **UI Markdown Rendering (`plan_renderer.py`)**: Updated Section 5 (Thresholds) in the generated implementation plan to render a dedicated `Channel / Codes` column displaying the exact bound codes per threshold rule.
+
+### Why
+- Fixes an ambiguity where downstream text-to-SQL generation (Service B / PioTech AI) could not distinguish which explanation codes belonged to which threshold branch in compound multi-channel scenarios (e.g. outward transfer > 10k OR cash deposit < 10k), preventing uncorrelated SQL predicates.
+
+### Verify
+- Verified with end-to-end unit script validating `Threshold` and `SemanticCondition` channel bindings, `explanation_codes_by_type` dict population, and plan markdown rendering.
+
+---
+
+## [2026-08-23] fix: Reasoning Model Compatibility & Dynamic `reasoning_effort` Handling
+
+### What
+- **Root Cause Analysis**: When switching models to newer OpenAI reasoning models (such as `gpt-5.6-luna`, `o1`, `o3`), the API returned `400 Bad Request: Function tools with reasoning_effort are not supported for gpt-5.6-luna in /v1/chat/completions. To use function tools, set reasoning_effort to 'none'`.
+- **Fix Applied**:
+  - Added `LLM_REASONING_EFFORT` configuration setting in [`settings.py`](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/settings.py).
+  - Updated `build_llm()` in [`llm_client.py`](file:///c:/Users/abura/Development/AI_AML_AGENT/services/aml_builder/web/services/llm_client.py) with smart detection for reasoning models (`gpt-5`, `o1`, `o3`, `luna`, `thinking`), automatically setting `reasoning_effort="none"` for OpenAI function-calling compatibility unless explicitly overridden in `.env`.
+  - Preserved standard parameter sets for local models (`LM Studio`, `vLLM`, `Ollama`) without sending unsupported proprietary parameters.
+  - Handled strict fixed-temperature constraints for reasoning models (`o1-preview`, `o1-mini`).
+- **Verification**: Verified live tool binding and invocation with `gpt-5.6-luna`.
+
+---
+
 ## [2026-08-19] fix: Anti-Loop Stopping Rule for Registry Tool & Hard Recursion Limit
 
 ### What

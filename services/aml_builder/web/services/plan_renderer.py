@@ -80,9 +80,12 @@ def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]
     lines.append("|---|---|")
     lines.append(f"| **Scenario Name** | {intent.get('scenario_name', '—')} |")
     lines.append(f"| **Scenario Type** | `{intent.get('scenario_type', '—')}` |")
+    tx_types = intent.get("transaction_types")
     tx_type = intent.get("transaction_type")
-    if tx_type:
-        lines.append(f"| **Transaction Type** | {tx_type} |")
+    if tx_types and isinstance(tx_types, list):
+        lines.append(f"| **Transaction Types** | {', '.join(f'`{t}`' for t in tx_types)} |")
+    elif tx_type:
+        lines.append(f"| **Transaction Type** | `{tx_type}` |")
 
     segs = intent.get("customer_segments")
     if segs:
@@ -169,29 +172,57 @@ def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]
         if detail_thresholds:
             lines.append("### 5.1 Detail-Level Filters *(SQL: `WHERE` clause)*")
             lines.append("")
-            lines.append("| # | Field | Operator | Value | Provenance |")
-            lines.append("|---|---|---|---|---|")
-            for i, t in enumerate(detail_thresholds, 1):
-                val = f"`{t.get('value_from')}`"
-                if t.get("operator") == "BETWEEN" and t.get("value_to") is not None:
-                    val = f"`{t.get('value_from')}` — `{t.get('value_to')}`"
-                prov = t.get("provenance", "stated")
-                prov_label = "✅ Stated" if prov == "stated" else "⚙️ Assumed" if prov == "assumed_default" else "❓ Needs User"
-                lines.append(f"| {i} | `{t.get('field')}` | `{t.get('operator')}` | {val} | {prov_label} |")
+            has_channels = any(t.get("transaction_type") or t.get("explanation_codes") for t in detail_thresholds)
+            if has_channels:
+                lines.append("| # | Field | Operator | Value | Channel / Codes | Provenance |")
+                lines.append("|---|---|---|---|---|---|")
+                for i, t in enumerate(detail_thresholds, 1):
+                    val = f"`{t.get('value_from')}`"
+                    if t.get("operator") == "BETWEEN" and t.get("value_to") is not None:
+                        val = f"`{t.get('value_from')}` — `{t.get('value_to')}`"
+                    prov = t.get("provenance", "stated")
+                    prov_label = "✅ Stated" if prov == "stated" else "⚙️ Assumed" if prov == "assumed_default" else "❓ Needs User"
+                    ch = t.get("transaction_type") or "—"
+                    codes_str = f" (`{', '.join(t.get('explanation_codes', []))}`)" if t.get("explanation_codes") else ""
+                    lines.append(f"| {i} | `{t.get('field')}` | `{t.get('operator')}` | {val} | `{ch}`{codes_str} | {prov_label} |")
+            else:
+                lines.append("| # | Field | Operator | Value | Provenance |")
+                lines.append("|---|---|---|---|---|")
+                for i, t in enumerate(detail_thresholds, 1):
+                    val = f"`{t.get('value_from')}`"
+                    if t.get("operator") == "BETWEEN" and t.get("value_to") is not None:
+                        val = f"`{t.get('value_from')}` — `{t.get('value_to')}`"
+                    prov = t.get("provenance", "stated")
+                    prov_label = "✅ Stated" if prov == "stated" else "⚙️ Assumed" if prov == "assumed_default" else "❓ Needs User"
+                    lines.append(f"| {i} | `{t.get('field')}` | `{t.get('operator')}` | {val} | {prov_label} |")
             lines.append("")
 
         if aggregate_thresholds:
             lines.append("### 5.2 Aggregate-Level Conditions *(SQL: `HAVING` clause)*")
             lines.append("")
-            lines.append("| # | Field | Operator | Value | Provenance |")
-            lines.append("|---|---|---|---|---|")
-            for i, t in enumerate(aggregate_thresholds, 1):
-                val = f"`{t.get('value_from')}`"
-                if t.get("operator") == "BETWEEN" and t.get("value_to") is not None:
-                    val = f"`{t.get('value_from')}` — `{t.get('value_to')}`"
-                prov = t.get("provenance", "stated")
-                prov_label = "✅ Stated" if prov == "stated" else "⚙️ Assumed" if prov == "assumed_default" else "❓ Needs User"
-                lines.append(f"| {i} | `{t.get('field')}` | `{t.get('operator')}` | {val} | {prov_label} |")
+            has_channels = any(t.get("transaction_type") or t.get("explanation_codes") for t in aggregate_thresholds)
+            if has_channels:
+                lines.append("| # | Field | Operator | Value | Channel / Codes | Provenance |")
+                lines.append("|---|---|---|---|---|---|")
+                for i, t in enumerate(aggregate_thresholds, 1):
+                    val = f"`{t.get('value_from')}`"
+                    if t.get("operator") == "BETWEEN" and t.get("value_to") is not None:
+                        val = f"`{t.get('value_from')}` — `{t.get('value_to')}`"
+                    prov = t.get("provenance", "stated")
+                    prov_label = "✅ Stated" if prov == "stated" else "⚙️ Assumed" if prov == "assumed_default" else "❓ Needs User"
+                    ch = t.get("transaction_type") or "—"
+                    codes_str = f" (`{', '.join(t.get('explanation_codes', []))}`)" if t.get("explanation_codes") else ""
+                    lines.append(f"| {i} | `{t.get('field')}` | `{t.get('operator')}` | {val} | `{ch}`{codes_str} | {prov_label} |")
+            else:
+                lines.append("| # | Field | Operator | Value | Provenance |")
+                lines.append("|---|---|---|---|---|")
+                for i, t in enumerate(aggregate_thresholds, 1):
+                    val = f"`{t.get('value_from')}`"
+                    if t.get("operator") == "BETWEEN" and t.get("value_to") is not None:
+                        val = f"`{t.get('value_from')}` — `{t.get('value_to')}`"
+                    prov = t.get("provenance", "stated")
+                    prov_label = "✅ Stated" if prov == "stated" else "⚙️ Assumed" if prov == "assumed_default" else "❓ Needs User"
+                    lines.append(f"| {i} | `{t.get('field')}` | `{t.get('operator')}` | {val} | {prov_label} |")
             lines.append("")
     else:
         lines.append("*No numeric thresholds extracted.*")

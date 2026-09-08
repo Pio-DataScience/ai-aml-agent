@@ -70,6 +70,10 @@ class Settings(BaseSettings):
         default=4096,
         description="Max tokens per LLM response.",
     )
+    LLM_REASONING_EFFORT: Optional[str] = Field(
+        default=None,
+        description="Reasoning effort ('none', 'low', 'medium', 'high'). Auto-defaulted for reasoning models.",
+    )
 
     # ─── Oracle DB (Primary) ──────────────────────────────────────────────────
     ORACLE_DSN: str = Field(

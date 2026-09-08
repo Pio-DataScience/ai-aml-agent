@@ -57,8 +57,70 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
-# 1. TOOL DEFINITIONS (Zero Routing Logic — Autonomous Capabilities)
-# =============================================================================
+def _bind_channels_and_codes_to_intent(
+    intent_dict: Dict[str, Any],
+    discovered_codes: List[Dict[str, Any]],
+    codes_by_type: Dict[str, List[str]],
+) -> None:
+    """Bind channel-specific explanation codes directly to individual thresholds and semantic conditions."""
+    if not codes_by_type or len(codes_by_type) <= 0:
+        return
+
+    # 1. Bind to semantic_conditions
+    sc_list = intent_dict.get("semantic_conditions")
+    if isinstance(sc_list, list):
+        for sc in sc_list:
+            if not isinstance(sc, dict):
+                continue
+            text = f"{sc.get('raw_phrase', '')} {sc.get('predicate', '')}".lower()
+            for tx_key, codes in codes_by_type.items():
+                tx_lower = tx_key.lower()
+                tx_words = [w for w in tx_lower.split() if len(w) > 3]
+                if any(w in text for w in tx_words) or tx_lower in text:
+                    if not sc.get("transaction_type"):
+                        sc["transaction_type"] = tx_key
+                    if not sc.get("explanation_codes"):
+                        sc["explanation_codes"] = codes
+                    break
+
+    # 2. Bind to thresholds
+    thresholds = intent_dict.get("thresholds")
+    if isinstance(thresholds, list):
+        for idx, t in enumerate(thresholds):
+            if not isinstance(t, dict):
+                continue
+            existing_tx = t.get("transaction_type")
+            if existing_tx and existing_tx in codes_by_type:
+                t["explanation_codes"] = codes_by_type[existing_tx]
+                continue
+
+            matched_tx = None
+
+            # Check correlation with semantic conditions that already have transaction_type
+            if isinstance(sc_list, list):
+                for sc in sc_list:
+                    if isinstance(sc, dict) and sc.get("transaction_type"):
+                        raw_sc = str(sc.get("raw_phrase", "")).lower()
+                        pred_sc = str(sc.get("predicate", "")).lower()
+                        val_str = str(t.get("value_from", ""))
+                        if (
+                            val_str in raw_sc
+                            or val_str in pred_sc
+                            or (">" in str(t.get("operator", "")) and ("exceed" in pred_sc or "over" in raw_sc))
+                            or ("<" in str(t.get("operator", "")) and ("below" in pred_sc or "under" in raw_sc))
+                        ):
+                            matched_tx = sc["transaction_type"]
+                            break
+
+            # Fallback by index alignment if threshold count matches types count
+            if not matched_tx and len(thresholds) == len(codes_by_type):
+                types_keys = list(codes_by_type.keys())
+                if idx < len(types_keys):
+                    matched_tx = types_keys[idx]
+
+            if matched_tx and matched_tx in codes_by_type:
+                t["transaction_type"] = matched_tx
+                t["explanation_codes"] = codes_by_type[matched_tx]
 
 
 @tool
@@ -190,9 +252,40 @@ def analyze_intent_and_discover_explanation_codes(
                 agg["grain"] = "PER CUSTOMER PER DAY"
 
         tx_type = intent_dict.get("transaction_type")
+        tx_types = intent_dict.get("transaction_types")
         if not tx_type and isinstance(intent_dict.get("filters"), dict):
             tx_type = intent_dict["filters"].get("transaction_type")
-        if tx_type:
+            tx_types = intent_dict["filters"].get("transaction_types")
+
+        # Intelligent fallback: If transaction_type and transaction_types are not directly populated, scan semantic_conditions
+        if not tx_type and not tx_types and isinstance(intent_dict.get("semantic_conditions"), list):
+            discovered_from_sc = []
+            for sc in intent_dict["semantic_conditions"]:
+                if isinstance(sc, dict):
+                    pred = str(sc.get("predicate", ""))
+                    raw = str(sc.get("raw_phrase", ""))
+                    # Pattern 1: "transaction_type is outward transfer" or "transaction type is cash deposit"
+                    m = re.search(r"transaction_?type\s+is\s+([^,;.]+)", pred, re.IGNORECASE)
+                    if m:
+                        val = m.group(1).strip()
+                        if val and val.lower() not in [d.lower() for d in discovered_from_sc]:
+                            discovered_from_sc.append(val)
+                    # Pattern 2: behavioral subject = transaction
+                    elif sc.get("logical_type") == "BEHAVIORAL" and str(sc.get("subject", "")).lower() == "transaction":
+                        if raw and raw.lower() not in [d.lower() for d in discovered_from_sc] and raw.lower() not in ("or", "and"):
+                            discovered_from_sc.append(raw)
+            if discovered_from_sc:
+                tx_types = discovered_from_sc
+                tx_type = ", ".join(discovered_from_sc)
+                intent_dict["transaction_types"] = tx_types
+                intent_dict["transaction_type"] = tx_type
+                logger.info("[TOOL: INTENT] Recovered transaction types from semantic_conditions: %s", tx_types)
+
+        if tx_types and isinstance(tx_types, list):
+            intent_dict["transaction_types"] = [str(x).strip() for x in tx_types if str(x).strip()]
+            if not tx_type:
+                intent_dict["transaction_type"] = ", ".join(intent_dict["transaction_types"])
+        elif tx_type:
             intent_dict["transaction_type"] = tx_type
 
         explicit_codes = intent_dict.get("explanation_codes")
@@ -210,24 +303,38 @@ def analyze_intent_and_discover_explanation_codes(
                 "[TOOL: INTENT] User/LLM confirmed explicit explanation codes: %s",
                 explicit_codes,
             )
-        elif tx_type:
-            # Run vector search discovery only when codes have not been selected/confirmed yet
-            discovered_codes = select_relevant_explanation_codes(tx_type)
-            if discovered_codes:
-                expl_checkpoint = format_explanation_code_checkpoint(
-                    tx_type, discovered_codes
-                )
-                code_strings = [
-                    str(c.get("code")).strip()
-                    for c in discovered_codes
-                    if c.get("code")
-                ]
-                intent_dict["explanation_codes"] = code_strings
-                logger.info(
-                    "[TOOL: INTENT] Vector search discovered %d codes for '%s'",
-                    len(code_strings),
-                    tx_type,
-                )
+        else:
+            target_types = tx_types if tx_types else (tx_type if tx_type else None)
+            if target_types:
+                # Run vector search discovery for single or multiple types
+                discovered_codes = select_relevant_explanation_codes(target_types)
+                if discovered_codes:
+                    expl_checkpoint = format_explanation_code_checkpoint(
+                        target_types, discovered_codes
+                    )
+                    code_strings = [
+                        str(c.get("code")).strip()
+                        for c in discovered_codes
+                        if c.get("code")
+                    ]
+                    intent_dict["explanation_codes"] = code_strings
+
+                    # Build explanation_codes_by_type partitioning
+                    codes_by_type: Dict[str, List[str]] = {}
+                    for c in discovered_codes:
+                        tx_key = c.get("channel") or c.get("transaction_type") or (target_types[0] if isinstance(target_types, list) else str(target_types))
+                        codes_by_type.setdefault(tx_key, []).append(str(c.get("code")).strip())
+                    intent_dict["explanation_codes_by_type"] = codes_by_type
+
+                    # Bind channel-specific explanation codes directly to individual thresholds and semantic conditions
+                    _bind_channels_and_codes_to_intent(intent_dict, discovered_codes, codes_by_type)
+
+                    logger.info(
+                        "[TOOL: INTENT] Vector search discovered %d codes across %d channels: %s",
+                        len(code_strings),
+                        len(codes_by_type),
+                        list(codes_by_type.keys()),
+                    )
 
         intent = AMLIntent(**intent_dict)
 
