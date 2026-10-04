@@ -5,6 +5,15 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-09-15] docs: Enterprise Architecture Deep-Dive & Onboarding Specification
+
+### What
+- Authored [`Docs/SYSTEM_ARCHITECTURE_OVERVIEW.md`](file:///c:/Users/abura/Development/AI_AML_AGENT/Docs/SYSTEM_ARCHITECTURE_OVERVIEW.md) detailing the complete system stack, 5-phase lifecycle, directory structure, data contracts, and operational runbook for Service A (`AI_AML_AGENT`) and its frontend interface.
+- Structured for presentation generation and technical onboarding of new engineering hires.
+- Formatted with explicit component topologies, data contract listings (`AMLIntent`, `SSEEvent`, DDL mappings), database pools (`AIDB` vs `AMLDB`), and CLI/API operational commands.
+
+---
+
 ## [2026-09-08] feat: Multi-Transaction Type Schema Support, Multi-Type Vector Search & Deterministic Channel-to-Code Binding
 
 ### What
