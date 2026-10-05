@@ -135,7 +135,7 @@ class Settings(BaseSettings):
 
     # ─── PioTech AI (SQL Bridge) ───────────────────────────────────────────────
     PIOTECH_AI_URL: str = Field(
-        default="http://localhost:8001/chat/stream",
+        default="http://localhost:8006/chat/stream",
         description="PioTech AI DWH agent streaming endpoint (text-to-SQL).",
     )
     PIOTECH_AI_TIMEOUT_SECONDS: int = Field(

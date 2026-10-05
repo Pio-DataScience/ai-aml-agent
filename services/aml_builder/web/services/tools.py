@@ -17,6 +17,7 @@ Notes:
   independent of the sequential scenario-creation workflow above.
 """
 
+import re
 import json
 import logging
 import uuid

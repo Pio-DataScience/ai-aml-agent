@@ -5,6 +5,21 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-10-05] docs: Canonical code-verified project overview
+
+### What
+- Added root `PROJECT_OVERVIEW.md` as the canonical repository-level technical and onboarding reference, verified against current API, agent, persistence, Oracle, alert-engine, session, configuration, prompt, and test implementation paths.
+- Updated `README.md` to align local setup, endpoints, agent workflow, alert-engine behavior, configuration, security boundary, and verification guidance with the canonical overview.
+- Documented current trust boundaries, approval enforcement limits, data ownership, external dependencies, runtime commands, known risks, documentation drift, and unresolved live-infrastructure questions.
+- Added the overview maintenance contract to root `AGENTS.md` so material system changes keep the canonical description synchronized with implementation.
+
+### Verification
+- Traced the principal request, scenario-authoring, direct-deployment, dual-write, registry-query, session-history, and alert-execution workflows from entry point through persistence/integration boundaries.
+- Compared current paths and symbols with `ONBOARDING.md`, repository instructions, runtime prompts, configuration, tests, and specialized/historical documentation.
+- Confirmed Python compilation, imported the FastAPI/OpenAPI surface and six registered tool symbols with a command-local configuration override, and verified that pytest currently collects no test cases. Also documented the ambient `DEBUG` variable collision discovered during collection.
+
+---
+
 ## [2026-09-15] docs: Enterprise Architecture Deep-Dive & Onboarding Specification
 
 ### What
