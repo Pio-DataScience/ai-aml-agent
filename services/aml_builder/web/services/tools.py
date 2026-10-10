@@ -128,6 +128,53 @@ def _bind_channels_and_codes_to_intent(
                 t["transaction_type"] = matched_tx
                 t["explanation_codes"] = codes_by_type[matched_tx]
 
+    # 3. Bind codes into explicit semantic populations/predicates without
+    # broadening them into unrelated numerator or denominator populations.
+    semantic_contract = intent_dict.get("semantic_contract")
+    if isinstance(semantic_contract, dict):
+        normalized_codes = {
+            str(transaction_type).strip().lower(): list(codes)
+            for transaction_type, codes in codes_by_type.items()
+        }
+
+        def _codes_for_types(transaction_types: Any) -> List[str]:
+            bound: List[str] = []
+            if not isinstance(transaction_types, list):
+                return bound
+            for transaction_type in transaction_types:
+                for code in normalized_codes.get(
+                    str(transaction_type).strip().lower(), []
+                ):
+                    if code not in bound:
+                        bound.append(code)
+            return bound
+
+        populations = semantic_contract.get("populations") or []
+        for population in populations:
+            if not isinstance(population, dict) or population.get("explanation_codes"):
+                continue
+            bound_codes = _codes_for_types(population.get("transaction_types"))
+            if bound_codes:
+                population["explanation_codes"] = bound_codes
+
+        predicate_groups = [
+            semantic_contract.get("global_filters") or [],
+            semantic_contract.get("exclusions") or [],
+        ]
+        for population in populations:
+            if isinstance(population, dict):
+                predicate_groups.append(population.get("filters") or [])
+        for metric in semantic_contract.get("metrics") or []:
+            if isinstance(metric, dict):
+                predicate_groups.append(metric.get("filters") or [])
+        for predicates in predicate_groups:
+            for predicate in predicates:
+                if not isinstance(predicate, dict) or predicate.get("explanation_codes"):
+                    continue
+                bound_codes = _codes_for_types(predicate.get("transaction_types"))
+                if bound_codes:
+                    predicate["explanation_codes"] = bound_codes
+
 
 @tool
 def analyze_intent_and_discover_explanation_codes(

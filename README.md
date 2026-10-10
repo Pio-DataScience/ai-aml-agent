@@ -71,8 +71,8 @@ Once running:
 
 The six agent tools are registered in `services/aml_builder/web/services/graph.py`:
 
-1. `analyze_intent_and_discover_explanation_codes` extracts and normalizes `AMLIntent`, searches `PIO_EXPLANATION_CODE`, and seeds governance metadata.
-2. `generate_scenario_execution_plan` renders the deterministic 11-section Markdown plan.
+1. `analyze_intent_and_discover_explanation_codes` extracts and normalizes `AMLIntent`, including the optional versioned semantic contract for explicit grains, populations, metrics, time boundaries, evidence, and ambiguity markers; it searches `PIO_EXPLANATION_CODE` and seeds governance metadata.
+2. `generate_scenario_execution_plan` renders the deterministic 12-section Markdown plan, including explicit semantic-contract review.
 3. `execute_oracle_dwh_shadow_test` calls PioTech AI over HTTP SSE, extracts Oracle SQL, and runs a count wrapper through the shadow Oracle pool.
 4. `prepare_scenario_metadata_for_persistence` builds the governance field catalog and live lookup options.
 5. `persist_and_validate_scenario_in_dwh` validates metadata and atomically writes both registry tables.

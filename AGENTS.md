@@ -63,7 +63,7 @@ pip install -r requirements.txt
 # unrelated ambient DEBUG variables and applies only to this shell process.
 $env:DEBUG = "false"
 .\.venv\Scripts\python.exe -m compileall -q services app.py run_alert_engine.py
-.\.venv\Scripts\python.exe -m pytest -q services\aml_builder\tests\test_deployment_guard.py
+.\.venv\Scripts\python.exe -m pytest -q services\aml_builder\tests\test_deployment_guard.py services\aml_builder\tests\test_semantic_intent_contract.py
 .\.venv\Scripts\python.exe -m pytest --collect-only -q
 ```
 
@@ -99,7 +99,7 @@ The service is a single autonomous **LangGraph ReAct tool-driven agent** exposed
 
 - **`web/services/tools.py`** — the six `@tool` definitions above.
 - **`web/services/graph.py`** — compiles the ReAct agent (`get_tool_driven_graph`), manages the SQLite checkpointer lifecycle (`close_checkpointer`).
-- **`web/services/plan_renderer.py`** — the 11-section markdown plan builder.
+- **`web/services/plan_renderer.py`** — the 12-section markdown plan builder, including explicit semantic-contract review.
 - **`web/services/scenario_metadata.py`** — `PIO_AML_SCENARIO` field registry: seeding from `AMLIntent`, live lookup-table fetching, and the final validation guard-rail before persistence (see `Docs/PIO_AML_SCENARIO_schema_guide.md`).
 - **`web/services/scenario_registry_analytics.py`** — read-only search/analytics over persisted scenarios backing `query_production_scenario_registry` (semantic search, statistics, alert telemetry, scenario detail).
 - **`web/services/sql_extraction.py`** — pulls clean SQL out of the PioTech AI SSE response text.

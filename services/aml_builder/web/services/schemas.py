@@ -77,9 +77,9 @@ class Threshold(BaseModel):
     target_scope: Literal["DETAIL", "AGGREGATE"] = Field(
         ...,
         description=(
-            "MANDATORY: Scope of threshold. "
-            "Use 'DETAIL' ONLY for filtering individual raw transaction amounts BEFORE aggregation (WHERE clause). "
-            "Use 'AGGREGATE' for accumulated daily totals, sums, counts, or averages (HAVING clause)."
+            "Business evaluation scope, not a required SQL clause. DETAIL applies "
+            "to one record/entity observation; AGGREGATE applies to a grouped or "
+            "computed metric. Service B chooses the SQL implementation."
         ),
     )
     transaction_type: Optional[str] = Field(
@@ -276,6 +276,278 @@ class Clarification(BaseModel):
     options: Optional[List[str]] = Field(default=None)
 
 
+class GrainDefinition(BaseModel):
+    """Business grain at which a scenario is evaluated or returned."""
+
+    entity: str = Field(..., description="Business entity, such as CUSTOMER or ACCOUNT.")
+    keys: List[str] = Field(
+        default_factory=list,
+        description="Business keys required at this grain, such as CUS_NUM.",
+    )
+    period: Optional[str] = Field(
+        default=None,
+        description="Optional business period component, such as DAY or ROLLING_WINDOW.",
+    )
+    description: Optional[str] = None
+
+
+class BusinessPredicate(BaseModel):
+    """A business filter with explicit applicability and evaluation phase."""
+
+    predicate_id: str
+    subject: str
+    field: str
+    operator: Literal[
+        ">", "<", ">=", "<=", "=", "!=", "BETWEEN", "IN", "NOT_IN", "IS_NULL", "IS_NOT_NULL"
+    ]
+    value_from: Optional[Union[float, str, bool, List[str]]] = None
+    value_to: Optional[Union[float, str]] = None
+    evaluation_phase: Literal["RECORD", "GROUP", "METRIC", "OUTPUT"]
+    applies_to: Literal["GLOBAL", "POPULATION", "METRIC"] = "GLOBAL"
+    population_ids: List[str] = Field(default_factory=list)
+    metric_ids: List[str] = Field(default_factory=list)
+    transaction_types: List[str] = Field(default_factory=list)
+    explanation_codes: List[str] = Field(default_factory=list)
+    raw_phrase: Optional[str] = None
+    provenance: Literal["stated", "assumed_default", "needs_user"] = "stated"
+
+    @model_validator(mode="after")
+    def validate_target_references(self) -> "BusinessPredicate":
+        """Require references when a predicate is population- or metric-specific."""
+        if self.applies_to == "POPULATION" and not self.population_ids:
+            raise ValueError("POPULATION predicate requires population_ids")
+        if self.applies_to == "METRIC" and not self.metric_ids:
+            raise ValueError("METRIC predicate requires metric_ids")
+        if self.operator == "BETWEEN" and self.value_to is None:
+            raise ValueError("BETWEEN predicate requires value_to")
+        return self
+
+
+class PopulationDefinition(BaseModel):
+    """Explicit population used by a metric, ratio, or comparison."""
+
+    population_id: str
+    role: Literal["BASE", "NUMERATOR", "DENOMINATOR", "COMPARISON"]
+    entity: str
+    description: str
+    filters: List[BusinessPredicate] = Field(default_factory=list)
+    transaction_types: List[str] = Field(default_factory=list)
+    explanation_codes: List[str] = Field(default_factory=list)
+    time_window_id: Optional[str] = None
+
+
+class MetricComparison(BaseModel):
+    """Business comparison applied to a computed metric."""
+
+    operator: Literal[">", "<", ">=", "<=", "=", "!=", "BETWEEN"]
+    value_from: Union[float, str]
+    value_to: Optional[Union[float, str]] = None
+
+    @model_validator(mode="after")
+    def validate_between(self) -> "MetricComparison":
+        """Require an upper bound for BETWEEN comparisons."""
+        if self.operator == "BETWEEN" and self.value_to is None:
+            raise ValueError("BETWEEN comparison requires value_to")
+        return self
+
+
+class MetricDefinition(BaseModel):
+    """One explicitly defined business metric and its source populations."""
+
+    metric_id: str
+    name: str
+    metric_kind: Literal[
+        "AMOUNT", "COUNT", "DISTINCT_COUNT", "AVERAGE", "MINIMUM", "MAXIMUM", "RATIO", "PERCENTAGE", "OTHER"
+    ]
+    measure: Optional[str] = None
+    population_id: Optional[str] = None
+    numerator_population_id: Optional[str] = None
+    denominator_population_id: Optional[str] = None
+    grain: GrainDefinition
+    filters: List[BusinessPredicate] = Field(default_factory=list)
+    comparison: Optional[MetricComparison] = None
+    zero_denominator_policy: Optional[
+        Literal["EXCLUDE", "RETURN_ZERO", "RETURN_NULL", "ERROR", "NEEDS_USER"]
+    ] = None
+    null_measure_policy: Optional[
+        Literal["EXCLUDE", "TREAT_AS_ZERO", "PROPAGATE_NULL", "NEEDS_USER"]
+    ] = None
+
+    @model_validator(mode="after")
+    def validate_population_shape(self) -> "MetricDefinition":
+        """Require explicit numerator/denominator semantics for ratio metrics."""
+        if self.metric_kind in ("RATIO", "PERCENTAGE"):
+            if not self.numerator_population_id or not self.denominator_population_id:
+                raise ValueError(
+                    "RATIO/PERCENTAGE metric requires numerator_population_id and "
+                    "denominator_population_id"
+                )
+            if self.zero_denominator_policy is None:
+                raise ValueError(
+                    "RATIO/PERCENTAGE metric requires zero_denominator_policy"
+                )
+        elif not self.population_id:
+            raise ValueError("Non-ratio metric requires population_id")
+        return self
+
+
+class TimeWindowSemantics(BaseModel):
+    """Business time-window semantics independent of an Oracle implementation."""
+
+    window_id: str
+    purpose: Literal["OBSERVATION", "BASELINE", "COMPARISON", "EVIDENCE"]
+    window_type: Literal["ROLLING", "CALENDAR", "FIXED", "RELATIVE"]
+    unit: Optional[Literal["MINUTES", "HOURS", "DAYS", "WEEKS", "MONTHS", "YEARS"]] = None
+    value: Optional[int] = Field(default=None, gt=0)
+    offset_value: int = Field(default=0, ge=0)
+    offset_unit: Optional[
+        Literal["MINUTES", "HOURS", "DAYS", "WEEKS", "MONTHS", "YEARS"]
+    ] = None
+    fixed_start: Optional[str] = None
+    fixed_end: Optional[str] = None
+    anchor: Literal["EVALUATION_TIME", "EVALUATION_DATE", "EXPLICIT", "EVENT_TIME"]
+    anchor_value: Optional[str] = None
+    lower_inclusive: bool
+    upper_inclusive: bool
+    boundary_precision: Literal["CALENDAR_DAY", "BUSINESS_DAY", "INSTANT"]
+    timezone: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_window_shape(self) -> "TimeWindowSemantics":
+        """Require values appropriate to relative and fixed window types."""
+        if self.window_type in ("ROLLING", "RELATIVE", "CALENDAR"):
+            if self.value is None or self.unit is None:
+                raise ValueError(f"{self.window_type} window requires value and unit")
+        if self.window_type == "FIXED" and (not self.fixed_start or not self.fixed_end):
+            raise ValueError("FIXED window requires fixed_start and fixed_end")
+        if self.anchor == "EXPLICIT" and not self.anchor_value:
+            raise ValueError("EXPLICIT anchor requires anchor_value")
+        return self
+
+
+class EntityRelationship(BaseModel):
+    """Business relationship required to evaluate the scenario."""
+
+    relationship_id: str
+    from_entity: str
+    to_entity: str
+    relationship: str
+    cardinality: Literal["ONE_TO_ONE", "ONE_TO_MANY", "MANY_TO_ONE", "MANY_TO_MANY", "UNKNOWN"]
+    required: bool = True
+    purpose: str
+
+
+class EvidenceRequirement(BaseModel):
+    """Required output and transaction evidence for downstream alert creation."""
+
+    required: bool
+    output_grain: GrainDefinition
+    required_fields: List[str] = Field(default_factory=list)
+    include_matching_transactions: bool = False
+    transaction_fields: List[str] = Field(default_factory=list)
+
+
+class AmbiguityMarker(BaseModel):
+    """A semantic gap that must remain visible instead of being guessed."""
+
+    code: str
+    field_path: str
+    why_it_matters: str
+    question: str
+    options: Optional[List[str]] = None
+    blocking: bool = True
+
+
+class UnsupportedRequirement(BaseModel):
+    """A requested business requirement not safely supported by the current contract."""
+
+    requirement: str
+    reason: str
+    blocking: bool = True
+
+
+class SemanticContract(BaseModel):
+    """Versioned business-semantic contract consumed by the SQL generator."""
+
+    contract_version: Literal["1.0"] = "1.0"
+    evaluation_grain: GrainDefinition
+    output_grain: GrainDefinition
+    populations: List[PopulationDefinition] = Field(default_factory=list)
+    metrics: List[MetricDefinition] = Field(default_factory=list)
+    global_filters: List[BusinessPredicate] = Field(default_factory=list)
+    exclusions: List[BusinessPredicate] = Field(default_factory=list)
+    time_windows: List[TimeWindowSemantics] = Field(default_factory=list)
+    relationships: List[EntityRelationship] = Field(default_factory=list)
+    evidence: EvidenceRequirement
+    ambiguities: List[AmbiguityMarker] = Field(default_factory=list)
+    unsupported_requirements: List[UnsupportedRequirement] = Field(
+        default_factory=list
+    )
+
+    @model_validator(mode="after")
+    def validate_references(self) -> "SemanticContract":
+        """Reject dangling population, metric, and time-window references."""
+        population_ids = [population.population_id for population in self.populations]
+        metric_ids = [metric.metric_id for metric in self.metrics]
+        window_ids = [window.window_id for window in self.time_windows]
+        if len(population_ids) != len(set(population_ids)):
+            raise ValueError("population_id values must be unique")
+        if len(metric_ids) != len(set(metric_ids)):
+            raise ValueError("metric_id values must be unique")
+        if len(window_ids) != len(set(window_ids)):
+            raise ValueError("window_id values must be unique")
+
+        known_populations = set(population_ids)
+        known_metrics = set(metric_ids)
+        known_windows = set(window_ids)
+        for population in self.populations:
+            if population.time_window_id and population.time_window_id not in known_windows:
+                raise ValueError(
+                    f"Population '{population.population_id}' references unknown time window"
+                )
+        for metric in self.metrics:
+            references = {
+                metric.population_id,
+                metric.numerator_population_id,
+                metric.denominator_population_id,
+            } - {None}
+            missing = references - known_populations
+            if missing:
+                raise ValueError(
+                    f"Metric '{metric.metric_id}' references unknown populations: {sorted(missing)}"
+                )
+        predicates = [*self.global_filters, *self.exclusions]
+        for population in self.populations:
+            predicates.extend(population.filters)
+        for metric in self.metrics:
+            predicates.extend(metric.filters)
+        for predicate in predicates:
+            if set(predicate.population_ids) - known_populations:
+                raise ValueError(
+                    f"Predicate '{predicate.predicate_id}' references unknown populations"
+                )
+            if set(predicate.metric_ids) - known_metrics:
+                raise ValueError(
+                    f"Predicate '{predicate.predicate_id}' references unknown metrics"
+                )
+        unresolved_values = any(
+            metric.zero_denominator_policy == "NEEDS_USER"
+            or metric.null_measure_policy == "NEEDS_USER"
+            for metric in self.metrics
+        ) or any(predicate.provenance == "needs_user" for predicate in predicates)
+        unresolved_relationships = any(
+            relationship.required and relationship.cardinality == "UNKNOWN"
+            for relationship in self.relationships
+        )
+        if (unresolved_values or unresolved_relationships) and not any(
+            ambiguity.blocking for ambiguity in self.ambiguities
+        ):
+            raise ValueError(
+                "NEEDS_USER or required UNKNOWN semantics require a blocking ambiguity"
+            )
+        return self
+
+
 class AMLIntent(BaseModel):
     """Fully structured, unambiguous AML detection intent.
 
@@ -289,6 +561,7 @@ class AMLIntent(BaseModel):
         thresholds (list[Threshold]): All numeric conditions extracted from intent.
         time_window (Optional[TimeWindow]): Rolling or fixed observation period.
         baseline_window (Optional[BaselineWindow]): Dedicated non-overlapping baseline window.
+        semantic_contract (Optional[SemanticContract]): Versioned explicit business semantics.
         customer_segments (Optional[list[str]]): Target legal classifications (INDIVIDUAL, CORPORATE) or segments.
         exclusions (Optional[list[str]]): Explicit exclusion rules.
         clarification_needed (bool): True if the agent must ask the user something.
@@ -369,6 +642,13 @@ class AMLIntent(BaseModel):
         default_factory=list,
         description="All strictly separated, atomic semantic logic constraints.",
     )
+    semantic_contract: Optional[SemanticContract] = Field(
+        default=None,
+        description=(
+            "Versioned explicit populations, metrics, grains, time boundaries, "
+            "relationships, evidence, and ambiguity markers. Optional for legacy intents."
+        ),
+    )
     clarifications: List[Clarification] = Field(
         default_factory=list,
         description="Material ambiguities to resolve before handoff to the SQL agent.",
@@ -425,13 +705,17 @@ class AMLIntent(BaseModel):
 
     @model_validator(mode="after")
     def validate_and_deduplicate_thresholds(self) -> "AMLIntent":
-        """Guarantees zero conflict between DETAIL and AGGREGATE scopes for cumulative scenarios.
+        """Apply the legacy duplicate-threshold heuristic only to legacy intents.
 
         If a scenario is at CUSTOMER or ACCOUNT grain with SUM/COUNT aggregation, any redundant
-        DETAIL threshold matching an AGGREGATE threshold value is purged so the WHERE clause
-        never filters out raw transactions before summing.
+        DETAIL threshold matching an AGGREGATE threshold value is removed. Explicit semantic
+        contracts preserve all predicates because equal values can target distinct populations.
         """
-        if self.scenario_type in ["CUSTOMER", "ACCOUNT"] and self.aggregation:
+        if (
+            self.semantic_contract is None
+            and self.scenario_type in ["CUSTOMER", "ACCOUNT"]
+            and self.aggregation
+        ):
             if self.aggregation.function in ["SUM", "COUNT"]:
                 aggregate_thresholds = [
                     t for t in self.thresholds if t.target_scope == "AGGREGATE"
@@ -453,6 +737,19 @@ class AMLIntent(BaseModel):
                             t.target_scope == "DETAIL" and t.value_from in agg_values
                         )
                     ]
+        blocking_semantics = bool(
+            self.semantic_contract
+            and (
+                any(item.blocking for item in self.semantic_contract.ambiguities)
+                or any(
+                    item.blocking
+                    for item in self.semantic_contract.unsupported_requirements
+                )
+            )
+        )
+        if self.clarifications or blocking_semantics:
+            self.clarification_needed = True
+            self.ready_for_handoff = False
         return self
 
 

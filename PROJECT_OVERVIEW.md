@@ -35,7 +35,7 @@ The service is synchronous at several integration boundaries despite async HTTP 
 | `services/aml_builder/web/services/graph.py` | ReAct graph/checkpointer singleton lifecycle and six-tool registration. |
 | `services/aml_builder/web/services/tools.py` | Agent-facing intent, plan, shadow-test, metadata, persistence, and registry-query tools. |
 | `services/aml_builder/web/services/schemas.py` | `AMLIntent` domain contract plus chat and SSE Pydantic models. |
-| `services/aml_builder/web/services/plan_renderer.py` | Deterministic 11-section Markdown plan renderer. |
+| `services/aml_builder/web/services/plan_renderer.py` | Deterministic 12-section Markdown plan renderer, including semantic-contract review. |
 | `services/aml_builder/web/services/explanation_code_search.py` | Oracle-backed explanation-code embedding cache, similarity search, and LLM reranking. |
 | `services/aml_builder/web/services/scenario_metadata.py` | Governance field registry, defaults, live lookup options, normalization, and validation. |
 | `services/aml_builder/web/services/deployment_guard.py` | Reconstructs checkpoint evidence, binds approval to an immutable intent/SQL/metadata artifact, and prevents concurrent/replayed deployment. |
@@ -98,15 +98,17 @@ The chat stream emits `thinking`, `tool_call`, `content`, selected artifact/resu
 
 ### `AMLIntent`
 
-`services/aml_builder/web/services/schemas.py:AMLIntent` is the main handoff contract between intent extraction, plan rendering, and external SQL generation. Important nested models are `Threshold`, `TimeWindow`, `BaselineWindow`, `AggregationProfile`, `SemanticCondition`, and `Clarification`.
+`services/aml_builder/web/services/schemas.py:AMLIntent` is the main handoff contract between intent extraction, plan rendering, and external SQL generation. Legacy fields remain supported. New intents can also carry the optional versioned `semantic_contract`, whose typed models represent evaluation/output grain, distinct populations and metrics, filter applicability and evaluation phase, precise time boundaries, entity relationships, output evidence, ambiguity markers, and unsupported requirements.
 
 Rules implemented in code or runtime prompts include:
 
-- Every threshold has `target_scope` of `DETAIL` or `AGGREGATE`, representing pre-aggregation versus aggregate conditions.
-- For `CUSTOMER`/`ACCOUNT` scenarios with `SUM` or `COUNT`, `AMLIntent.validate_and_deduplicate_thresholds` removes a detail threshold whose value duplicates an aggregate threshold value. Function matching is case-sensitive.
+- Every threshold has `target_scope` of `DETAIL` or `AGGREGATE`. These are business scopes (record/entity observation versus grouped/computed metric), not mandatory mappings to SQL `WHERE` or `HAVING`; Service B owns implementation placement.
+- For legacy `CUSTOMER`/`ACCOUNT` intents with `SUM` or `COUNT`, `AMLIntent.validate_and_deduplicate_thresholds` retains the historical heuristic that removes a detail threshold whose value duplicates an aggregate threshold value. Explicit semantic-contract intents bypass that lossy heuristic because equal values may target different populations/phases.
 - Percentage strings normalize to ratios and multiplier strings such as `<N>x` normalize to numbers; other strings may remain relational field names.
-- Multiple transaction types and explanation codes can be represented globally and per threshold/semantic condition. `tools.py:_bind_channels_and_codes_to_intent` uses text matching and, when counts align, positional fallback to associate them.
-- The intent prompt requires historical comparisons to use a non-overlapping `baseline_window`, although correctness still depends on LLM output and Service B honoring the contract.
+- Multiple transaction types and explanation codes can be represented globally, per threshold/semantic condition, and per semantic population/predicate. `tools.py:_bind_channels_and_codes_to_intent` propagates discovered codes only into explicitly matching transaction-type scopes.
+- The semantic contract separates numerator and denominator populations, global versus population/metric filters, and required evidence. Ratio/percentage metrics require explicit population references and a zero-denominator policy.
+- Time semantics represent window purpose/type, anchor, offset, inclusivity, business precision, and timezone where applicable without prescribing Oracle expressions.
+- Blocking semantic ambiguities or unsupported requirements force `ready_for_handoff=false`; the existing extraction LLM produces these markers and no additional extraction agent/call is used.
 - Plans are rendered deterministically by `plan_renderer.py:build_plan_markdown`; intent extraction also includes a plan artifact in its own result, while `generate_scenario_execution_plan` can re-render it.
 
 ### Explanation-code discovery
@@ -296,11 +298,11 @@ Consequences for deployments:
 
 ## 11. Testing and verification model
 
-`services/aml_builder/tests/test_deployment_guard.py` is an offline deterministic suite covering approval bypass, failed and stale artifacts, metadata drift/validation failure, missing writer evidence, retry, and concurrent deployment claims. Run it with:
+`services/aml_builder/tests/test_deployment_guard.py` is an offline deterministic suite covering approval bypass, failed and stale artifacts, metadata drift/validation failure, missing writer evidence, retry, and concurrent deployment claims. `test_semantic_intent_contract.py` covers complex populations, denominator policy, time/evidence preservation, blocking ambiguity, legacy compatibility, reference integrity, and plan rendering. Run them with:
 
 ```powershell
 $env:DEBUG = "false"
-.\.venv\Scripts\python.exe -m pytest -q services\aml_builder\tests\test_deployment_guard.py
+.\.venv\Scripts\python.exe -m pytest -q services\aml_builder\tests\test_deployment_guard.py services\aml_builder\tests\test_semantic_intent_contract.py
 ```
 
 `services/aml_builder/tests/test_registry_analytics.py` remains a manually run integration check requiring live Oracle, persisted tables/data, and OpenAI for semantic search. Run it from the repository root only with approved live configuration:
@@ -340,6 +342,7 @@ No production deployment topology is encoded in this repository. The docs' refer
 
 - Read applicable `AGENTS.md` and this overview before project-wide work; verify task-specific behavior in code.
 - Keep one canonical `AMLIntent` shape across schemas, the extraction prompt, plan rendering, tool payloads, and Service B expectations.
+- Evolve `semantic_contract.contract_version` additively and coordinate any transport-level version enforcement with Package 09; legacy intents without the nested contract remain accepted.
 - Preserve the distinction between detail (`WHERE`) and aggregate (`HAVING`) thresholds.
 - Do not bypass explicit human review stages casually. If approval must become enforceable, add server-side state rather than relying more heavily on prompt wording.
 - Scenario persistence must keep the production and governance writes in one `atomic_connection` transaction.

@@ -170,7 +170,7 @@ def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]
         aggregate_thresholds = [t for t in thresholds if t.get("target_scope") == "AGGREGATE"]
 
         if detail_thresholds:
-            lines.append("### 5.1 Detail-Level Filters *(SQL: `WHERE` clause)*")
+            lines.append("### 5.1 Detail-Level Business Conditions")
             lines.append("")
             has_channels = any(t.get("transaction_type") or t.get("explanation_codes") for t in detail_thresholds)
             if has_channels:
@@ -198,7 +198,7 @@ def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]
             lines.append("")
 
         if aggregate_thresholds:
-            lines.append("### 5.2 Aggregate-Level Conditions *(SQL: `HAVING` clause)*")
+            lines.append("### 5.2 Aggregate-Metric Business Conditions")
             lines.append("")
             has_channels = any(t.get("transaction_type") or t.get("explanation_codes") for t in aggregate_thresholds)
             if has_channels:
@@ -327,11 +327,140 @@ def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]
             lines.append("")
 
     # ─────────────────────────────────────────
-    # SECTION 11 — SHADOW TESTING SCOPE
+    # SECTION 11 — EXPLICIT SEMANTIC CONTRACT
+    # ─────────────────────────────────────────
+    semantic_contract = intent.get("semantic_contract")
+    if semantic_contract:
+        lines.append("---")
+        lines.append("")
+        lines.append("## 11. Explicit Semantic Contract")
+        lines.append("")
+        lines.append(
+            f"- **Contract Version:** `{semantic_contract.get('contract_version', '—')}`"
+        )
+        evaluation_grain = semantic_contract.get("evaluation_grain") or {}
+        output_grain = semantic_contract.get("output_grain") or {}
+        lines.append(
+            "- **Evaluation Grain:** "
+            f"`{evaluation_grain.get('entity', '—')}` "
+            f"({', '.join(evaluation_grain.get('keys') or []) or 'no keys stated'})"
+        )
+        lines.append(
+            "- **Output Grain:** "
+            f"`{output_grain.get('entity', '—')}` "
+            f"({', '.join(output_grain.get('keys') or []) or 'no keys stated'})"
+        )
+        lines.append("")
+
+        populations = semantic_contract.get("populations") or []
+        if populations:
+            lines.append("### Populations")
+            lines.append("")
+            lines.append("| ID | Role | Entity | Time Window | Description |")
+            lines.append("|---|---|---|---|---|")
+            for population in populations:
+                lines.append(
+                    f"| `{population.get('population_id', '—')}` | "
+                    f"`{population.get('role', '—')}` | "
+                    f"`{population.get('entity', '—')}` | "
+                    f"`{population.get('time_window_id') or '—'}` | "
+                    f"{population.get('description', '—')} |"
+                )
+            lines.append("")
+
+        metrics = semantic_contract.get("metrics") or []
+        if metrics:
+            lines.append("### Metrics")
+            lines.append("")
+            lines.append("| ID | Kind | Source Population(s) | Comparison | Zero Denominator |")
+            lines.append("|---|---|---|---|---|")
+            for metric in metrics:
+                sources = metric.get("population_id") or " / ".join(
+                    value
+                    for value in (
+                        metric.get("numerator_population_id"),
+                        metric.get("denominator_population_id"),
+                    )
+                    if value
+                )
+                comparison = metric.get("comparison") or {}
+                comparison_text = "—"
+                if comparison:
+                    comparison_text = (
+                        f"{comparison.get('operator')} {comparison.get('value_from')}"
+                    )
+                    if comparison.get("value_to") is not None:
+                        comparison_text += f" to {comparison.get('value_to')}"
+                lines.append(
+                    f"| `{metric.get('metric_id', '—')}` | "
+                    f"`{metric.get('metric_kind', '—')}` | `{sources or '—'}` | "
+                    f"`{comparison_text}` | "
+                    f"`{metric.get('zero_denominator_policy') or '—'}` |"
+                )
+            lines.append("")
+
+        time_windows = semantic_contract.get("time_windows") or []
+        if time_windows:
+            lines.append("### Time Boundaries")
+            lines.append("")
+            lines.append("| ID | Purpose | Window | Bounds | Precision / Timezone |")
+            lines.append("|---|---|---|---|---|")
+            for window in time_windows:
+                window_size = (
+                    f"{window.get('value')} {window.get('unit')}"
+                    if window.get("value") is not None
+                    else f"{window.get('fixed_start')} to {window.get('fixed_end')}"
+                )
+                bounds = (
+                    ("[" if window.get("lower_inclusive") else "(")
+                    + ("upper]" if window.get("upper_inclusive") else "upper)")
+                )
+                precision = window.get("boundary_precision", "—")
+                timezone = window.get("timezone") or "not applicable/stated"
+                lines.append(
+                    f"| `{window.get('window_id', '—')}` | "
+                    f"`{window.get('purpose', '—')}` | "
+                    f"`{window.get('window_type', '—')} {window_size}` | "
+                    f"`{bounds}` | `{precision} / {timezone}` |"
+                )
+            lines.append("")
+
+        evidence = semantic_contract.get("evidence") or {}
+        lines.append("### Required Alert Evidence")
+        lines.append("")
+        lines.append(f"- **Required:** `{evidence.get('required', False)}`")
+        lines.append(
+            "- **Output Fields:** "
+            + (", ".join(f"`{field}`" for field in evidence.get("required_fields") or []) or "—")
+        )
+        lines.append(
+            f"- **Matching Transactions:** `{evidence.get('include_matching_transactions', False)}`"
+        )
+        lines.append("")
+
+        semantic_ambiguities = semantic_contract.get("ambiguities") or []
+        unsupported = semantic_contract.get("unsupported_requirements") or []
+        if semantic_ambiguities or unsupported:
+            lines.append("### Semantic Blocks")
+            lines.append("")
+            for ambiguity in semantic_ambiguities:
+                lines.append(
+                    f"- ❓ **{ambiguity.get('code', 'AMBIGUITY')}** — "
+                    f"{ambiguity.get('question', '')}"
+                )
+            for requirement in unsupported:
+                lines.append(
+                    f"- ⛔ **Unsupported:** {requirement.get('requirement', '')} — "
+                    f"{requirement.get('reason', '')}"
+                )
+            lines.append("")
+
+    # ─────────────────────────────────────────
+    # SECTION 12 — SHADOW TESTING SCOPE
     # ─────────────────────────────────────────
     lines.append("---")
     lines.append("")
-    lines.append("## 11. Shadow Testing Scope")
+    lines.append("## 12. Shadow Testing Scope")
     lines.append("")
     if anchor:
         lines.append(f"- **Mode:** 🕐 Historical Shadow Test")

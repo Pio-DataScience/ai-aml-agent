@@ -5,6 +5,18 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-10-10] feat: Add versioned semantic intent contract
+
+### What
+- Added an optional `semantic_contract` v1 to `AMLIntent` for explicit grains, populations, metrics, filter applicability, precise time boundaries, relationships, required evidence, ambiguities, and unsupported requirements.
+- Required ratio/percentage numerator and denominator references plus explicit zero-denominator policy, with reference-integrity validation.
+- Updated the existing extraction prompt and explanation-code enrichment without adding an LLM call.
+- Updated deterministic plan rendering to expose semantic details without prescribing SQL `WHERE`/`HAVING` placement.
+- Added offline semantic-preservation and backward-compatibility tests.
+
+### Verification
+- `python -m pytest -q services/aml_builder/tests/test_semantic_intent_contract.py services/aml_builder/tests/test_deployment_guard.py`
+
 ## [2026-10-10] security: Enforce deployment approval and artifact integrity
 
 ### What

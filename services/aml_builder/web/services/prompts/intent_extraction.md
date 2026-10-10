@@ -9,6 +9,7 @@ Output ONLY a valid JSON object matching AMLIntent schema with mandatory root ke
 - detection_logic (str): plain English summary of business logic
 - thresholds (list of dicts with: field, operator, value_from, target_scope, transaction_type)
 - time_window (dict with: unit, value, is_rolling)
+- baseline_window (dict or null): legacy summary of a historical baseline
 - aggregation (dict with: metric, function, grain)
 - customer_segments (list of str or null): target entity classifications (e.g. ['INDIVIDUAL'], ['CORPORATE']) or business segments, or null
 - exclusions (list of str or null): e.g. ['<EXCLUSION_RULE>'], or null
@@ -16,6 +17,24 @@ Output ONLY a valid JSON object matching AMLIntent schema with mandatory root ke
 - anchor_date (str or null): YYYY-MM-DD date or null
 - explanation_codes (list of str or null)
 - explanation_codes_by_type (dict of str -> list of str, or null)
+- semantic_contract (object): versioned explicit business semantics described below
+- clarifications (list): material business questions that block safe SQL generation
+- clarification_needed (bool): true when clarifications or blocking semantic markers exist
+- clarification_questions (list of str): compatibility mirror for the current UI
+- applied_defaults (list): only semantically safe defaults, stated plainly
+- ready_for_handoff (bool): false when any blocking ambiguity or unsupported requirement remains
+
+`semantic_contract` MUST use this exact shape:
+- contract_version: "1.0"
+- evaluation_grain / output_grain: {entity, keys[], period|null, description|null}
+- populations[]: {population_id, role(BASE|NUMERATOR|DENOMINATOR|COMPARISON), entity, description, filters[], transaction_types[], explanation_codes[], time_window_id|null}
+- metrics[]: {metric_id, name, metric_kind(AMOUNT|COUNT|DISTINCT_COUNT|AVERAGE|MINIMUM|MAXIMUM|RATIO|PERCENTAGE|OTHER), measure|null, population_id|null, numerator_population_id|null, denominator_population_id|null, grain, filters[], comparison|null, zero_denominator_policy(EXCLUDE|RETURN_ZERO|RETURN_NULL|ERROR|NEEDS_USER)|null, null_measure_policy(EXCLUDE|TREAT_AS_ZERO|PROPAGATE_NULL|NEEDS_USER)|null}
+- each filter: {predicate_id, subject, field, operator, value_from, value_to|null, evaluation_phase(RECORD|GROUP|METRIC|OUTPUT), applies_to(GLOBAL|POPULATION|METRIC), population_ids[], metric_ids[], transaction_types[], explanation_codes[], raw_phrase|null, provenance}
+- time_windows[]: {window_id, purpose, window_type, unit|null, value|null, offset_value, offset_unit|null, fixed_start|null, fixed_end|null, anchor, anchor_value|null, lower_inclusive, upper_inclusive, boundary_precision, timezone|null}
+- relationships[]: {relationship_id, from_entity, to_entity, relationship, cardinality, required, purpose}
+- evidence: {required, output_grain, required_fields[], include_matching_transactions, transaction_fields[]}
+- ambiguities[]: {code, field_path, why_it_matters, question, options|null, blocking}
+- unsupported_requirements[]: {requirement, reason, blocking}
 
 [CORE EXTRACTION LAWS]
 
@@ -46,8 +65,9 @@ Output ONLY a valid JSON object matching AMLIntent schema with mandatory root ke
 
 5. MANDATORY SCOPE CLASSIFICATION (target_scope):
    Every threshold in the 'thresholds' array MUST explicitly set 'target_scope' to either 'DETAIL' or 'AGGREGATE':
-   - 'DETAIL': Applies to individual transaction or entity-level attributes evaluated before aggregation (placed in SQL WHERE clause). Example: '<FIELD_NAME> <OPERATOR> <VALUE>'.
-   - 'AGGREGATE': Applies to summed, averaged, or counted metrics across a group/window (placed in SQL HAVING clause). Example: '<AGGREGATE_METRIC> <OPERATOR> <VALUE>'.
+   - 'DETAIL': Applies to one transaction/entity observation.
+   - 'AGGREGATE': Applies to a grouped or computed metric.
+   - These are BUSINESS scopes, not SQL clause instructions. Do not claim DETAIL must be WHERE or AGGREGATE must be HAVING; Service B owns SQL implementation choices.
 
 6. 'BETWEEN' OPERATOR LOWER & UPPER BOUNDS:
    - When operator is 'BETWEEN', you MUST populate BOTH 'value_from' (lower bound float) AND 'value_to' (upper bound float).
@@ -79,5 +99,39 @@ Output ONLY a valid JSON object matching AMLIntent schema with mandatory root ke
       * Populate 'transaction_type': '<TX_TYPE_1>, <TX_TYPE_2>'.
       * On each entry in 'thresholds' and 'semantic_conditions', explicitly bind 'transaction_type': '<MATCHING_TX_TYPE>' so each threshold is unambiguously linked to its corresponding transaction channel.
       * NEVER leave 'transaction_type' or 'transaction_types' null if transaction activities or channels are mentioned in the prompt.
+
+14. VERSIONED SEMANTIC CONTRACT:
+    - Emit `semantic_contract.contract_version` = `"1.0"`.
+    - State `evaluation_grain` and `output_grain` separately using `entity`, business `keys`, optional `period`, and description.
+    - `output_grain.keys` MUST include every business identifier the user requires downstream. For AML customer alerts this normally includes `CUS_NUM`; do not invent transaction evidence fields the user did not require.
+
+15. POPULATIONS AND METRICS:
+    - Define each BASE, NUMERATOR, DENOMINATOR, or COMPARISON population separately with a stable `population_id`, entity, description, filters, transaction types/codes, and `time_window_id`.
+    - Define each metric with a stable `metric_id`, `metric_kind`, measure, grain, source population references, comparison, and policies.
+    - Ratio/percentage metrics MUST reference distinct explicit numerator and denominator populations and MUST set `zero_denominator_policy` to one of EXCLUDE, RETURN_ZERO, RETURN_NULL, ERROR, or NEEDS_USER.
+    - Never copy a numerator-only filter into the denominator or apply a metric-specific filter globally.
+
+16. FILTER APPLICABILITY AND EVALUATION PHASE:
+    - Put shared constraints in `global_filters`; put population-specific constraints inside that population; put metric-specific constraints inside that metric.
+    - Every business predicate MUST declare `evaluation_phase`: RECORD, GROUP, METRIC, or OUTPUT and `applies_to`: GLOBAL, POPULATION, or METRIC.
+    - This phase describes business evaluation order only. Do not prescribe WHERE, JOIN, HAVING, CTE, or subquery placement.
+
+17. PRECISE TIME SEMANTICS:
+    - Every current, baseline, comparison, or evidence period MUST be a separate `time_windows` entry and referenced by population ID.
+    - Explicitly capture window_type, value/unit or fixed_start/fixed_end, offset, anchor, lower/upper inclusivity, boundary_precision (CALENDAR_DAY, BUSINESS_DAY, or INSTANT), and timezone when business meaning depends on it.
+    - Do not emit SQL date formulas in `semantic_contract`; Service B chooses Oracle expressions.
+    - If inclusivity, anchor, calendar-vs-instant precision, baseline offset/overlap, or a material timezone cannot be inferred from the user's words, add a blocking ambiguity instead of guessing.
+
+18. RELATIONSHIPS, EXCLUSIONS, NULLS, AND EVIDENCE:
+    - Capture required entity relationships with business cardinality, purpose, and whether required. Do not invent join columns.
+    - Capture exclusions as typed predicates, including which population/metric they affect.
+    - For every metric where NULL treatment changes the result, set `null_measure_policy`; use NEEDS_USER plus a blocking ambiguity when unstated and material.
+    - Set `evidence.required`, output grain, required output fields, whether matching transactions are needed, and required transaction fields. These are output requirements, not table/column implementation instructions.
+
+19. AMBIGUITY AND UNSUPPORTED REQUIREMENTS:
+    - Use `semantic_contract.ambiguities` for every unresolved choice that could materially change the alert population. Each marker needs code, field_path, why_it_matters, a business question, options when useful, and `blocking`.
+    - Use `semantic_contract.unsupported_requirements` when the request cannot be represented or safely implemented with known semantics. Never silently drop it.
+    - Mirror blocking semantic ambiguities in the legacy `clarifications` list for the current UI and set `clarification_needed=true` and `ready_for_handoff=false`.
+    - Defaults are allowed only when business-equivalent and safe. Record every default in `applied_defaults`; never default numerator/denominator membership, boundary inclusivity, zero-denominator handling, relationship cardinality, or required evidence when those choices affect alerts.
 
 Do not wrap in markdown fences.
