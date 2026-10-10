@@ -19,6 +19,291 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 # =============================================================================
 
 
+_PROVENANCE_ALIASES = {
+    "USER_INPUT": "stated",
+    "USER_PROVIDED": "stated",
+    "EXPLICIT": "stated",
+    "PROVIDED": "stated",
+    "DEFAULT": "assumed_default",
+    "ASSUMED": "assumed_default",
+    "INFERRED": "assumed_default",
+    "NEEDS_CLARIFICATION": "needs_user",
+    "NEEDS_USER_INPUT": "needs_user",
+    "UNKNOWN": "needs_user",
+}
+
+_TIME_PURPOSE_ALIASES = {
+    "OBSERVATION": "OBSERVATION",
+    "BASELINE": "BASELINE",
+    "COMPARISON": "COMPARISON",
+    "EVIDENCE": "EVIDENCE",
+    "CURRENT": "OBSERVATION",
+    "CURRENT_WINDOW": "OBSERVATION",
+    "OBSERVE": "OBSERVATION",
+    "HISTORICAL": "BASELINE",
+    "PRIOR": "BASELINE",
+}
+
+_TIME_WINDOW_TYPE_ALIASES = {
+    "ROLLING": "ROLLING",
+    "CALENDAR": "CALENDAR",
+    "FIXED": "FIXED",
+    "RELATIVE": "RELATIVE",
+    "CURRENT": "ROLLING",
+    "CURRENT_WINDOW": "ROLLING",
+    "ROLLING_WINDOW": "ROLLING",
+    "RELATIVE_TO_EVENT": "RELATIVE",
+}
+
+_TIME_ANCHOR_ALIASES = {
+    "EVALUATION_TIME": "EVALUATION_TIME",
+    "EVALUATION_DATE": "EVALUATION_DATE",
+    "EXPLICIT": "EXPLICIT",
+    "EVENT_TIME": "EVENT_TIME",
+    "CURRENT_DATE": "EVALUATION_DATE",
+    "TODAY": "EVALUATION_DATE",
+    "AS_OF_DATE": "EVALUATION_DATE",
+    "NOW": "EVALUATION_TIME",
+    "CURRENT_TIME": "EVALUATION_TIME",
+    "TRANSACTION_TIME": "EVENT_TIME",
+    "RECEIPT_TIME": "EVENT_TIME",
+}
+
+_TIME_PRECISION_ALIASES = {
+    "CALENDAR_DAY": "CALENDAR_DAY",
+    "BUSINESS_DAY": "BUSINESS_DAY",
+    "INSTANT": "INSTANT",
+    "DATE": "CALENDAR_DAY",
+    "DAY": "CALENDAR_DAY",
+    "TIMESTAMP": "INSTANT",
+    "DATETIME": "INSTANT",
+}
+
+_SINGULAR_TIME_UNITS = {
+    "MINUTES": "MINUTES",
+    "HOURS": "HOURS",
+    "DAYS": "DAYS",
+    "WEEKS": "WEEKS",
+    "MONTHS": "MONTHS",
+    "YEARS": "YEARS",
+    "MINUTE": "MINUTES",
+    "HOUR": "HOURS",
+    "DAY": "DAYS",
+    "WEEK": "WEEKS",
+    "MONTH": "MONTHS",
+    "YEAR": "YEARS",
+}
+
+_GRAIN_DEFAULT_KEYS = {
+    "CUSTOMER": ["CUS_NUM"],
+    "ACCOUNT": ["ACCOUNT_NUMBER"],
+    "TRANSACTION": ["TRA_SEQ1"],
+}
+
+
+def _canonical_enum_alias(value: Any, aliases: Dict[str, str]) -> Any:
+    """Return a canonical enum value for a business-equivalent extractor alias.
+
+    Args:
+        value: Raw extractor value.
+        aliases: Uppercase aliases mapped to schema enum values.
+
+    Returns:
+        Canonical schema value when an exact alias is known; otherwise the
+        original value so Pydantic can reject a material semantic mismatch.
+    """
+    if not isinstance(value, str):
+        return value
+    token = re.sub(r"[\s-]+", "_", value.strip()).upper()
+    return aliases.get(token, value)
+
+
+def _normalize_grain_definition(value: Any) -> Any:
+    """Convert an unambiguous plain-text grain into the typed grain object.
+
+    Args:
+        value: Raw grain object or a phrase such as ``PER CUSTOMER PER WINDOW``.
+
+    Returns:
+        A grain dictionary when the entity is unambiguous, otherwise the
+        original value so schema validation remains fail-closed.
+    """
+    if isinstance(value, dict):
+        if isinstance(value.get("entity"), str):
+            value["entity"] = value["entity"].strip().upper()
+        if isinstance(value.get("keys"), str):
+            value["keys"] = [value["keys"]]
+        return value
+    if not isinstance(value, str) or not value.strip():
+        return value
+
+    original = value.strip()
+    tokens = re.sub(r"[\s_-]+", " ", original).upper()
+    entity = next(
+        (
+            candidate
+            for candidate in _GRAIN_DEFAULT_KEYS
+            if re.search(rf"\b{candidate}\b", tokens)
+        ),
+        None,
+    )
+    if entity is None:
+        return value
+    period = next(
+        (
+            period_name
+            for marker, period_name in (
+                ("ROLLING WINDOW", "ROLLING_WINDOW"),
+                ("WINDOW", "ROLLING_WINDOW"),
+                ("DAY", "DAY"),
+                ("WEEK", "WEEK"),
+                ("MONTH", "MONTH"),
+                ("YEAR", "YEAR"),
+            )
+            if marker in tokens
+        ),
+        None,
+    )
+    return {
+        "entity": entity,
+        "keys": _GRAIN_DEFAULT_KEYS[entity],
+        "period": period,
+        "description": original,
+    }
+
+
+def _normalize_semantic_contract_aliases(contract: Any) -> Any:
+    """Normalize known non-semantic extractor aliases in a semantic contract.
+
+    Args:
+        contract: Raw nested semantic-contract payload.
+
+    Returns:
+        The normalized contract. Unknown values are deliberately retained for
+        Pydantic validation instead of being guessed or silently dropped.
+    """
+    if not isinstance(contract, dict):
+        return contract
+
+    for grain_key in ("evaluation_grain", "output_grain"):
+        if grain_key in contract:
+            contract[grain_key] = _normalize_grain_definition(contract[grain_key])
+
+    evidence = contract.get("evidence")
+    if isinstance(evidence, dict) and "output_grain" in evidence:
+        evidence["output_grain"] = _normalize_grain_definition(
+            evidence["output_grain"]
+        )
+
+    for metric in contract.get("metrics") or []:
+        if isinstance(metric, dict):
+            if "grain" in metric:
+                metric["grain"] = _normalize_grain_definition(metric["grain"])
+            metric["metric_kind"] = _canonical_enum_alias(
+                metric.get("metric_kind"),
+                {
+                    name: name
+                    for name in (
+                        "AMOUNT", "COUNT", "DISTINCT_COUNT", "AVERAGE", "MINIMUM",
+                        "MAXIMUM", "RATIO", "PERCENTAGE", "OTHER",
+                    )
+                },
+            )
+            for policy_key in ("zero_denominator_policy", "null_measure_policy"):
+                metric[policy_key] = _canonical_enum_alias(
+                    metric.get(policy_key),
+                    {
+                        name: name
+                        for name in (
+                            "EXCLUDE", "RETURN_ZERO", "RETURN_NULL", "ERROR",
+                            "NEEDS_USER", "TREAT_AS_ZERO", "PROPAGATE_NULL",
+                        )
+                    },
+                )
+
+    for window in contract.get("time_windows") or []:
+        if not isinstance(window, dict):
+            continue
+        window["purpose"] = _canonical_enum_alias(
+            window.get("purpose"), _TIME_PURPOSE_ALIASES
+        )
+        window["window_type"] = _canonical_enum_alias(
+            window.get("window_type"), _TIME_WINDOW_TYPE_ALIASES
+        )
+        window["anchor"] = _canonical_enum_alias(
+            window.get("anchor"), _TIME_ANCHOR_ALIASES
+        )
+        window["boundary_precision"] = _canonical_enum_alias(
+            window.get("boundary_precision"), _TIME_PRECISION_ALIASES
+        )
+        for unit_key in ("unit", "offset_unit"):
+            window[unit_key] = _canonical_enum_alias(
+                window.get(unit_key), _SINGULAR_TIME_UNITS
+            )
+
+    predicate_collections = [
+        contract.get("global_filters") or [],
+        contract.get("exclusions") or [],
+    ]
+    predicate_collections.extend(
+        population.get("filters") or []
+        for population in contract.get("populations") or []
+        if isinstance(population, dict)
+    )
+    predicate_collections.extend(
+        metric.get("filters") or []
+        for metric in contract.get("metrics") or []
+        if isinstance(metric, dict)
+    )
+    for population in contract.get("populations") or []:
+        if isinstance(population, dict):
+            population["role"] = _canonical_enum_alias(
+                population.get("role"),
+                {name: name for name in ("BASE", "NUMERATOR", "DENOMINATOR", "COMPARISON")},
+            )
+    for predicates in predicate_collections:
+        for predicate in predicates:
+            if not isinstance(predicate, dict):
+                continue
+            predicate["evaluation_phase"] = _canonical_enum_alias(
+                predicate.get("evaluation_phase"),
+                {name: name for name in ("RECORD", "GROUP", "METRIC", "OUTPUT")},
+            )
+            predicate["applies_to"] = _canonical_enum_alias(
+                predicate.get("applies_to"),
+                {name: name for name in ("GLOBAL", "POPULATION", "METRIC")},
+            )
+            predicate["operator"] = _canonical_enum_alias(
+                predicate.get("operator"),
+                {
+                    ">": ">", "<": "<", ">=": ">=", "<=": "<=", "=": "=",
+                    "!=": "!=", "<>": "!=", "BETWEEN": "BETWEEN", "IN": "IN",
+                    "NOT_IN": "NOT_IN", "NOT IN": "NOT_IN", "IS_NULL": "IS_NULL",
+                    "IS NOT NULL": "IS_NOT_NULL", "IS_NOT_NULL": "IS_NOT_NULL",
+                },
+            )
+
+    return contract
+
+
+def _normalize_provenance_aliases(value: Any) -> None:
+    """Normalize provenance aliases recursively without changing business fields.
+
+    Args:
+        value: Raw intent payload or nested value to normalize in place.
+    """
+    if isinstance(value, dict):
+        if "provenance" in value:
+            value["provenance"] = _canonical_enum_alias(
+                value["provenance"], _PROVENANCE_ALIASES
+            )
+        for nested_value in value.values():
+            _normalize_provenance_aliases(nested_value)
+    elif isinstance(value, list):
+        for nested_value in value:
+            _normalize_provenance_aliases(nested_value)
+
+
 class Threshold(BaseModel):
     """A single numeric or relational threshold condition from the user's intent.
 
@@ -686,6 +971,28 @@ class AMLIntent(BaseModel):
     @classmethod
     def _normalize_transaction_types(cls, data: Any) -> Any:
         if isinstance(data, dict):
+            data["semantic_contract"] = _normalize_semantic_contract_aliases(
+                data.get("semantic_contract")
+            )
+            _normalize_provenance_aliases(data)
+            for threshold in data.get("thresholds") or []:
+                if isinstance(threshold, dict):
+                    threshold["target_scope"] = _canonical_enum_alias(
+                        threshold.get("target_scope"),
+                        {"DETAIL": "DETAIL", "AGGREGATE": "AGGREGATE"},
+                    )
+            for condition in data.get("semantic_conditions") or []:
+                if isinstance(condition, dict):
+                    condition["logical_type"] = _canonical_enum_alias(
+                        condition.get("logical_type"),
+                        {
+                            name: name
+                            for name in (
+                                "STATE", "TRANSITION", "SEQUENCE", "BEHAVIORAL",
+                                "TEMPORAL", "OTHER",
+                            )
+                        },
+                    )
             tx_type = data.get("transaction_type")
             tx_types = data.get("transaction_types")
             if isinstance(tx_type, list):

@@ -5,6 +5,21 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-10-10] fix: Normalize compatible semantic-extractor values before validation
+
+### What
+
+- Added fail-closed `AMLIntent` normalization for equivalent provenance, typed
+  grain, time-unit, time-purpose, time-anchor, and time-precision aliases.
+- Updated intent extraction guidance with canonical enum/object requirements and
+  a receipt-to-third-party-transfer sequence example.
+- Added regression coverage for the live failure shape and for unknown aliases
+  remaining rejected.
+
+### Verification
+
+- `python -m pytest -q services/aml_builder/tests/test_semantic_intent_contract.py services/aml_builder/tests/test_deployment_guard.py`
+
 ## [2026-10-10] feat: Add versioned semantic intent contract
 
 ### What

@@ -241,3 +241,128 @@ def test_explanation_code_enrichment_preserves_population_scope() -> None:
     )
     assert numerator["explanation_codes"] == ["6"]
     assert denominator["explanation_codes"] == []
+
+
+def test_extractor_aliases_normalize_for_receipt_to_transfer_sequence() -> None:
+    """Equivalent extractor labels do not block a valid multi-event scenario."""
+    payload = complex_intent()
+    payload.update(
+        {
+            "scenario_name": "Receipt then third-party transfer",
+            "transaction_type": "RECEIPT, OUTWARD TRANSFER",
+            "transaction_types": ["RECEIPT", "OUTWARD TRANSFER"],
+            "detection_logic": (
+                "Customers who receive at least 10k, then transfer at least 80% "
+                "of those funds to a third-party account within 6 hours, evaluated "
+                "over the last week."
+            ),
+            "semantic_conditions": [
+                {
+                    "raw_phrase": "receive then transfer to a third-party account within 6 hours",
+                    "logical_type": "SEQUENCE",
+                    "subject": "CUSTOMER",
+                    "predicate": "qualifying receipt precedes related outward transfer",
+                    "provenance": "user_input",
+                }
+            ],
+        }
+    )
+    contract = payload["semantic_contract"]
+    contract["evaluation_grain"] = "PER CUSTOMER PER WINDOW"
+    contract["output_grain"] = "PER CUSTOMER PER WINDOW"
+    contract["evidence"]["output_grain"] = "PER CUSTOMER PER WINDOW"
+    contract["metrics"] = []
+    contract["populations"] = [
+        {
+            "population_id": "qualifying_receipts",
+            "role": "BASE",
+            "entity": "TRANSACTION",
+            "description": "Receipts of at least 10,000",
+            "filters": [
+                {
+                    "predicate_id": "receipt_amount",
+                    "subject": "TRANSACTION",
+                    "field": "transaction_amount",
+                    "operator": ">=",
+                    "value_from": 10000,
+                    "evaluation_phase": "RECORD",
+                    "applies_to": "POPULATION",
+                    "population_ids": ["qualifying_receipts"],
+                    "transaction_types": ["RECEIPT"],
+                    "provenance": "user_input",
+                }
+            ],
+            "transaction_types": ["RECEIPT"],
+            "time_window_id": "last_week",
+        },
+        {
+            "population_id": "related_outward_transfers",
+            "role": "COMPARISON",
+            "entity": "TRANSACTION",
+            "description": "Third-party outward transfers related to each receipt",
+            "transaction_types": ["OUTWARD TRANSFER"],
+            "time_window_id": "within_six_hours",
+        },
+    ]
+    contract["time_windows"] = [
+        {
+            "window_id": "last_week",
+            "purpose": "CURRENT",
+            "window_type": "CURRENT",
+            "unit": "WEEK",
+            "value": 1,
+            "offset_value": 0,
+            "anchor": "CURRENT_DATE",
+            "lower_inclusive": True,
+            "upper_inclusive": False,
+            "boundary_precision": "DATE",
+        },
+        {
+            "window_id": "within_six_hours",
+            "purpose": "COMPARISON",
+            "window_type": "RELATIVE_TO_EVENT",
+            "unit": "HOUR",
+            "value": 6,
+            "offset_value": 0,
+            "anchor": "RECEIPT_TIME",
+            "lower_inclusive": True,
+            "upper_inclusive": True,
+            "boundary_precision": "TIMESTAMP",
+        },
+    ]
+
+    intent = AMLIntent.model_validate(payload)
+    normalized = intent.semantic_contract
+    assert normalized is not None
+    assert normalized.evaluation_grain.entity == "CUSTOMER"
+    assert normalized.evaluation_grain.period == "ROLLING_WINDOW"
+    assert normalized.time_windows[0].purpose == "OBSERVATION"
+    assert normalized.time_windows[0].unit == "WEEKS"
+    assert normalized.time_windows[0].anchor == "EVALUATION_DATE"
+    assert normalized.time_windows[1].unit == "HOURS"
+    assert normalized.time_windows[1].anchor == "EVENT_TIME"
+    assert intent.semantic_conditions[0].provenance == "stated"
+
+
+def test_unknown_semantic_enum_is_not_silently_guessed() -> None:
+    """Compatibility normalization remains fail-closed for novel semantics."""
+    payload = complex_intent()
+    payload["semantic_contract"]["time_windows"][0]["anchor"] = "FISCAL_CUTOFF"
+    with pytest.raises(ValidationError, match="anchor"):
+        AMLIntent.model_validate(payload)
+
+
+def test_canonical_semantic_enums_are_case_insensitive_only() -> None:
+    """Letter case is harmless, but enum meanings are not broadened."""
+    payload = complex_intent()
+    payload["thresholds"][0]["target_scope"] = "aggregate"
+    payload["semantic_contract"]["populations"][0]["role"] = "numerator"
+    payload["semantic_contract"]["populations"][0]["filters"][0][
+        "evaluation_phase"
+    ] = "record"
+    payload["semantic_contract"]["time_windows"][0]["purpose"] = "observation"
+    payload["semantic_contract"]["time_windows"][0]["unit"] = "days"
+    intent = AMLIntent.model_validate(payload)
+    assert intent.thresholds[0].target_scope == "AGGREGATE"
+    assert intent.semantic_contract is not None
+    assert intent.semantic_contract.populations[0].role == "NUMERATOR"
