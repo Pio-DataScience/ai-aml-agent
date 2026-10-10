@@ -42,6 +42,8 @@ _TIME_PURPOSE_ALIASES = {
     "OBSERVE": "OBSERVATION",
     "HISTORICAL": "BASELINE",
     "PRIOR": "BASELINE",
+    "BASE": "BASELINE",
+    "EVENT_RELATIVE": "COMPARISON",
 }
 
 _TIME_WINDOW_TYPE_ALIASES = {
@@ -53,6 +55,7 @@ _TIME_WINDOW_TYPE_ALIASES = {
     "CURRENT_WINDOW": "ROLLING",
     "ROLLING_WINDOW": "ROLLING",
     "RELATIVE_TO_EVENT": "RELATIVE",
+    "OBSERVATION": "ROLLING",
 }
 
 _TIME_ANCHOR_ALIASES = {
@@ -172,6 +175,32 @@ def _normalize_grain_definition(value: Any) -> Any:
     }
 
 
+def _normalize_aggregation_grain(value: Any) -> Any:
+    """Convert a typed extractor grain into the legacy aggregation label.
+
+    Args:
+        value: Legacy string grain or an accidentally emitted GrainDefinition.
+
+    Returns:
+        A plain-language grain string when conversion is unambiguous; otherwise
+        the original value so the legacy field still validates strictly.
+    """
+    if not isinstance(value, dict):
+        return value
+    normalized = _normalize_grain_definition(value)
+    if not isinstance(normalized, dict):
+        return value
+    description = normalized.get("description")
+    if isinstance(description, str) and description.strip():
+        return description
+    entity = normalized.get("entity")
+    if not isinstance(entity, str) or not entity.strip():
+        return value
+    period = normalized.get("period")
+    suffix = f" PER {str(period).replace('_', ' ')}" if period else ""
+    return f"PER {entity}{suffix}"
+
+
 def _normalize_semantic_contract_aliases(contract: Any) -> Any:
     """Normalize known non-semantic extractor aliases in a semantic contract.
 
@@ -224,12 +253,26 @@ def _normalize_semantic_contract_aliases(contract: Any) -> Any:
     for window in contract.get("time_windows") or []:
         if not isinstance(window, dict):
             continue
-        window["purpose"] = _canonical_enum_alias(
+        raw_purpose = _canonical_enum_alias(
             window.get("purpose"), _TIME_PURPOSE_ALIASES
         )
-        window["window_type"] = _canonical_enum_alias(
+        raw_window_type = _canonical_enum_alias(
             window.get("window_type"), _TIME_WINDOW_TYPE_ALIASES
         )
+        # Some extractor outputs place the event-relative meaning in purpose
+        # and the observation label in window_type. Together these values have
+        # one unambiguous v1 representation: a relative comparison window.
+        if (
+            raw_purpose == "COMPARISON"
+            and _canonical_enum_alias(
+                window.get("purpose"), {"EVENT_RELATIVE": "EVENT_RELATIVE"}
+            )
+            == "EVENT_RELATIVE"
+            and raw_window_type == "ROLLING"
+        ):
+            raw_window_type = "RELATIVE"
+        window["purpose"] = raw_purpose
+        window["window_type"] = raw_window_type
         window["anchor"] = _canonical_enum_alias(
             window.get("anchor"), _TIME_ANCHOR_ALIASES
         )
@@ -975,6 +1018,11 @@ class AMLIntent(BaseModel):
                 data.get("semantic_contract")
             )
             _normalize_provenance_aliases(data)
+            aggregation = data.get("aggregation")
+            if isinstance(aggregation, dict) and "grain" in aggregation:
+                aggregation["grain"] = _normalize_aggregation_grain(
+                    aggregation["grain"]
+                )
             for threshold in data.get("thresholds") or []:
                 if isinstance(threshold, dict):
                     threshold["target_scope"] = _canonical_enum_alias(

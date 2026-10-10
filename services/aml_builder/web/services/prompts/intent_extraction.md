@@ -40,8 +40,9 @@ Output ONLY a valid JSON object matching AMLIntent schema with mandatory root ke
 
 - `provenance` is exactly `stated`, `assumed_default`, or `needs_user`; never use `user_input`, `user_provided`, `default`, or `unknown`.
 - Every semantic-contract grain is an object, never a string. For example, `PER CUSTOMER PER WINDOW` is `{ "entity": "CUSTOMER", "keys": ["CUS_NUM"], "period": "ROLLING_WINDOW", "description": "Per customer per rolling window" }`.
+- The legacy root `aggregation.grain` is the exception: it remains a plain string such as `PER CUSTOMER PER ROLLING WINDOW`; never put a grain object in that field.
 - Time values are plural enums: `MINUTES`, `HOURS`, `DAYS`, `WEEKS`, `MONTHS`, `YEARS`. Use `OBSERVATION` rather than `CURRENT` for the current evaluation window. Use `EVALUATION_DATE` for a date-based current anchor and `EVALUATION_TIME` for an instant-based current anchor.
-- A request such as "customers who receive 10k, then transfer 80% within 6 hours, evaluated over the last week" has two transaction populations, a `SEQUENCE` semantic condition, one weekly `OBSERVATION` window anchored to `EVALUATION_DATE`, and one six-hour event-relative window anchored to `EVENT_TIME`. Preserve the receipt-to-transfer relationship; do not collapse both activities into one unbound transaction filter.
+- A request such as "customers who receive 10k, then transfer 80% within 6 hours, evaluated over the last week" has two transaction populations, a `SEQUENCE` semantic condition, one weekly window with `purpose: OBSERVATION`, `window_type: ROLLING`, and `anchor: EVALUATION_DATE`, and one six-hour window with `purpose: COMPARISON`, `window_type: RELATIVE`, and `anchor: EVENT_TIME`. Preserve the receipt-to-transfer relationship; do not collapse both activities into one unbound transaction filter.
 
 [CORE EXTRACTION LAWS]
 

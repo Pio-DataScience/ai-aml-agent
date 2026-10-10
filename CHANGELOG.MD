@@ -10,7 +10,8 @@ Format: `[DATE] TYPE: Description`
 ### What
 
 - Added fail-closed `AMLIntent` normalization for equivalent provenance, typed
-  grain, time-unit, time-purpose, time-anchor, and time-precision aliases.
+  grain (including legacy aggregation grain), time-unit, time-purpose,
+  time-anchor, time-precision, and observed swapped-purpose/type aliases.
 - Updated intent extraction guidance with canonical enum/object requirements and
   a receipt-to-third-party-transfer sequence example.
 - Added regression coverage for the live failure shape and for unknown aliases

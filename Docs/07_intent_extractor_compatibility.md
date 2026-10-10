@@ -13,8 +13,11 @@ before `AMLIntent` validation. It converts only known equivalent values:
 
 - provenance aliases such as `user_input` to `stated`;
 - unambiguous customer/account/transaction grain strings to `GrainDefinition`;
+- an accidentally typed legacy `aggregation.grain` back to its required
+  plain-language string;
 - singular time units and common time-purpose, type, anchor, and precision
-  aliases to canonical v1 enums.
+  aliases to canonical v1 enums, including the observed `BASE` and
+  `EVENT_RELATIVE` labels and their unambiguous swapped-purpose/type shape.
 
 Unknown values are retained and rejected by Pydantic. The normalizer therefore
 does not invent business semantics, weaken ambiguity handling, add an LLM call,

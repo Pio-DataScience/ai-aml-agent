@@ -366,3 +366,57 @@ def test_canonical_semantic_enums_are_case_insensitive_only() -> None:
     assert intent.thresholds[0].target_scope == "AGGREGATE"
     assert intent.semantic_contract is not None
     assert intent.semantic_contract.populations[0].role == "NUMERATOR"
+
+
+def test_live_extractor_aggregation_and_time_shape_normalizes() -> None:
+    """Accept the additional compatible shapes observed in live extraction logs."""
+    payload = complex_intent()
+    payload["aggregation"] = {
+        "metric": "transaction_amount",
+        "function": "SUM",
+        "grain": {
+            "entity": "CUSTOMER",
+            "keys": ["CUS_NUM"],
+            "period": "ROLLING_WINDOW",
+            "description": "Per customer per rolling window",
+        },
+    }
+    payload["semantic_contract"]["time_windows"] = [
+        {
+            "window_id": "last_week",
+            "purpose": "BASE",
+            "window_type": "OBSERVATION",
+            "unit": "WEEK",
+            "value": 1,
+            "offset_value": 0,
+            "anchor": "CURRENT_DATE",
+            "lower_inclusive": True,
+            "upper_inclusive": False,
+            "boundary_precision": "DATE",
+        },
+        {
+            "window_id": "within_six_hours",
+            "purpose": "EVENT_RELATIVE",
+            "window_type": "OBSERVATION",
+            "unit": "HOUR",
+            "value": 6,
+            "offset_value": 0,
+            "anchor": "RECEIPT_TIME",
+            "lower_inclusive": True,
+            "upper_inclusive": True,
+            "boundary_precision": "TIMESTAMP",
+        },
+    ]
+    for population, window_id in zip(
+        payload["semantic_contract"]["populations"],
+        ["last_week", "within_six_hours"],
+    ):
+        population["time_window_id"] = window_id
+
+    intent = AMLIntent.model_validate(payload)
+    assert intent.aggregation is not None
+    assert intent.aggregation.grain == "Per customer per rolling window"
+    assert intent.semantic_contract is not None
+    first, second = intent.semantic_contract.time_windows
+    assert (first.purpose, first.window_type) == ("BASELINE", "ROLLING")
+    assert (second.purpose, second.window_type) == ("COMPARISON", "RELATIVE")
