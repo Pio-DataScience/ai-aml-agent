@@ -5,19 +5,19 @@ Handles the direct 'Deploy Scenario to Production' action from the
 frontend Governance Metadata sidebar panel.
 """
 
-import json
 import logging
-import os
 import uuid
 from typing import Any, Dict, List, Optional
-from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
 from services.aml_builder.web.services.graph import get_tool_driven_graph
+from services.aml_builder.web.services.deployment_guard import (
+    DeploymentGuardError,
+    authorize_direct_deployment,
+)
 from services.aml_builder.web.services.production_registry import save_production_scenario
-from services.aml_builder.web.services.scenario_metadata import validate_scenario_metadata
 from services.aml_builder.web.services.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -53,70 +53,45 @@ async def deploy_scenario(request: DeployRequest):
         request.user_id,
     )
 
-    # 1. Validate Governance Metadata
-    is_valid, validation_errors = validate_scenario_metadata(request.metadata_json)
-    if not is_valid:
-        logger.warning("[DEPLOY] Metadata validation failed: %s", validation_errors)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "success": False,
-                "message": "Governance metadata validation failed.",
-                "validation_errors": validation_errors,
-            },
-        )
-
-    # 2. Retrieve State from Checkpointer (searching candidate thread prefixes)
-    candidate_thread_ids = [
-        f"{request.project_id}_{request.session_id}_{request.user_id}",
-        f"default_{request.session_id}_{request.user_id}",
-        f"no_project_{request.session_id}_{request.user_id}",
-        f"{request.session_id}_{request.user_id}",
-        request.session_id,
-    ]
-
-    raw_sql = None
-    intent_dict = {}
+    project_id = request.project_id
+    if not project_id or project_id in ("0", "None"):
+        project_id = "no_project"
+    thread_id = f"{project_id}_{request.session_id}_{request.user_id}"
 
     try:
         graph = await get_tool_driven_graph()
-        for t_id in candidate_thread_ids:
-            config = {"configurable": {"thread_id": t_id}}
-            state = await graph.aget_state(config)
-            messages = state.values.get("messages", []) if state else []
-
-            for m in reversed(messages):
-                # Check for shadow test tool output or intent output
-                if getattr(m, "type", None) == "tool" or m.__class__.__name__ == "ToolMessage":
-                    content_str = getattr(m, "content", "")
-                    if isinstance(content_str, str) and content_str.strip().startswith("{"):
-                        try:
-                            payload = json.loads(content_str)
-                            if "raw_sql" in payload and not raw_sql:
-                                raw_sql = payload.get("raw_sql")
-                            if "sql" in payload and not raw_sql:
-                                raw_sql = payload.get("sql")
-                            if "enriched_intent" in payload and not intent_dict:
-                                intent_dict = payload.get("enriched_intent", {})
-                        except Exception:
-                            pass
-            if raw_sql:
-                logger.info("[DEPLOY] Found verified SQL in checkpointer thread: %s", t_id)
-                break
-    except Exception as exc:
-        logger.error("[DEPLOY] Error retrieving session state from checkpointer: %s", exc)
-
-    if not raw_sql:
-        logger.error("[DEPLOY] No verified shadow-tested SQL found for session %s", request.session_id)
+        config = {"configurable": {"thread_id": thread_id}}
+        state = await graph.aget_state(config)
+        messages = state.values.get("messages", []) if state else []
+        evidence = authorize_direct_deployment(
+            messages=messages,
+            metadata=request.metadata_json,
+            thread_id=thread_id,
+            approved_by=request.user_id,
+        )
+    except DeploymentGuardError as exc:
+        logger.warning("[DEPLOY] Deployment rejected (%s): %s", exc.code, exc)
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_409_CONFLICT,
             detail={
                 "success": False,
-                "message": "No shadow-tested SQL query found in this session. Please ensure the scenario was shadow tested first.",
-                "validation_errors": ["Scenario must be shadow tested before deployment."],
+                "message": str(exc),
+                "validation_errors": [exc.code],
             },
-        )
+        ) from exc
+    except Exception as exc:
+        logger.error("[DEPLOY] Error retrieving session state from checkpointer: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "success": False,
+                "message": "Deployment evidence could not be verified. Please retry.",
+                "validation_errors": ["deployment_evidence_unavailable"],
+            },
+        ) from exc
 
+    intent_dict = evidence.intent
+    raw_sql = evidence.raw_sql
     scenario_name = intent_dict.get("scenario_name", "AML Detection Scenario")
     scenario_type = intent_dict.get("scenario_type", "CUSTOMER")
     detection_logic = intent_dict.get("detection_logic", scenario_name)
@@ -131,16 +106,30 @@ async def deploy_scenario(request: DeployRequest):
 
     scenario_id = f"PRD_{uuid.uuid4().hex[:8].upper()}"
 
-    success = save_production_scenario(
-        scenario_id=scenario_id,
-        scenario_name=scenario_name,
-        scenario_type=scenario_type,
-        detection_logic=detection_logic,
-        raw_sql=raw_sql,
-        scenario_metadata=request.metadata_json,
-        time_window_days=time_window_days,
-        created_by=str(request.metadata_json.get("CREATED_BY") or settings.AML_CREATED_BY),
-    )
+    try:
+        success = save_production_scenario(
+            scenario_id=scenario_id,
+            scenario_name=scenario_name,
+            scenario_type=scenario_type,
+            detection_logic=detection_logic,
+            raw_sql=raw_sql,
+            scenario_metadata=evidence.metadata,
+            time_window_days=time_window_days,
+            created_by=str(
+                evidence.metadata.get("CREATED_BY") or settings.AML_CREATED_BY
+            ),
+            deployment_evidence=evidence,
+        )
+    except DeploymentGuardError as exc:
+        logger.warning("[DEPLOY] Deployment claim rejected (%s): %s", exc.code, exc)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "success": False,
+                "message": str(exc),
+                "validation_errors": [exc.code],
+            },
+        ) from exc
 
     if not success:
         logger.error("[DEPLOY] Failed to persist scenario to Oracle DWH.")

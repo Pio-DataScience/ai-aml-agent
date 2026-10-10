@@ -48,7 +48,7 @@ Once running:
 - Health endpoint: `GET /health`
 - Chat stream: `POST /chat/stream`
 
-`/health` reports process health only; it does not verify Oracle, OpenAI, or PioTech AI connectivity. Startup initializes SQLite session metadata, Oracle pools, and the LangGraph checkpointer. Oracle/graph warm-up failures are logged as non-fatal startup errors.
+`/health` reports process health only; it does not verify Oracle, OpenAI, or PioTech AI connectivity. Startup initializes SQLite session metadata and the deployment-artifact claim ledger, Oracle pools, and the LangGraph checkpointer. Oracle/graph warm-up failures are logged as non-fatal startup errors.
 
 ## HTTP API
 
@@ -86,7 +86,7 @@ intent extraction → plan review/approval → SQL generation and shadow test
 → atomic Oracle dual-write
 ```
 
-Approval gates are currently prompt/tool instructions, not server-side state transitions. The direct `/scenario/deploy` route does not require `validation_success=true` on the recovered shadow result, so treat deployment as a sensitive trusted-gateway operation.
+Persistence is fail-closed on the server. Both deployment routes require the latest successful shadow-tested SQL, current intent, valid metadata, and explicit approval bound to one immutable artifact identity. The shared writer rejects missing evidence, and a SQLite claim ledger prevents concurrent or replayed deployment of the same artifact. The direct endpoint still requires a trusted authenticated gateway because this service has no local authentication middleware.
 
 ## Alert engine
 

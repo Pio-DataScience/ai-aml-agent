@@ -68,7 +68,12 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
 
     tool_graph = await get_tool_driven_graph()
     config = {
-        "configurable": {"thread_id": thread_id},
+        "configurable": {
+            "thread_id": thread_id,
+            "user_id": user_id,
+            "project_id": project_id,
+            "chat_id": chat_id,
+        },
         "recursion_limit": 10,
     }
     user_msg = request.messages[-1].content if request.messages else ""

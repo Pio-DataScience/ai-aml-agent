@@ -1,6 +1,6 @@
 # Canonical Project Overview
 
-> **Status:** Canonical repository-level technical overview, verified against the working-tree implementation on 2026-10-05.
+> **Status:** Canonical repository-level technical overview, verified against the working-tree implementation on 2026-10-10.
 >
 > Read this after the applicable `AGENTS.md`. Use it to navigate and reason about the system, then inspect the current code, tests, schemas, and configuration relevant to the task. Those remain authoritative. Claims below are **Verified** unless explicitly marked **Inferred** or **Unclear**.
 
@@ -38,6 +38,7 @@ The service is synchronous at several integration boundaries despite async HTTP 
 | `services/aml_builder/web/services/plan_renderer.py` | Deterministic 11-section Markdown plan renderer. |
 | `services/aml_builder/web/services/explanation_code_search.py` | Oracle-backed explanation-code embedding cache, similarity search, and LLM reranking. |
 | `services/aml_builder/web/services/scenario_metadata.py` | Governance field registry, defaults, live lookup options, normalization, and validation. |
+| `services/aml_builder/web/services/deployment_guard.py` | Reconstructs checkpoint evidence, binds approval to an immutable intent/SQL/metadata artifact, and prevents concurrent/replayed deployment. |
 | `services/aml_builder/web/services/production_registry.py` | Table initialization and atomic dual-table scenario writer. |
 | `services/aml_builder/web/services/scenario_registry_analytics.py` | Read-only scenario search, counts, detail, and alert telemetry. |
 | `services/aml_builder/web/services/alert_engine.py` | Loads active scenarios, executes saved SQL, and writes alert headers/details. |
@@ -156,7 +157,7 @@ user description
   -> persist_and_validate_scenario_in_dwh
 ```
 
-Approval ordering is **not a server-side state machine**. The prompt and tool descriptions instruct the LLM to stop at approval gates; the tools themselves do not verify previous approval or a successful shadow-test record.
+Plan and shadow-result review remain conversational gates, but production persistence is enforced server-side. The deployment guard requires the latest shadow result to have `validation_success: true`, rejects intent/SQL/metadata drift, requires a later explicit chat persistence instruction for the agent route, and binds the approved values to a SHA-256 artifact identity before the shared writer can run.
 
 ### SQL generation and shadow testing
 
@@ -175,17 +176,22 @@ through `run_shadow_readonly`. `header_alert_count` is the returned row count. `
 Both the agent persistence tool and the direct deploy route call `production_registry.py:save_production_scenario`:
 
 ```text
-validate governance metadata
+recover the exact composite-thread checkpoint
+  -> require latest successful shadow-test evidence
+  -> reject later intent revisions or caller-supplied SQL drift
+  -> validate current governance metadata
+  -> require explicit chat approval or direct deploy action
+  -> atomically claim the immutable artifact in SQLite
   -> initialize registry tables if absent
   -> acquire one primary Oracle connection
   -> upsert PIO_AML_PRODUCTION_SCENARIOS
   -> upsert PIO_AML_SCENARIO
-  -> commit both, or roll back both on exception
+  -> commit both and mark the claim deployed, or release a pre-commit failure for retry
 ```
 
 The application creates missing tables directly with DDL; there is no versioned migration system. Every normal persistence call generates a new random `PRD_<8_HEX>` ID, so the update branches are rarely reached through current public paths.
 
-`POST /scenario/deploy` searches several candidate checkpoint thread IDs and scans tool messages backward for `raw_sql`/`sql` and `enriched_intent`. It validates governance metadata, but it does not require `validation_success: true`; because failed shadow results retain `raw_sql`, their SQL can be recovered and deployed. It also catches JSON/checkpoint errors broadly and has no server-side approval record.
+`POST /scenario/deploy` uses only the exact `{project_id}_{session_id}_{user_id}` checkpoint. The POST action is the direct approval signal, but SQL and intent always come from the latest successful shadow-test tool exchange; the request cannot supply or override them. Missing, failed, stale, or malformed evidence returns an actionable fail-closed error. The agent tool route additionally requires an explicit later human message containing a deployment action and an unchanged metadata-review snapshot.
 
 ### Existing-scenario queries
 
@@ -225,6 +231,7 @@ When a specific `scenario_id` is requested, selection still requires `PIO_AML_PR
 
 - LangGraph checkpoint tables, which store conversation/agent state keyed by the composite thread string.
 - `chat_sessions`, which stores sidebar title, update time, pin, and soft-delete state.
+- `deployment_artifacts`, a single-use claim ledger keyed by the SHA-256 identity of intent, validated SQL, and governance metadata. `IN_PROGRESS` blocks concurrent/replayed writes; successful Oracle commits become `DEPLOYED`, while pre-commit failures release the claim for retry.
 
 Soft deletion affects only `chat_sessions`; checkpoint messages remain. `chat_sessions.chat_id` alone is the primary key even though reads/mutations also use user and project. Reusing the same chat ID across users/projects can collide, and `upsert_chat_session` updates an existing row by `chat_id` without checking ownership.
 
@@ -289,14 +296,21 @@ Consequences for deployments:
 
 ## 11. Testing and verification model
 
-The only repository test file is `services/aml_builder/tests/test_registry_analytics.py`. It defines `run_all_checks()` and a `__main__` runner; it does not define pytest `test_*` functions. It requires live Oracle, persisted tables/data, and OpenAI for semantic search. Run it manually from the repository root only with approved live configuration:
+`services/aml_builder/tests/test_deployment_guard.py` is an offline deterministic suite covering approval bypass, failed and stale artifacts, metadata drift/validation failure, missing writer evidence, retry, and concurrent deployment claims. Run it with:
+
+```powershell
+$env:DEBUG = "false"
+.\.venv\Scripts\python.exe -m pytest -q services\aml_builder\tests\test_deployment_guard.py
+```
+
+`services/aml_builder/tests/test_registry_analytics.py` remains a manually run integration check requiring live Oracle, persisted tables/data, and OpenAI for semantic search. Run it from the repository root only with approved live configuration:
 
 ```powershell
 $env:PYTHONPATH = "services\aml_builder"
 .\.venv\Scripts\python.exe services\aml_builder\tests\test_registry_analytics.py
 ```
 
-There is no offline unit, API, graph, persistence, or alert-engine regression suite. `pytest` may collect no tests; historical instructions referring to `tests/test_decomposer.py` are stale.
+There is still no offline alert-engine or full graph/API integration suite. The deployment guard suite mocks live metadata lookup validation and does not write Oracle.
 
 Safe structural checks include the following. The explicit `DEBUG` override avoids unrelated ambient-variable collisions during verification and lasts only for the current PowerShell process:
 
@@ -306,7 +320,7 @@ $env:DEBUG = "false"
 .\.venv\Scripts\python.exe -m pytest --collect-only -q
 ```
 
-At the verified revision, collection reports `no tests collected`; it is not a passing regression suite.
+Collection now includes the deployment guard regression tests; the registry analytics script is still not collected as pytest tests.
 
 Do not run the integration script, start the app lifespan, invoke agent tools, or trigger the engine merely as a routine test: those paths can call paid APIs, query live systems, create Oracle tables, or write production data.
 
@@ -350,7 +364,7 @@ No rationale should be inferred beyond these code- and history-supported decisio
 
 Confirmed or directly evidenced concerns:
 
-- **Approval and shadow success are not enforced server-side.** Prompt rules can be bypassed, and direct deploy can recover `raw_sql` from a failed shadow-test payload.
+- **Direct-deploy approval depends on endpoint semantics.** `POST /scenario/deploy` is treated as the user's explicit approval action; local authentication is still absent, so a trusted authenticated gateway remains required to bind that action to a real principal.
 - **No local authentication/authorization.** Sensitive endpoints trust caller-supplied identities.
 - **Tenant scoping is incomplete.** Several joins use only scenario ID/code; lookup fetching retries without country/institution filters when tenant-filtered lookup returns no rows.
 - **Sidebar session key collision.** `chat_sessions` uses `chat_id` alone as its primary key and upsert lookup.
@@ -366,7 +380,7 @@ Confirmed or directly evidenced concerns:
 - **Telemetry filtering is inconsistent.** Per-scenario header counts honor caller filters, but the corresponding detail count query uses only scenario ID and can report lifetime details beside date/customer-filtered headers.
 - **Request-contract fields are partly inert.** `reasoning_mode` does not affect execution, supplied prior messages are ignored in favor of checkpoint state, and a server-generated chat ID is not explicitly returned.
 - **Documentation and code comments overstate behavior.** Examples include an automatic/daily runner, telemetry notes that are not returned, period/version metadata, and safe sequence generation.
-- **Minimal automated testing.** Critical workflows depend on live infrastructure and lack offline coverage.
+- **Partial automated testing.** Deployment integrity has offline regression coverage, but other critical graph, API, Oracle, and alert-engine behavior still depends on live infrastructure or lacks automated coverage.
 - **Generic environment-variable collision.** Ambient `DEBUG` values that are not parseable booleans prevent all imports that construct `Settings`.
 
 ## 16. Known uncertainties

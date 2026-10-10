@@ -17,6 +17,13 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from services.aml_builder.web.services.settings import settings
+from services.aml_builder.web.services.deployment_guard import (
+    DeploymentEvidence,
+    assert_evidence_matches,
+    claim_deployment,
+    mark_deployment_succeeded,
+    release_deployment_claim,
+)
 from services.aml_builder.web.services.oracle import run_readonly, run_write, atomic_connection
 
 logger = logging.getLogger(__name__)
@@ -135,6 +142,8 @@ def save_production_scenario(
     scenario_metadata: Dict[str, Any],
     time_window_days: Optional[int] = None,
     created_by: str = "COMPLIANCE_OFFICER",
+    *,
+    deployment_evidence: DeploymentEvidence,
 ) -> bool:
     """Insert or update a confirmed scenario across both registry tables atomically.
 
@@ -156,15 +165,27 @@ def save_production_scenario(
             expected keys (COUNTRY_CODE, INST_CODE, CATEG_CODE, RISK_DEGREE, etc.).
         time_window_days (Optional[int]): Observation window size in days.
         created_by (str): User identifier written to PIO_AML_PRODUCTION_SCENARIOS.CREATED_BY.
+        deployment_evidence (DeploymentEvidence): Server-issued evidence binding
+            approval and successful validation to this exact SQL artifact.
 
     Returns:
         bool: True if both writes succeeded and were committed, False if the
             transaction failed and was rolled back on both tables.
     """
-    init_production_scenarios_table()
-    init_scenario_metadata_table()
+    assert_evidence_matches(
+        deployment_evidence,
+        scenario_name=scenario_name,
+        scenario_type=scenario_type,
+        detection_logic=detection_logic,
+        raw_sql=raw_sql,
+        scenario_metadata=scenario_metadata,
+        time_window_days=time_window_days,
+    )
+    claim_deployment(deployment_evidence)
 
     try:
+        init_production_scenarios_table()
+        init_scenario_metadata_table()
         with atomic_connection() as conn:
             cursor = conn.cursor()
 
@@ -322,8 +343,17 @@ def save_production_scenario(
             "PIO_AML_PRODUCTION_SCENARIOS and PIO_AML_SCENARIO.",
             scenario_id,
         )
-        return True
     except Exception as exc:
+        try:
+            release_deployment_claim(deployment_evidence.artifact_id)
+        except Exception as ledger_exc:
+            logger.error(
+                "[PRODUCTION_REGISTRY] Could not release failed deployment claim "
+                "for artifact %s: %s",
+                deployment_evidence.artifact_id,
+                ledger_exc,
+                exc_info=True,
+            )
         logger.error(
             "[PRODUCTION_REGISTRY] Atomic write failed for scenario %s — both tables rolled back: %s",
             scenario_id,
@@ -331,6 +361,20 @@ def save_production_scenario(
             exc_info=True,
         )
         return False
+
+    try:
+        mark_deployment_succeeded(deployment_evidence.artifact_id, scenario_id)
+    except Exception as exc:
+        # Oracle already committed. Leave the artifact IN_PROGRESS so retries
+        # fail closed instead of producing a duplicate scenario.
+        logger.critical(
+            "[PRODUCTION_REGISTRY] Scenario %s committed but deployment ledger "
+            "finalization failed; artifact remains claimed: %s",
+            scenario_id,
+            exc,
+            exc_info=True,
+        )
+    return True
 
 
 def get_production_scenarios(is_active_only: bool = True) -> List[Dict[str, Any]]:

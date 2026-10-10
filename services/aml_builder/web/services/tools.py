@@ -27,6 +27,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
+from langchain.tools import ToolRuntime
 
 from services.aml_builder.web.services.settings import settings
 from services.aml_builder.web.services.schemas import AMLIntent
@@ -37,6 +38,10 @@ from services.aml_builder.web.services.explanation_code_search import (
 from services.aml_builder.web.services.oracle import run_readonly, run_shadow_readonly
 from services.aml_builder.web.services.production_registry import (
     save_production_scenario,
+)
+from services.aml_builder.web.services.deployment_guard import (
+    DeploymentGuardError,
+    authorize_chat_deployment,
 )
 from services.aml_builder.web.services.llm_client import build_llm, safe_parse_json
 from services.aml_builder.web.services.sql_extraction import extract_sql
@@ -678,7 +683,10 @@ def prepare_scenario_metadata_for_persistence(metadata_json: str) -> str:
 
 @tool
 def persist_and_validate_scenario_in_dwh(
-    intent_json: str, raw_sql: str, metadata_json: str
+    intent_json: str,
+    raw_sql: str,
+    metadata_json: str,
+    runtime: ToolRuntime,
 ) -> str:
     """Persist the confirmed, shadow-tested AML scenario atomically into both
     PIO_AML_PRODUCTION_SCENARIOS (for the automated daily ETL runner) and
@@ -692,7 +700,8 @@ def persist_and_validate_scenario_in_dwh(
     if the scenario_id already exists it updates the record and reactivates it (IS_ACTIVE=1),
     incrementing PIO_AML_SCENARIO.VERSION_NUM. Only call after shadow test results have been
     reviewed AND prepare_scenario_metadata_for_persistence reports ready_for_persistence=True
-    (or the user explicitly confirms proceeding despite missing fields).
+    and the user explicitly approves persistence in a later turn. Missing or unverifiable
+    metadata always blocks persistence.
 
     Every mandatory PIO_AML_SCENARIO field is re-validated here against its live lookup table
     or allowed-value set before anything is written — if validation fails, NOTHING is written
@@ -703,6 +712,8 @@ def persist_and_validate_scenario_in_dwh(
         raw_sql (str): Production-grade Oracle SQL statement from the shadow test.
         metadata_json (str): Serialized PIO_AML_SCENARIO metadata JSON — the merged output of
             prepare_scenario_metadata_for_persistence plus any officer picks.
+        runtime (ToolRuntime): Injected LangGraph state and request configuration used
+            to verify current checkpoint evidence. Hidden from the LLM tool schema.
 
     Returns:
         str: JSON containing 'scenario_id', 'scenario_name', 'write_success',
@@ -713,30 +724,36 @@ def persist_and_validate_scenario_in_dwh(
         "[TOOL: PERSISTER] Writing confirmed scenario to PIO_AML_PRODUCTION_SCENARIOS + PIO_AML_SCENARIO..."
     )
 
+    configurable = runtime.config.get("configurable", {})
+    thread_id = str(configurable.get("thread_id") or "")
+    approved_by = str(configurable.get("user_id") or "unknown")
+    messages = runtime.state.get("messages", []) if runtime.state else []
     try:
-        intent_dict = json.loads(intent_json)
-    except json.JSONDecodeError as exc:
-        logger.error("[TOOL: PERSISTER] Invalid intent JSON: %s", exc)
-        return json.dumps({"error": f"Invalid intent JSON: {exc}"})
-
-    try:
-        metadata_dict = json.loads(metadata_json) if metadata_json else {}
-    except json.JSONDecodeError as exc:
-        logger.error("[TOOL: PERSISTER] Invalid metadata JSON: %s", exc)
-        return json.dumps({"error": f"Invalid metadata JSON: {exc}"})
-
-    is_valid, problems = validate_scenario_metadata(metadata_dict)
-    if not is_valid:
-        logger.warning("[TOOL: PERSISTER] Metadata validation failed: %s", problems)
+        evidence = authorize_chat_deployment(
+            messages=messages,
+            intent_json=intent_json,
+            raw_sql=raw_sql,
+            metadata_json=metadata_json,
+            thread_id=thread_id,
+            approved_by=approved_by,
+        )
+    except DeploymentGuardError as exc:
+        logger.warning(
+            "[TOOL: PERSISTER] Deployment rejected (%s): %s", exc.code, exc
+        )
         return json.dumps(
             {
                 "write_success": False,
-                "validation_errors": problems,
+                "validation_errors": [exc.code],
+                "error": str(exc),
             },
             ensure_ascii=False,
             indent=2,
         )
 
+    intent_dict = evidence.intent
+    metadata_dict = evidence.metadata
+    raw_sql = evidence.raw_sql
     scenario_name: str = intent_dict.get("scenario_name", "AML Detection Scenario")
     scenario_type: str = intent_dict.get("scenario_type", "CUSTOMER")
     detection_logic: str = intent_dict.get("detection_logic", scenario_name)
@@ -754,16 +771,31 @@ def persist_and_validate_scenario_in_dwh(
     scenario_id = f"PRD_{uuid.uuid4().hex[:8].upper()}"
     created_at = datetime.utcnow().isoformat()
 
-    success = save_production_scenario(
-        scenario_id=scenario_id,
-        scenario_name=scenario_name,
-        scenario_type=scenario_type,
-        detection_logic=detection_logic,
-        raw_sql=raw_sql,
-        scenario_metadata=metadata_dict,
-        time_window_days=time_window_days,
-        created_by=settings.AML_CREATED_BY,
-    )
+    try:
+        success = save_production_scenario(
+            scenario_id=scenario_id,
+            scenario_name=scenario_name,
+            scenario_type=scenario_type,
+            detection_logic=detection_logic,
+            raw_sql=raw_sql,
+            scenario_metadata=metadata_dict,
+            time_window_days=time_window_days,
+            created_by=settings.AML_CREATED_BY,
+            deployment_evidence=evidence,
+        )
+    except DeploymentGuardError as exc:
+        logger.warning(
+            "[TOOL: PERSISTER] Deployment claim rejected (%s): %s", exc.code, exc
+        )
+        return json.dumps(
+            {
+                "write_success": False,
+                "validation_errors": [exc.code],
+                "error": str(exc),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
 
     if success:
         logger.info(

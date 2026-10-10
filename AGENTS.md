@@ -63,10 +63,11 @@ pip install -r requirements.txt
 # unrelated ambient DEBUG variables and applies only to this shell process.
 $env:DEBUG = "false"
 .\.venv\Scripts\python.exe -m compileall -q services app.py run_alert_engine.py
+.\.venv\Scripts\python.exe -m pytest -q services\aml_builder\tests\test_deployment_guard.py
 .\.venv\Scripts\python.exe -m pytest --collect-only -q
 ```
 
-Pytest currently collects no test cases. The only test file is a manually run live integration check that requires configured Oracle/OpenAI access and may query live systems:
+The deployment-guard suite is offline and deterministic. The registry analytics file remains a manually run live integration check that requires configured Oracle/OpenAI access and may query live systems:
 
 ```powershell
 $env:DEBUG = "false"

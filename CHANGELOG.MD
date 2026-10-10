@@ -5,6 +5,19 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-10-10] security: Enforce deployment approval and artifact integrity
+
+### What
+- Added a shared fail-closed deployment guard for the chat persistence tool and `POST /scenario/deploy`.
+- Bound approval to the exact current intent, successfully shadow-tested SQL, and validated governance metadata using a SHA-256 artifact identity.
+- Made the production registry writer require server-issued deployment evidence.
+- Added a SQLite claim ledger preventing concurrent or replayed deployment while allowing retry after pre-commit failure.
+- Added offline tests for approval bypass, validation failure, stale SQL/intent/metadata, missing evidence, retry, and concurrent requests.
+
+### Verification
+- `python -m pytest -q services/aml_builder/tests/test_deployment_guard.py`
+- `python -m compileall -q services app.py run_alert_engine.py`
+
 ## [2026-10-05] docs: Canonical code-verified project overview
 
 ### What
