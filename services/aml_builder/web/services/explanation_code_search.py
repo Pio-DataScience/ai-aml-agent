@@ -162,11 +162,11 @@ def search_explanation_candidates(
     return candidates
 
 
-def select_relevant_explanation_codes(
-    transaction_type: str, min_similarity: float = 0.55
+def _select_codes_for_single_type(
+    single_type: str, min_similarity: float = 0.55
 ) -> List[Dict[str, Any]]:
-    """Sub-LLM selection & ranking for candidates meeting the similarity threshold."""
-    candidates = search_explanation_candidates(transaction_type, min_similarity=min_similarity, top_k=100)
+    """Sub-LLM selection & ranking for candidates meeting the similarity threshold for a single transaction type."""
+    candidates = search_explanation_candidates(single_type, min_similarity=min_similarity, top_k=100)
     if not candidates:
         return []
 
@@ -181,7 +181,7 @@ def select_relevant_explanation_codes(
 
     prompt = (
         "You are an expert AML database classifier.\n"
-        f"User Goal / Transaction Type: '{transaction_type}'\n\n"
+        f"User Goal / Transaction Type: '{single_type}'\n\n"
         "Analyze the candidate explanation codes from the bank DWH catalog (PIO_EXPLANATION_CODE) below. "
         "Select and rank ALL explanation codes that correspond to this transaction type (or relevant sub-types).\n\n"
         f"CANDIDATES:\n{candidates_text}\n\n"
@@ -209,13 +209,14 @@ def select_relevant_explanation_codes(
         logger.info(
             "[EXPL_SEARCH] Sub-LLM selected %d explanation codes for '%s' (min_similarity=%.2f).",
             len(parsed),
-            transaction_type,
+            single_type,
             min_similarity,
         )
         return parsed
     except Exception as exc:
         logger.error(
-            "[EXPL_SEARCH] Sub-LLM reranking failed: %s. Returning top vector candidates.",
+            "[EXPL_SEARCH] Sub-LLM reranking failed for '%s': %s. Returning top vector candidates.",
+            single_type,
             exc,
         )
         fallback = []
@@ -230,7 +231,51 @@ def select_relevant_explanation_codes(
         return fallback
 
 
-def format_explanation_code_checkpoint(transaction_type: str, matches: List[Dict[str, Any]]) -> str:
+def select_relevant_explanation_codes(
+    transaction_type: Any, min_similarity: float = 0.55
+) -> List[Dict[str, Any]]:
+    """Select and rank explanation codes for single or multiple transaction types with deduplication."""
+    if not transaction_type:
+        return []
+
+    # Parse into a list of distinct query strings
+    types_list: List[str] = []
+    if isinstance(transaction_type, list):
+        for item in transaction_type:
+            if isinstance(item, str) and item.strip():
+                types_list.append(item.strip())
+    elif isinstance(transaction_type, str):
+        # Split comma, semicolon, or 'or' / 'and' separated phrases if multiple types listed
+        parts = re.split(r"[,;]|\b(?:or|and)\b", transaction_type, flags=re.IGNORECASE)
+        cleaned = [p.strip() for p in parts if p.strip() and len(p.strip()) > 2 and p.strip().lower() not in ("or", "and")]
+        if len(cleaned) > 1:
+            types_list = cleaned
+        else:
+            types_list = [transaction_type.strip()]
+
+    if not types_list:
+        return []
+
+    all_matches: List[Dict[str, Any]] = []
+    seen_codes = set()
+
+    for tx in types_list:
+        codes = _select_codes_for_single_type(tx, min_similarity=min_similarity)
+        for c in codes:
+            code_val = str(c.get("code", "")).strip()
+            if code_val and code_val not in seen_codes:
+                seen_codes.add(code_val)
+                c["channel"] = tx
+                c["transaction_type"] = tx
+                # Annotate reason with matched transaction type if multi-type search
+                if len(types_list) > 1 and "reason" in c:
+                    c["reason"] = f"[{tx}] {c.get('reason', '')}".strip()
+                all_matches.append(c)
+
+    return all_matches
+
+
+def format_explanation_code_checkpoint(transaction_type: Any, matches: List[Dict[str, Any]]) -> str:
     """Format discovered transaction types into a clean executive markdown table view."""
     if not matches:
         return ""
@@ -247,9 +292,10 @@ def format_explanation_code_checkpoint(transaction_type: str, matches: List[Dict
     table_body = "\n".join(table_rows)
 
     count_str = f"({len(matches)} Matches Found)"
+    label = ", ".join(transaction_type) if isinstance(transaction_type, list) else str(transaction_type)
 
     return (
-        f"### 🔍 Discovered Transaction Types for **\"{transaction_type}\"** {count_str}\n\n"
+        f"### 🔍 Discovered Transaction Types for **\"{label}\"** {count_str}\n\n"
         f"I searched our compliance transaction catalog and identified the following matching transaction codes:\n\n"
         f"| Code | Description | Match % | Relevance | Reason |\n"
         f"| :--- | :--- | :--- | :--- | :--- |\n"

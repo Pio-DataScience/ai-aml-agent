@@ -82,6 +82,14 @@ class Threshold(BaseModel):
             "Use 'AGGREGATE' for accumulated daily totals, sums, counts, or averages (HAVING clause)."
         ),
     )
+    transaction_type: Optional[str] = Field(
+        default=None,
+        description="Specific transaction channel/type this threshold applies to (e.g. 'OUTWARD TRANSFER', 'CASH DEPOSIT').",
+    )
+    explanation_codes: Optional[List[str]] = Field(
+        default=None,
+        description="Specific compliance explanation codes bound directly to this threshold filter.",
+    )
 
 
 class TimeWindow(BaseModel):
@@ -233,6 +241,14 @@ class SemanticCondition(BaseModel):
     predicate: str = Field(
         ..., description="A single, atomic plain English business rule."
     )
+    transaction_type: Optional[str] = Field(
+        default=None,
+        description="Specific transaction channel/type this condition applies to.",
+    )
+    explanation_codes: Optional[List[str]] = Field(
+        default=None,
+        description="Specific compliance explanation codes bound directly to this semantic condition.",
+    )
     provenance: Literal["stated", "assumed_default", "needs_user"] = Field(
         default="stated"
     )
@@ -292,9 +308,17 @@ class AMLIntent(BaseModel):
             "'OUTWARD TRANSFER', or null if all transaction types are monitored."
         ),
     )
+    transaction_types: Optional[List[str]] = Field(
+        default=None,
+        description="List of explicit transaction types if multiple are present e.g. ['OUTWARD TRANSFER', 'CASH DEPOSIT'].",
+    )
     explanation_codes: Optional[List[str]] = Field(
         default=None,
-        description="Discovered or user-selected domain explanation code strings.",
+        description="Discovered or user-selected domain explanation code strings (flat list).",
+    )
+    explanation_codes_by_type: Optional[Dict[str, List[str]]] = Field(
+        default=None,
+        description="Discovered explanation codes partitioned/mapped by transaction type name e.g. {'OUTWARD TRANSFER': ['1414'], 'CASH DEPOSIT': ['110']}.",
     )
     detection_logic: str = Field(
         ..., description="Plain English description of the detection logic."
@@ -377,6 +401,27 @@ class AMLIntent(BaseModel):
             "anchor — used during shadow testing against seeded/historical DWH snapshots."
         ),
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_transaction_types(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            tx_type = data.get("transaction_type")
+            tx_types = data.get("transaction_types")
+            if isinstance(tx_type, list):
+                data["transaction_types"] = [str(x).strip() for x in tx_type if str(x).strip()]
+                data["transaction_type"] = ", ".join(data["transaction_types"])
+            elif isinstance(tx_types, list) and tx_types:
+                data["transaction_types"] = [str(x).strip() for x in tx_types if str(x).strip()]
+                if not tx_type:
+                    data["transaction_type"] = ", ".join(data["transaction_types"])
+            elif isinstance(tx_type, str) and tx_type.strip():
+                # Split comma/semicolon/OR/AND separated phrases if multiple types listed in single string
+                parts = re.split(r"[,;]|\b(?:or|and)\b", tx_type, flags=re.IGNORECASE)
+                cleaned = [p.strip() for p in parts if p.strip() and len(p.strip()) > 2 and p.strip().lower() not in ("or", "and")]
+                if len(cleaned) > 1 and not tx_types:
+                    data["transaction_types"] = cleaned
+        return data
 
     @model_validator(mode="after")
     def validate_and_deduplicate_thresholds(self) -> "AMLIntent":

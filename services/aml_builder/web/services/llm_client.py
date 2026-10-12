@@ -23,8 +23,10 @@ def build_llm(fast: bool = False) -> ChatOpenAI:
 
     Supports two providers controlled by LLM_PROVIDER env var:
     - 'openai'   : standard OpenAI endpoint (requires OPENAI_API_KEY).
-    - 'lmstudio' : local LM Studio server at LLM_BASE_URL (e.g. http://127.0.0.1:1234/v1).
-                   Uses a dummy api_key value since LM Studio does not enforce authentication.
+                   Includes smart detection for reasoning models (e.g. gpt-5.6-luna, o1, o3)
+                   to configure reasoning_effort and temperature parameters appropriately.
+    - 'lmstudio' : local LM Studio / vLLM / Ollama server at LLM_BASE_URL (e.g. http://127.0.0.1:1234/v1).
+                   Uses standard ChatOpenAI params without proprietary OpenAI kwargs.
 
     Args:
         fast (bool): If True, use settings.LLM_MODEL_FAST instead of the primary model —
@@ -33,19 +35,40 @@ def build_llm(fast: bool = False) -> ChatOpenAI:
     Returns:
         ChatOpenAI: Configured LLM instance.
     """
+    model_name = settings.LLM_MODEL_FAST if fast else settings.LLM_MODEL
     kwargs: Dict[str, Any] = {
-        "model": settings.LLM_MODEL_FAST if fast else settings.LLM_MODEL,
-        "temperature": settings.LLM_TEMPERATURE,
+        "model": model_name,
         "max_retries": 5,
         "timeout": 120.0,
     }
+
     if settings.LLM_PROVIDER == "lmstudio":
         kwargs["base_url"] = settings.LLM_BASE_URL or "http://127.0.0.1:1234/v1"
-        kwargs["api_key"] = (
-            "lm-studio"  # LM Studio ignores the key but langchain requires it
-        )
+        kwargs["api_key"] = "lm-studio"
+        kwargs["temperature"] = settings.LLM_TEMPERATURE
     else:
         kwargs["api_key"] = settings.OPENAI_API_KEY
+
+        # Detect if model is an OpenAI reasoning model
+        is_reasoning_model = any(
+            tag in model_name.lower()
+            for tag in ("o1", "o3", "gpt-5", "reasoner", "thinking", "luna")
+        )
+
+        # Configure reasoning_effort
+        if settings.LLM_REASONING_EFFORT:
+            kwargs["reasoning_effort"] = settings.LLM_REASONING_EFFORT
+        elif is_reasoning_model:
+            # Default to 'none' for function-calling compatibility in chat completions
+            kwargs["reasoning_effort"] = "none"
+
+        # Some strict reasoning models (like o1-preview, o1-mini) reject custom temperature
+        is_strict_fixed_temp = any(
+            model_name.lower().startswith(prefix) for prefix in ("o1-preview", "o1-mini")
+        )
+        if not is_strict_fixed_temp:
+            kwargs["temperature"] = settings.LLM_TEMPERATURE
+
     return ChatOpenAI(**kwargs)
 
 
