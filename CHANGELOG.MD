@@ -5,6 +5,106 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-10-06] fix: PIOTECH_AI_URL Pointed at an Unserved Port (Shadow Test Could Never Connect)
+
+### What
+- **Root Cause**: `PIOTECH_AI_URL` defaulted to `http://localhost:8001/chat/stream`, but nothing listens on 8001.
+  The PioTech-AI module actually deployed as this agent's text-to-SQL counterpart is
+  `services.dwh_scenario_agent.web.api.main:app` on **port 8006** (bound to `127.0.0.1` only). `httpx` raised
+  `ConnectError`, caught as `httpx.HTTPError` at `tools.py:445` and returned as a generic
+  `"PioTech AI HTTP error"`, which the orchestrator LLM then paraphrased to the user as a "temporary network
+  problem or service downtime" — masking a static misconfiguration as a transient fault.
+- **Fix Applied**:
+  - `.env` (not committed): `PIOTECH_AI_URL=http://127.0.0.1:8006/chat/stream`. Backup at `.env.bak.20261006`.
+  - `settings.py`: `PIOTECH_AI_URL` default changed to `http://127.0.0.1:8006/chat/stream`; description now names
+    the `services/dwh_scenario_agent` module and its loopback-only binding.
+  - `CLAUDE.md`: external-dependency section updated to the correct module and port.
+- Uses `127.0.0.1` rather than `localhost` deliberately: port 8006 is bound to IPv4 loopback only, and `localhost`
+  can resolve to `::1` first on Windows, which fails identically.
+
+### Note
+`run_dev.ps1` exports `.env` values as **process-scope** environment variables, which override `.env` in
+pydantic-settings. `--reload` does not re-read settings. Restart Service A in a **new terminal**, or run
+`Remove-Item Env:PIOTECH_AI_URL` first.
+
+### Verify
+`Get-NetTCPConnection` confirmed 8005 (AML Builder) and 8006 (`dwh_scenario_agent`, PID 9828) listening, 8001
+unreachable. `GET http://127.0.0.1:8006/openapi.json` lists `/chat/stream`. Both Oracle DSNs reachable.
+End-to-end shadow test not yet re-run — requires the Service A restart above.
+
+## [2026-10-06] docs: Correct Service B Module Attribution in Local-Inference Inventory
+
+### What
+- `Docs/05_local_inference_hardware.md` attributed Service B to `services/dwh` (port 8001). The deployed module
+  is `services/dwh_scenario_agent` (port 8006), which is a **leaner fork**: it has no supervisor node, no vision
+  tool and no safeguard guardrail, and never contacts LM Studio.
+- **Counts corrected: 10 runtime roles / 6 distinct models → 7 roles / 4 models.** Dropped `qwen/qwen3-vl-8b`
+  and `meta-llama/Llama-Guard-3-8B` entirely (declared in `settings.py:172-188` but no code reads them), and the
+  supervisor role. `BAAI/bge-large-en-v1.5` is now the only already-local model.
+- Removed vision + guardrail VRAM (~11–14 GB) from all three hardware tables; added a note on what to add back
+  if the system is ever repointed at `services/dwh`.
+- Also recorded: `_get_sql_error_explanation` (`agent.py:421`) imports `ChatOpenAI` but is pure rule-based
+  ORA-code matching — a dead import, not an LLM call. And the live service loaded BGE on **CPU** (`device_name:
+  cpu`, ~2.5 s per warmup embedding) despite `EMBED_DEVICE=cuda`, because the module resolves the device as
+  `auto`.
+
+### Note
+The API-based model set is unchanged (`gpt-4o`, `gpt-4o-mini`, `gpt-4o-mini-2024-07-18`,
+`text-embedding-ada-002`), as is the single code blocker — the three hardcoded `OpenAIEmbeddings(...)` call
+sites in Service A. The two modules' `settings.py` differ only in port and added `COUNTRY_CODE`/`INST_CODE`;
+`embeddings_provider.py` is byte-identical.
+
+## [2026-10-04] docs: Local Inference Model Inventory & Hardware Sizing
+
+### What
+- Added [`Docs/05_local_inference_hardware.md`](Docs/05_local_inference_hardware.md): a full audit of every model
+  invoked at runtime across Service A (`ai-aml-agent`) and the `services/dwh` module of Service B (`PioTech-AI`),
+  which is the only PioTech-AI module on the AML scenario-creation path.
+- **10 runtime model roles, 6 distinct models.** API-based: `gpt-4o`, `gpt-4o-mini`, `gpt-4o-mini-2024-07-18`,
+  `text-embedding-ada-002`. Already local: `BAAI/bge-large-en-v1.5` (sentence-transformers, CUDA),
+  `qwen/qwen3-vl-8b` and `meta-llama/Llama-Guard-3-8B` (both LM Studio).
+- **Only one code blocker to pure local inference**: the three `OpenAIEmbeddings(...)` instantiations in
+  `explanation_code_search.py` (lines 95, 137) and `scenario_registry_analytics.py` (line 164). None passes
+  `model=`, so all silently use the langchain-openai default `text-embedding-ada-002`. Every chat model is
+  already switchable via `LLM_PROVIDER=lmstudio`.
+- Doc includes three local-model quality tiers, KV-cache math showing context (not weights) is the dominant VRAM
+  cost at Service B's `LLM_MAX_TOKENS=100000`, and three hardware tables sized for 1–3 / 5–10 / 20+ concurrent
+  users with the reasoning for each step up.
+
+### Note
+No code changed — this is an audit document. The embedding provider switch described in its migration checklist
+is not yet implemented. Switching the embedding model will invalidate the `PIO_EXPLANATION_CODE` pickle vector
+cache, which must then be rebuilt.
+
+## [2026-09-17] fix: run_dev.ps1 .env Parser Mishandled Inline Comments
+
+### What
+- **Root Cause**: `run_dev.ps1` exported `.env` values with `$value.Trim().Trim('"').Trim("'")`, which has no concept
+  of inline comments. `LLM_PROVIDER=openai   # "openai" or "lmstudio"` was exported as the literal string
+  `openai   # "openai" or "lmstudio` (the trailing `"` stripped by `Trim('"')`). Because process environment
+  variables take precedence over `.env` in pydantic-settings, `Settings` rejected it at import:
+  `LLM_PROVIDER must be one of {'openai', 'lmstudio'}`.
+- **Fix Applied**:
+  - `run_dev.ps1`: quoted values now keep only the text inside the quotes; unquoted values drop an inline
+    comment (a `#` preceded by whitespace). `#` with no preceding whitespace (e.g. inside a password) is kept.
+    Matches python-dotenv's semantics, so the script and pydantic-settings now read `.env` identically.
+  - Local `.env` (not committed): moved the `LLM_PROVIDER` comment onto its own line.
+
+### Note
+`run_dev.ps1` sets variables with process scope, so a bad value exported by the old parser persists in that
+PowerShell window after the script exits and still overrides `.env`. Open a new terminal, or run
+`Remove-Item Env:LLM_PROVIDER`, before retrying in the same window.
+
+### Verify
+Parser tested against inline-comment, double-quoted-with-`#`, single-quoted, `#`-without-whitespace, quoted-plain
+and plain values (6/6 pass). End-to-end: parsed the real `.env` with the new logic and imported `Settings` —
+`LLM_PROVIDER='openai'`, loads cleanly.
+
+### Files modified
+`run_dev.ps1`
+
+---
+
 ## [2026-08-19] fix: Anti-Loop Stopping Rule for Registry Tool & Hard Recursion Limit
 
 ### What
