@@ -5,6 +5,37 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-10-14] feat: Pass the PioTech rejection report through to the officer
+
+### What
+- **Problem**: when the PioTech DWH Scenario Agent refused a scenario, it streamed a `scenario_report` and an
+  `error` event naming the blocking condition, the reason and how to get past it. The shadow-test tool ignored
+  both and returned "PioTech AI did not return a valid SQL query", so the agent guessed a cause ("needs a small
+  refinement", "too complex to combine deposits AND withdrawals"), retried the same intent up to five times, and
+  sometimes moved on to the governance step with no SQL.
+- **Fix**:
+  - New `web/services/piotech_report.py`: turns the PioTech report + error into a structured rejection
+    (`kind`, `blocked_by`, `reasons`, `suggestions`, `implementable_without`, `warnings`) and a markdown panel.
+    Kinds: `NOT_IMPLEMENTABLE`, `UNRESOLVED`, `VALIDATION_FAILED`, `NO_SQL`, `SERVICE_UNAVAILABLE`.
+    Suggestions reuse PioTech's own advice sentences; a generic one is added only when it gave none.
+  - `tools.py` (`execute_oracle_dwh_shadow_test`): captures `scenario_report` and `error` from the stream and
+    returns `error` (one-line summary), `rejection`, `rejection_report` (markdown) and `scenario_report`. A refused
+    connection now returns a `SERVICE_UNAVAILABLE` rejection that says the scenario was not evaluated.
+  - `routes/chat.py`: emits the markdown as an `escalation_report` SSE event, which the existing UI already renders
+    in the side panel (no frontend change). `routes/sessions.py`: restores that panel from chat history.
+  - `prompts/tool_driven_system.md`: the agent must present Blocked by / Reason / Suggestion as given, never invent a
+    cause, never re-call the shadow test with the same intent, and never proceed to governance without SQL.
+- Successful shadow tests are unchanged.
+
+### Verify
+- `PYTHONPATH=services/aml_builder pytest services/aml_builder/tests/test_piotech_rejection.py` — 10 tests: parsing of
+  real OPENBI2 report shapes, markdown sections, and the tool end to end against a mocked PioTech stream (refusal,
+  unreachable service, unchanged success path). Existing `test_all_transaction_code_scope.py` still passes.
+- End to end on the live services (OPENBI2, no persist): the pass-through scenario with "without maintaining a
+  balance" now shows the blocker, PioTech's reason and its 90% alternative in chat and in the side panel; asking to
+  proceed to governance is refused; the panel is restored from `/chat/.../history`.
+- `flake8`/`black` are not installed in `.venv`, so they were not run.
+
 ## [2026-10-13] fix: Skip explanation-code discovery for all transaction scope
 
 ### What

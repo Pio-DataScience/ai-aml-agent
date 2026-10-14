@@ -67,6 +67,7 @@ async def get_chat_history(project_id: str, chat_id: str, user_id: str):
             pending_plan_artifact = None
             pending_scenario_result = None
             pending_metadata_catalog = None
+            pending_escalation_report = None
 
             for msg in messages_data:
                 msg_class = msg.__class__.__name__
@@ -104,6 +105,9 @@ async def get_chat_history(project_id: str, chat_id: str, user_id: str):
                     if not meta_cat and pending_metadata_catalog:
                         meta_cat = pending_metadata_catalog
                         pending_metadata_catalog = None
+                    if not esc_rep and pending_escalation_report:
+                        esc_rep = pending_escalation_report
+                        pending_escalation_report = None
 
                     # Skip if message is entirely empty (no text and no artifacts)
                     if not content.strip() and not (plan_art or val_res or esc_rep or meta_cat):
@@ -136,6 +140,9 @@ async def get_chat_history(project_id: str, chat_id: str, user_id: str):
                                     if not pending_metadata_catalog:
                                         from services.aml_builder.web.services.scenario_metadata import build_metadata_catalog
                                         pending_metadata_catalog = build_metadata_catalog(payload["scenario_metadata"])
+                                elif payload.get("rejection_report"):
+                                    # PioTech generated no SQL: restore its explanation panel.
+                                    pending_escalation_report = payload["rejection_report"]
                                 elif tool_name in ("persist_and_validate_scenario_in_dwh", "execute_oracle_dwh_shadow_test") or "write_success" in payload or "header_alert_count" in payload:
                                     pending_scenario_result = payload
                         except (json.JSONDecodeError, Exception):

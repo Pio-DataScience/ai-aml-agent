@@ -151,7 +151,15 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                                 # Emit shadow test results or scenario persistence confirmation card
                                 try:
                                     payload = json.loads(getattr(m, "content", "{}"))
-                                    if "raw_sql" in payload or payload.get("write_success") or "shadow_test_metrics" in payload:
+                                    if payload.get("rejection_report"):
+                                        # PioTech generated no SQL: show its own explanation
+                                        # (blocked by / reason / suggestion) in the side panel.
+                                        yield _sse(SSEEvent(type="escalation_report", text=payload["rejection_report"]))
+                                        logger.info(
+                                            "[API] Emitted PioTech rejection report: %s",
+                                            payload.get("error", ""),
+                                        )
+                                    elif "raw_sql" in payload or payload.get("write_success") or "shadow_test_metrics" in payload:
                                         yield _sse(SSEEvent(type="scenario_result", data=payload))
                                         logger.info("[API] Emitted scenario_result SSE from %s.", tool_name)
                                 except Exception as exc:
