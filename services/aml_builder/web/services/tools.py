@@ -56,6 +56,41 @@ from services.aml_builder.web.services.scenario_registry_analytics import (
 
 logger = logging.getLogger(__name__)
 
+_ALL_TRANSACTION_SCOPE_LABELS = {
+    "ALL",
+    "ALL TRANSACTION",
+    "ALL TRANSACTIONS",
+    "ALL TYPES",
+    "ALL TRANSACTION TYPES",
+    "ANY",
+    "ANY TRANSACTION",
+    "ANY TRANSACTIONS",
+    "ANY TYPE",
+    "ANY TYPES",
+    "ANY TRANSACTION TYPE",
+    "ANY TRANSACTION TYPES",
+}
+
+
+def _specific_transaction_types(transaction_type: Any) -> List[str]:
+    """Return specific transaction types, excluding all/any scope labels.
+
+    Args:
+        transaction_type: One transaction type or a list of transaction types.
+
+    Returns:
+        Specific transaction types that can be used for code discovery.
+    """
+    values = (
+        transaction_type if isinstance(transaction_type, list) else [transaction_type]
+    )
+    return [
+        normalized
+        for value in values
+        if value and (normalized := " ".join(str(value).strip().upper().split()))
+        and normalized not in _ALL_TRANSACTION_SCOPE_LABELS
+    ]
+
 
 # =============================================================================
 def _bind_channels_and_codes_to_intent(
@@ -130,10 +165,14 @@ def analyze_intent_and_discover_explanation_codes(
     existing_intent_json: Optional[str] = None,
     existing_metadata_json: Optional[str] = None,
 ) -> str:
-    """Analyze the user's compliance scenario prompt, extract structured scenario parameters (AMLIntent),
-    run vector similarity search against the domain explanation codes catalog (top 70% relative
-    cutoff), and deterministically seed the PIO_AML_SCENARIO governance metadata (period, country/
-    institution codes, description, etc.) that will later be needed at persistence time.
+    """Extract scenario intent, conditionally discover codes, and seed governance metadata.
+
+    For specific transaction types, code discovery uses vector similarity search against the domain
+    explanation-code catalog (top 70% relative cutoff). It also seeds PIO_AML_SCENARIO metadata
+    (period, country/institution codes, description, etc.) for later persistence.
+
+    ALL/ANY transaction scope does not need explanation-code discovery. Do not search the catalog
+    for ALL/ANY or unspecified transaction types; only search for one or more specific types.
 
     IMPORTANT: Always invoke `generate_scenario_execution_plan` immediately after this tool in the
     same turn to render the implementation plan artifact in the side panel before responding to the user.
@@ -294,6 +333,9 @@ def analyze_intent_and_discover_explanation_codes(
         discovered_codes = []
         expl_checkpoint = None
 
+        target_types = tx_types if tx_types else tx_type
+        specific_types = _specific_transaction_types(target_types)
+
         # If user explicitly confirmed/selected codes via LLM resolution, preserve them & skip re-discovery checkpoint
         if (
             explicit_codes
@@ -304,38 +346,53 @@ def analyze_intent_and_discover_explanation_codes(
                 "[TOOL: INTENT] User/LLM confirmed explicit explanation codes: %s",
                 explicit_codes,
             )
+        elif specific_types:
+            # Search only for explicitly named transaction types. ALL/ANY is
+            # a scope choice, not a catalog query.
+            search_types: Any = (
+                specific_types if isinstance(target_types, list) else specific_types[0]
+            )
+            discovered_codes = select_relevant_explanation_codes(search_types)
+            if discovered_codes:
+                expl_checkpoint = format_explanation_code_checkpoint(
+                    search_types, discovered_codes
+                )
+                code_strings = [
+                    str(c.get("code")).strip()
+                    for c in discovered_codes
+                    if c.get("code")
+                ]
+                intent_dict["explanation_codes"] = code_strings
+
+                # Build explanation_codes_by_type partitioning
+                codes_by_type: Dict[str, List[str]] = {}
+                for c in discovered_codes:
+                    tx_key = c.get("channel") or c.get("transaction_type") or (search_types[0] if isinstance(search_types, list) else str(search_types))
+                    codes_by_type.setdefault(tx_key, []).append(str(c.get("code")).strip())
+                intent_dict["explanation_codes_by_type"] = codes_by_type
+
+                # Bind channel-specific explanation codes directly to individual thresholds and semantic conditions
+                _bind_channels_and_codes_to_intent(intent_dict, discovered_codes, codes_by_type)
+
+                logger.info(
+                    "[TOOL: INTENT] Vector search discovered %d codes across %d channels: %s",
+                    len(code_strings),
+                    len(codes_by_type),
+                    list(codes_by_type.keys()),
+                )
+
         else:
-            target_types = tx_types if tx_types else (tx_type if tx_type else None)
-            if target_types:
-                # Run vector search discovery for single or multiple types
-                discovered_codes = select_relevant_explanation_codes(target_types)
-                if discovered_codes:
-                    expl_checkpoint = format_explanation_code_checkpoint(
-                        target_types, discovered_codes
-                    )
-                    code_strings = [
-                        str(c.get("code")).strip()
-                        for c in discovered_codes
-                        if c.get("code")
-                    ]
-                    intent_dict["explanation_codes"] = code_strings
-
-                    # Build explanation_codes_by_type partitioning
-                    codes_by_type: Dict[str, List[str]] = {}
-                    for c in discovered_codes:
-                        tx_key = c.get("channel") or c.get("transaction_type") or (target_types[0] if isinstance(target_types, list) else str(target_types))
-                        codes_by_type.setdefault(tx_key, []).append(str(c.get("code")).strip())
-                    intent_dict["explanation_codes_by_type"] = codes_by_type
-
-                    # Bind channel-specific explanation codes directly to individual thresholds and semantic conditions
-                    _bind_channels_and_codes_to_intent(intent_dict, discovered_codes, codes_by_type)
-
-                    logger.info(
-                        "[TOOL: INTENT] Vector search discovered %d codes across %d channels: %s",
-                        len(code_strings),
-                        len(codes_by_type),
-                        list(codes_by_type.keys()),
-                    )
+            # Do not let model-generated codes turn an ALL/ANY request into a
+            # restricted transaction population. Explicit user-selected codes
+            # are handled by the branch above.
+            intent_dict["explanation_codes"] = None
+            intent_dict["explanation_codes_by_type"] = None
+            for condition_field in ("thresholds", "semantic_conditions"):
+                conditions = intent_dict.get(condition_field)
+                if isinstance(conditions, list):
+                    for condition in conditions:
+                        if isinstance(condition, dict):
+                            condition["explanation_codes"] = None
 
         intent = AMLIntent(**intent_dict)
 

@@ -80,4 +80,8 @@ Output ONLY a valid JSON object matching AMLIntent schema with mandatory root ke
       * On each entry in 'thresholds' and 'semantic_conditions', explicitly bind 'transaction_type': '<MATCHING_TX_TYPE>' so each threshold is unambiguously linked to its corresponding transaction channel.
       * NEVER leave 'transaction_type' or 'transaction_types' null if transaction activities or channels are mentioned in the prompt.
 
+14. ALL / ANY TRANSACTION SCOPE:
+    - When the user asks for 'any', 'all', or does not restrict transaction type, represent the scope as ANY/ALL (or null when no type is stated) and leave explanation_codes and explanation_codes_by_type empty/null unless the user explicitly selected specific codes.
+    - Never invent a specific transaction type to enable explanation-code discovery.
+
 Do not wrap in markdown fences.
