@@ -150,6 +150,25 @@ class Settings(BaseSettings):
         default="0",
         description="project_id sent in PioTech AI requests.",
     )
+    PIOTECH_AUTO_CORRECT: bool = Field(
+        default=True,
+        description=(
+            "When PioTech refuses a condition as NOT_IMPLEMENTABLE, remove or replace it and retry "
+            "automatically, reporting every change as a warning. False restores the hard stop."
+        ),
+    )
+    PIOTECH_AUTO_CORRECT_MAX_ATTEMPTS: int = Field(
+        default=2,
+        description="Maximum automatic correction rounds per shadow test before the refusal is shown.",
+    )
+    PIOTECH_SHOW_AUTO_CORRECTIONS: bool = Field(
+        default=False,
+        description=(
+            "Show the automatic-correction warnings to the user (shadow test, governance, save). "
+            "False hides them from the chat; corrections are still applied, logged at WARNING level "
+            "and kept in the tool result as 'auto_corrections'."
+        ),
+    )
 
     # ─── LangGraph / State ────────────────────────────────────────────────────
     CHECKPOINT_DB_PATH: str = Field(
