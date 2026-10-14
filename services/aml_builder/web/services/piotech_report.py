@@ -21,6 +21,7 @@ Event shapes consumed (PioTech ``services/dwh_scenario_agent``):
     error:           {"type": "error", "message": "NOT_IMPLEMENTABLE: ..." | "UNRESOLVED: a | b" | str}
 """
 
+import json
 import re
 from typing import Any, Dict, Final, List, Literal, Optional
 
@@ -29,6 +30,7 @@ RejectionKind = Literal[
     "UNRESOLVED",
     "VALIDATION_FAILED",
     "NO_SQL",
+    "REQUEST_REJECTED",
     "SERVICE_UNAVAILABLE",
 ]
 
@@ -37,7 +39,15 @@ _KIND_TITLES: Final[Dict[str, str]] = {
     "UNRESOLVED": "The scenario needs your answer before SQL can be generated",
     "VALIDATION_FAILED": "The generated SQL did not pass validation",
     "NO_SQL": "The SQL service returned no SQL",
+    "REQUEST_REJECTED": "The SQL service rejected the scenario as sent",
     "SERVICE_UNAVAILABLE": "The SQL service could not be reached",
+}
+
+# Plain-language hints for intent fields the PioTech contract validates (HTTP 422).
+_FIELD_HINTS: Final[Dict[str, str]] = {
+    "time_window": "State the period to look over, for example \"within 30 days\". A window of 0 is not allowed.",
+    "baseline_window": "State the earlier period to compare with, for example \"compared with the previous 180 days\".",
+    "thresholds": "State the amount or count to test, for example \"more than 20,000 JOD\" or \"more than 10 deposits\".",
 }
 
 # Sentences in a PioTech reason or warning that tell the officer what to do instead.
@@ -173,6 +183,56 @@ def build_unavailable_rejection(url: str, detail: str) -> Dict[str, Any]:
     }
 
 
+def build_http_rejection(status_code: int, body: str) -> Dict[str, Any]:
+    """Build the rejection for a PioTech service that answered with an HTTP error status.
+
+    The service was reachable; it refused the request. For 422 the body is FastAPI's
+    validation detail naming the intent field that broke the PioTech contract.
+
+    Args:
+        status_code (int): The HTTP status returned (4xx or 5xx).
+        body (str): The raw response body.
+
+    Returns:
+        Dict[str, Any]: A rejection in the same shape as :func:`build_rejection`, kind
+            ``REQUEST_REJECTED`` for 4xx, or ``VALIDATION_FAILED`` for 5xx (an internal
+            failure of the SQL service).
+    """
+    detail = _http_detail(body)
+    if status_code >= 500:
+        return {
+            "kind": "VALIDATION_FAILED",
+            "title": "The SQL service failed while processing the scenario",
+            "blocked_by": [f"an internal error in the SQL service (HTTP {status_code})"],
+            "reasons": [{"condition": f"HTTP {status_code}", "reason": detail or "No detail was returned."}],
+            "suggestions": [
+                "This is a fault in the SQL service, not in the scenario. Try again; if it repeats, "
+                "share this reason with the PioTech team."
+            ],
+            "implementable_without": [],
+            "warnings": [],
+            "message": detail,
+        }
+
+    fields = sorted({f for f in _FIELD_HINTS if f in detail})
+    suggestions = [_FIELD_HINTS[f] for f in fields]
+    suggestions.append(
+        "The scenario as sent is missing a value or has an invalid one. Restate the scenario "
+        "with that value; the SQL service did not evaluate it."
+    )
+    return {
+        "kind": "REQUEST_REJECTED",
+        "title": _KIND_TITLES["REQUEST_REJECTED"],
+        "blocked_by": [f"the {f.replace('_', ' ')} of the scenario" for f in fields]
+        or [f"the scenario as sent (HTTP {status_code})"],
+        "reasons": [{"condition": f"HTTP {status_code}", "reason": detail or "No detail was returned."}],
+        "suggestions": suggestions,
+        "implementable_without": [],
+        "warnings": [],
+        "message": detail,
+    }
+
+
 def render_rejection_markdown(rejection: Dict[str, Any]) -> str:
     """Render a rejection as markdown for the UI side panel.
 
@@ -245,6 +305,33 @@ def _str_list(value: Any) -> List[str]:
     if not isinstance(value, list):
         return []
     return [str(item).strip() for item in value if item is not None and str(item).strip()]
+
+
+def _http_detail(body: str) -> str:
+    """Extract a readable message from an HTTP error body (FastAPI ``{"detail": ...}`` or text).
+
+    Args:
+        body (str): The raw response body.
+
+    Returns:
+        str: The detail as one line of text ("" if the body is empty).
+    """
+    text = (body or "").strip()
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return " ".join(text.split())[:800]
+    detail = parsed.get("detail", parsed) if isinstance(parsed, dict) else parsed
+    if isinstance(detail, list):
+        parts = []
+        for item in detail:
+            if isinstance(item, dict):
+                loc = ".".join(str(x) for x in item.get("loc", []) if x != "body")
+                parts.append(f"{loc}: {item.get('msg', '')}".strip(": "))
+            else:
+                parts.append(str(item))
+        detail = "; ".join(parts)
+    return " ".join(str(detail).split())[:800]
 
 
 def _classify(message: str, report: Dict[str, Any]) -> RejectionKind:

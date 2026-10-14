@@ -53,7 +53,10 @@ Now the officer sees, in chat and in the side panel:
 | `UNRESOLVED` | The intent is ambiguous or marked as needing the user. |
 | `VALIDATION_FAILED` | SQL was attempted but no candidate passed PioTech's checks. |
 | `NO_SQL` | Neither SQL, report nor error came back. |
-| `SERVICE_UNAVAILABLE` | PioTech could not be reached (e.g. `WinError 10061`). The scenario was not evaluated. |
+| `REQUEST_REJECTED` | PioTech answered HTTP 4xx (e.g. **422** when the intent breaks its contract, such as `time_window.value = 0`). Shows PioTech's validation detail and asks for the missing value. The scenario was not evaluated. |
+| `SERVICE_UNAVAILABLE` | PioTech could not be reached (connection refused, timeout, e.g. `WinError 10061`). The scenario was not evaluated. |
+
+An HTTP **5xx** is reported as `VALIDATION_FAILED` with the advice that the fault is in the SQL service, not the scenario.
 
 **Tool result on rejection**
 

@@ -41,6 +41,7 @@ from services.aml_builder.web.services.production_registry import (
 from services.aml_builder.web.services.llm_client import build_llm, safe_parse_json
 from services.aml_builder.web.services.sql_extraction import extract_sql
 from services.aml_builder.web.services.piotech_report import (
+    build_http_rejection,
     build_rejection,
     build_unavailable_rejection,
     normalize_scenario_report,
@@ -634,7 +635,19 @@ def execute_oracle_dwh_shadow_test(intent_json: str) -> str:
                     "Content-Type": "application/json",
                 },
             ) as response:
-                response.raise_for_status()
+                if response.status_code >= 400:
+                    # The service answered but refused the request (e.g. 422 when the
+                    # intent breaks its contract). Show its own explanation; this is
+                    # not an availability problem.
+                    body = response.read().decode("utf-8", errors="replace")
+                    logger.error(
+                        "[TOOL: SQL_BRIDGE] PioTech AI rejected the request: HTTP %d %s",
+                        response.status_code,
+                        body[:500],
+                    )
+                    return _rejection_result(
+                        build_http_rejection(response.status_code, body), None
+                    )
                 for line in response.iter_lines():
                     if not line or not line.startswith("data:"):
                         continue

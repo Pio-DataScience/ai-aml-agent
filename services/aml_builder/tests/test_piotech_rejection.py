@@ -199,6 +199,36 @@ def test_tool_reports_unreachable_service(monkeypatch: pytest.MonkeyPatch) -> No
     assert "10061" in result["rejection"]["reasons"][0]["reason"]
 
 
+def test_tool_reports_422_as_rejected_request_not_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A 422 from a running service is REQUEST_REJECTED with its own detail, not SERVICE_UNAVAILABLE."""
+    detail = {
+        "detail": "Invalid AML_SCENARIO_GENERATION intent: 1 validation error for ServiceAIntent\n"
+        "time_window.value\n  Input should be greater than 0 [type=greater_than, input_value=0, input_type=int]"
+    }
+    _mock_piotech(monkeypatch, lambda request: httpx.Response(422, json=detail))
+
+    result = json.loads(aml_tools.execute_oracle_dwh_shadow_test.invoke({"intent_json": json.dumps(INTENT)}))
+    rejection = result["rejection"]
+
+    assert rejection["kind"] == "REQUEST_REJECTED"
+    assert rejection["blocked_by"] == ["the time window of the scenario"]
+    assert "Input should be greater than 0" in rejection["reasons"][0]["reason"]
+    assert any("within 30 days" in s for s in rejection["suggestions"])
+    assert not any("Start the PioTech" in s for s in rejection["suggestions"])
+
+
+def test_tool_reports_500_as_service_fault(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A 5xx says the fault is in the SQL service, not in the scenario."""
+    _mock_piotech(monkeypatch, lambda request: httpx.Response(500, text="Internal Server Error"))
+
+    rejection = json.loads(
+        aml_tools.execute_oracle_dwh_shadow_test.invoke({"intent_json": json.dumps(INTENT)})
+    )["rejection"]
+
+    assert rejection["kind"] == "VALIDATION_FAILED"
+    assert "not in the scenario" in rejection["suggestions"][0]
+
+
 def test_tool_success_path_is_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
     """When SQL comes back, the result has metrics and no rejection."""
     sql = "SELECT t.CUS_NUM FROM BI_DWH.PIO_TRANSACTIONS t WHERE t.TRA_DATE >= SYSDATE - 7"

@@ -5,6 +5,31 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-10-14] fix: HTTP 4xx/5xx from PioTech was reported as "service unreachable"
+
+### What
+- **Root Cause**: the rejection passthrough below caught every `httpx.HTTPError`, including the
+  `HTTPStatusError` raised by `raise_for_status()`, as `SERVICE_UNAVAILABLE`, and advised starting the service.
+  Seen live: the intent for "High-value transactions on dormant accounts" carried `time_window.value = 0`; the
+  running PioTech service answered **422** (`time_window.value: Input should be greater than 0`), and the officer
+  was told to start a service that was already up.
+- **Fix Applied**:
+  - `tools.py`: an HTTP status ≥ 400 is handled before streaming; the body is read and passed to the new
+    `build_http_rejection`. Only transport errors (connection refused, timeout) remain `SERVICE_UNAVAILABLE`.
+  - `piotech_report.py`: new kind `REQUEST_REJECTED` for 4xx, showing PioTech's own validation detail and a
+    plain-language hint for the field it names (time window, baseline window, thresholds). 5xx is reported as a
+    fault in the SQL service, not in the scenario.
+  - `tool_driven_system.md`: on `REQUEST_REJECTED` the agent asks the user for the missing value and never fills it in.
+
+### Note
+The underlying cause is upstream of this fix: intent extraction invented `time_window.value = 0` and a threshold of
+`>= 0` for a request that stated neither, and marked both `provenance: "stated"`. That is still open.
+
+### Verify
+13 tests pass (`test_piotech_rejection.py` adds 422 and 500 cases). The real failing intent, replayed through the
+fixed tool against the running PioTech service, now shows "Blocked by: the time window of the scenario" with the 422
+detail and "State the period to look over, for example 'within 30 days'".
+
 ## [2026-10-14] feat: Pass the PioTech rejection report through to the officer
 
 ### What
