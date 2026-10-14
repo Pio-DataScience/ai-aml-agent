@@ -5,6 +5,16 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-10-13] fix: Skip explanation-code discovery for all transaction scope
+
+### What
+- Treat `ANY`/`ALL` transaction labels as scope markers rather than code-search terms in the intent tool.
+- Clear non-explicit discovered code fields for all/any or unspecified transaction scopes, and clarify the extraction and agent instructions.
+- Add an offline regression check that verifies no explanation-code search runs for an `ANY` request.
+
+### Verification
+- `pytest -q services/aml_builder/tests/test_all_transaction_code_scope.py` — 1 passed.
+
 ## [2026-10-05] docs: Canonical code-verified project overview
 
 ### What

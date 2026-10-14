@@ -110,7 +110,7 @@ Rules implemented in code or runtime prompts include:
 
 ### Explanation-code discovery
 
-`explanation_code_search.py` reads `PIO_EXPLANATION_CODE` for configured country/institution values (including rows whose tenant columns are null), embeds the catalog with `OpenAIEmbeddings`, and caches normalized vectors both in-process and in `artifacts/explanation_codes_vector_cache_<country>_<institution>.pkl`. Query embeddings rank by cosine similarity using a 70% relative cutoff with an absolute floor; the fast chat model reranks candidates. If reranking fails, vector candidates are returned.
+`explanation_code_search.py` reads `PIO_EXPLANATION_CODE` for configured country/institution values (including rows whose tenant columns are null), embeds the catalog with `OpenAIEmbeddings`, and caches normalized vectors both in-process and in `artifacts/explanation_codes_vector_cache_<country>_<institution>.pkl`. Discovery runs only for specific transaction types; `ANY`/`ALL` and unspecified types skip the search so they do not create an `EXPL_CODE` restriction. Query embeddings rank by cosine similarity using a 70% relative cutoff with an absolute floor; the fast chat model reranks candidates. If reranking fails, vector candidates are returned.
 
 The cache has no TTL or source-data invalidation. Changing explanation-code rows without deleting/rebuilding the cache can therefore leave discovery stale.
 
