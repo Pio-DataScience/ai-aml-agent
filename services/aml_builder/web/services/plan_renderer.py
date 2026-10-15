@@ -79,7 +79,6 @@ def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]
     lines.append("| Field | Value |")
     lines.append("|---|---|")
     lines.append(f"| **Scenario Name** | {intent.get('scenario_name', '—')} |")
-    lines.append(f"| **Scenario Type** | `{intent.get('scenario_type', '—')}` |")
     tx_types = intent.get("transaction_types")
     tx_type = intent.get("transaction_type")
     if tx_types and isinstance(tx_types, list):
@@ -111,7 +110,7 @@ def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]
     # ─────────────────────────────────────────
     lines.append("---")
     lines.append("")
-    lines.append("## 3. Observation Window & Time Parameters")
+    lines.append("## 3. Monitoring Time")
     lines.append("")
     tw = intent.get("time_window")
     if tw:

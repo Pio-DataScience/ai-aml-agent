@@ -5,6 +5,18 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-10-15] change: "Scenario Type" row removed from the plan's Scenario Overview
+
+### What
+- `plan_renderer.py`: the Scenario Overview table no longer shows "Scenario Type". Display only — `scenario_type`
+  stays in the intent and still decides per-customer vs per-account grouping in the generated SQL.
+
+## [2026-10-15] change: Plan section 3 renamed to "Monitoring Time"
+
+### What
+- `plan_renderer.py`: the implementation-plan heading "3. Observation Window & Time Parameters" is now
+  "3. Monitoring Time". Content unchanged (window size and window type). No other code or UI refers to the old text.
+
 ## [2026-10-15] feat: Scope guard — decline questions unrelated to AML scenarios
 
 ### What
