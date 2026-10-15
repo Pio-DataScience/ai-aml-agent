@@ -161,6 +161,13 @@ class Settings(BaseSettings):
         default=2,
         description="Maximum automatic correction rounds per shadow test before the refusal is shown.",
     )
+    AML_SCOPE_GUARD: bool = Field(
+        default=True,
+        description=(
+            "Decline messages clearly unrelated to AML scenarios (sport, general knowledge, poems, ...) "
+            "with a fixed refusal before the agent runs. False switches the check off."
+        ),
+    )
     PIOTECH_SHOW_AUTO_CORRECTIONS: bool = Field(
         default=False,
         description=(

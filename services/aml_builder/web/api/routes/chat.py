@@ -6,14 +6,17 @@ outputs) into the SSE event contract the frontend chat UI and side panel
 expect: tool_call, content, plan_artifact, scenario_result, done.
 """
 
+import asyncio
 import json
 import logging
 import uuid
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
+from services.aml_builder.web.services import scope_guard
 from services.aml_builder.web.services.graph import get_tool_driven_graph
 from services.aml_builder.web.services.schemas import ChatRequest, SSEEvent
 from services.aml_builder.web.services.session_store import upsert_chat_session
@@ -21,6 +24,43 @@ from services.aml_builder.web.services.session_store import upsert_chat_session
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Chat"])
+
+
+async def _scope_refusal(tool_graph: Any, config: Dict[str, Any], message: str) -> Optional[str]:
+    """Return a refusal if the message is outside the agent's scope, else None.
+
+    The refused exchange is written to the conversation state, so it appears in the chat history
+    and the next message is judged with it as context. Any failure lets the turn continue.
+
+    Args:
+        tool_graph (Any): The compiled ReAct agent graph.
+        config (Dict[str, Any]): The LangGraph run config (thread id).
+        message (str): The text the user typed.
+
+    Returns:
+        Optional[str]: The refusal text, or None when the turn should continue.
+    """
+    try:
+        state = await tool_graph.aget_state(config)
+        history = scope_guard.history_of((state.values or {}).get("messages", []) if state else [])
+    except Exception as exc:  # history is optional context; judge without it
+        logger.warning("[SCOPE] could not read conversation history (%s)", type(exc).__name__)
+        history = []
+
+    verdict = await asyncio.to_thread(scope_guard.check, message, history)
+    if not verdict.blocked:
+        return None
+
+    logger.info("[API] Message declined by the scope guard.")
+    try:
+        await tool_graph.aupdate_state(
+            config,
+            {"messages": [HumanMessage(content=message), AIMessage(content=verdict.refusal)]},
+            as_node="agent",
+        )
+    except Exception as exc:  # the refusal is still shown; only the history entry is missing
+        logger.warning("[SCOPE] could not record the declined exchange (%s)", type(exc).__name__)
+    return verdict.refusal
 
 
 @router.post("/chat/stream")
@@ -72,6 +112,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
         "recursion_limit": 10,
     }
     user_msg = request.messages[-1].content if request.messages else ""
+    typed_msg = user_msg  # what the user typed, before sidebar metadata is appended
     if request.metadata_json:
         metadata_str = json.dumps(request.metadata_json, ensure_ascii=False)
         user_msg += f"\n\n[Active Scenario Governance Metadata from Sidebar]:\n{metadata_str}"
@@ -94,6 +135,14 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
 
         try:
             yield _sse(SSEEvent(type="thinking", status="Analyzing your request..."))
+
+            # Scope guard: a message clearly unrelated to AML scenarios gets a fixed refusal
+            # and never reaches the agent. A sidebar governance submission is always in scope.
+            if not request.metadata_json:
+                refusal = await _scope_refusal(tool_graph, config, typed_msg)
+                if refusal:
+                    yield _sse(SSEEvent(type="content", text=refusal))
+                    return
 
             async for event in tool_graph.astream(inputs, config=config):
                 for node_name, node_output in event.items():

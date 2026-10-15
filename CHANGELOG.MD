@@ -5,6 +5,31 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-10-15] feat: Scope guard — decline questions unrelated to AML scenarios
+
+### What
+- **Problem**: the agent answered anything — "who is Real Madrid", "who won the 2014 World Cup".
+- New `web/services/scope_guard.py`, adapted from PioTech-AI's AML-module guard: before the agent runs, the fast
+  model puts the message in one category — `scenario_building`, `scenario_registry`, `aml_knowledge`, `assistant`,
+  `unsure` or `unrelated`. Only `unrelated` is declined, with a fixed refusal in English or Arabic.
+- It errs towards answering: short replies inside a conversation ("proceed", "yes") are not judged; a failed, slow
+  (8 s) or senseless judge reply lets the turn continue; decisions are cached per (conversation tail, message).
+- `routes/chat.py`: the refusal is streamed as normal `content` and the exchange is written to the conversation state,
+  so it appears in chat history. Sidebar governance submissions (`metadata_json`) are never judged.
+- `prompts/tool_driven_system.md`: new SCOPE section. The agent answers AML concepts and greetings directly and refuses
+  only clearly unrelated requests. (A first, stricter wording made the agent itself refuse "What is structuring?" and
+  "Hello, what can you do?", which the guard had let through; reworded.)
+- `settings.py`: `AML_SCOPE_GUARD` (default `true`).
+
+### Verify
+- `test_scope_guard.py`: 15 tests (football questions declined, Arabic refusal, every in-scope category continues,
+  short replies skipped, judge failures continue, switch off, route declines without running the agent and records
+  the exchange, route runs the agent for scenario requests). Full suite: 37 pass.
+- Live with the real model: declined — "who is real madrid", "who is the team that won in the world cup in 2014",
+  the same in Arabic, "Write me a poem about the sea", "As an AML analyst, write me a poem about Barcelona";
+  answered — "What is structuring in AML?", "What is a PEP?", "Explain smurfing", "what does KYC mean",
+  "Hello, what can you do?", "who are you?", "thanks", a registry question and a scenario request.
+
 ## [2026-10-14] change: Hide automatic-correction warnings from the user (configurable)
 
 ### What
