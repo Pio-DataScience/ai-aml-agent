@@ -1,0 +1,164 @@
+[
+  {
+    "name": "required field fallbacks",
+    "user_prompt": "Find unusual activity",
+    "raw": {},
+    "expected": {
+      "scenario_name": "AML Detection Scenario",
+      "scenario_type": "CUSTOMER",
+      "detection_logic": "AML Detection Scenario"
+    }
+  },
+  {
+    "name": "detection logic uses explicit scenario name",
+    "user_prompt": "Find unusual activity",
+    "raw": {"scenario_name": "Large deposits"},
+    "expected": {
+      "scenario_name": "Large deposits",
+      "scenario_type": "CUSTOMER",
+      "detection_logic": "Large deposits"
+    }
+  },
+  {
+    "name": "threshold aliases and numeric value",
+    "user_prompt": "Find amounts over 9000",
+    "raw": {
+      "thresholds": [{"type": "amount", "comparison": ">=", "value": "9000"}]
+    },
+    "expected": {
+      "thresholds": [
+        {"field": "amount", "operator": ">=", "value_from": 9000.0}
+      ],
+      "scenario_name": "AML Detection Scenario",
+      "scenario_type": "CUSTOMER",
+      "detection_logic": "AML Detection Scenario"
+    }
+  },
+  {
+    "name": "threshold defaults and nonnumeric value",
+    "user_prompt": "Find flagged amounts",
+    "raw": {"thresholds": [{"field": "", "operator": "", "value": "high"}]},
+    "expected": {
+      "thresholds": [
+        {
+          "field": "transaction_amount",
+          "operator": ">",
+          "value_from": "high"
+        }
+      ],
+      "scenario_name": "AML Detection Scenario",
+      "scenario_type": "CUSTOMER",
+      "detection_logic": "AML Detection Scenario"
+    }
+  },
+  {
+    "name": "time window aliases and aggregation defaults",
+    "user_prompt": "Find activity",
+    "raw": {
+      "time_window": {"duration": 2, "unit": "weeks"},
+      "aggregation": {}
+    },
+    "expected": {
+      "time_window": {"unit": "WEEKS", "value": 2},
+      "aggregation": {
+        "metric": "transaction_amount",
+        "function": "SUM",
+        "grain": "PER CUSTOMER PER DAY"
+      },
+      "scenario_name": "AML Detection Scenario",
+      "scenario_type": "CUSTOMER",
+      "detection_logic": "AML Detection Scenario"
+    }
+  },
+  {
+    "name": "invalid optional object values are cleared",
+    "user_prompt": "Find activity",
+    "raw": {
+      "baseline_window": "",
+      "aggregation": [],
+      "time_window": "30 days",
+      "mapped_keywords": []
+    },
+    "expected": {
+      "baseline_window": null,
+      "aggregation": null,
+      "time_window": null,
+      "mapped_keywords": null,
+      "scenario_name": "AML Detection Scenario",
+      "scenario_type": "CUSTOMER",
+      "detection_logic": "AML Detection Scenario"
+    }
+  },
+  {
+    "name": "transaction type list normalization",
+    "user_prompt": "Find transfers",
+    "raw": {"transaction_types": ["  Wire Transfer ", "Cash Deposit"]},
+    "expected": {
+      "transaction_types": ["Wire Transfer", "Cash Deposit"],
+      "transaction_type": "Wire Transfer, Cash Deposit",
+      "scenario_name": "AML Detection Scenario",
+      "scenario_type": "CUSTOMER",
+      "detection_logic": "AML Detection Scenario"
+    }
+  },
+  {
+    "name": "transaction types fall back to filters",
+    "user_prompt": "Find transfers",
+    "raw": {"filters": {"transaction_type": "Wire Transfer"}},
+    "expected": {
+      "filters": {"transaction_type": "Wire Transfer"},
+      "scenario_name": "AML Detection Scenario",
+      "scenario_type": "CUSTOMER",
+      "detection_logic": "AML Detection Scenario",
+      "transaction_type": "Wire Transfer"
+    }
+  },
+  {
+    "name": "semantic predicate transaction type recovery",
+    "user_prompt": "Find transfers",
+    "raw": {
+      "semantic_conditions": [
+        {"predicate": "transaction_type is outward transfer"},
+        {"predicate": "transaction type is outward transfer"}
+      ]
+    },
+    "expected": {
+      "semantic_conditions": [
+        {"predicate": "transaction_type is outward transfer"},
+        {"predicate": "transaction type is outward transfer"}
+      ],
+      "scenario_name": "AML Detection Scenario",
+      "scenario_type": "CUSTOMER",
+      "detection_logic": "AML Detection Scenario",
+      "transaction_types": ["outward transfer"],
+      "transaction_type": "outward transfer"
+    }
+  },
+  {
+    "name": "behavioral semantic transaction type recovery",
+    "user_prompt": "Find cash deposits",
+    "raw": {
+      "semantic_conditions": [
+        {
+          "logical_type": "BEHAVIORAL",
+          "subject": "transaction",
+          "raw_phrase": "Cash Deposit"
+        }
+      ]
+    },
+    "expected": {
+      "semantic_conditions": [
+        {
+          "logical_type": "BEHAVIORAL",
+          "subject": "transaction",
+          "raw_phrase": "Cash Deposit"
+        }
+      ],
+      "scenario_name": "AML Detection Scenario",
+      "scenario_type": "CUSTOMER",
+      "detection_logic": "AML Detection Scenario",
+      "transaction_types": ["Cash Deposit"],
+      "transaction_type": "Cash Deposit"
+    }
+  }
+]

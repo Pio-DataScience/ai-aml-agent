@@ -40,6 +40,9 @@ from services.aml_builder.web.services.production_registry import (
 )
 from services.aml_builder.web.services.llm_client import build_llm, safe_parse_json
 from services.aml_builder.web.services.sql_extraction import extract_sql
+from services.aml_builder.web.services._intent_normalization_baseline import (
+    normalize_intent_baseline,
+)
 from services.aml_builder.web.services.plan_renderer import build_plan_markdown
 from services.aml_builder.web.services.prompts.loader import load_prompt
 from services.aml_builder.web.services.scenario_metadata import (
@@ -229,104 +232,9 @@ def analyze_intent_and_discover_explanation_codes(
         elif "intent" in intent_dict and isinstance(intent_dict["intent"], dict):
             intent_dict = intent_dict["intent"]
 
-        # Sanitize optional dict/model fields that might be serialized as "" or invalid empty types
-        for dict_field in ("baseline_window", "aggregation", "time_window"):
-            if dict_field in intent_dict and not isinstance(
-                intent_dict[dict_field], dict
-            ):
-                intent_dict[dict_field] = None
-
-        for map_field in ("mapped_keywords",):
-            if map_field in intent_dict and not isinstance(
-                intent_dict[map_field], dict
-            ):
-                intent_dict[map_field] = None
-
-        # Sensible fallbacks for required fields if omitted by LLM
-        if not intent_dict.get("scenario_name"):
-            intent_dict["scenario_name"] = "AML Detection Scenario"
-        if not intent_dict.get("scenario_type"):
-            intent_dict["scenario_type"] = "CUSTOMER"
-        if not intent_dict.get("detection_logic"):
-            intent_dict["detection_logic"] = intent_dict.get(
-                "scenario_name", user_prompt
-            )
-
-        # Normalize thresholds keys if LLM used key variations (type -> field, comparison -> operator, value -> value_from)
-        thresholds = intent_dict.get("thresholds")
-        if isinstance(thresholds, list):
-            for t in thresholds:
-                if isinstance(t, dict):
-                    if "type" in t and "field" not in t:
-                        t["field"] = str(t.pop("type"))
-                    if "field" not in t or not t.get("field"):
-                        t["field"] = "transaction_amount"
-                    if "comparison" in t and "operator" not in t:
-                        t["operator"] = str(t.pop("comparison"))
-                    if "operator" not in t or not t.get("operator"):
-                        t["operator"] = ">"
-                    if "value" in t and "value_from" not in t:
-                        val = t.pop("value")
-                        try:
-                            t["value_from"] = float(val)
-                        except (ValueError, TypeError):
-                            t["value_from"] = str(val) if val is not None else None
-        # Normalize time_window keys / case
-        tw = intent_dict.get("time_window")
-        if isinstance(tw, dict):
-            if "unit" in tw and isinstance(tw["unit"], str):
-                tw["unit"] = tw["unit"].upper()
-            if "value" not in tw and "duration" in tw:
-                tw["value"] = tw.pop("duration")
-            if "value" not in tw:
-                tw["value"] = 1
-
-        # Normalize aggregation keys / defaults
-        agg = intent_dict.get("aggregation")
-        if isinstance(agg, dict):
-            if not agg.get("metric"):
-                agg["metric"] = "transaction_amount"
-            if not agg.get("function"):
-                agg["function"] = "SUM"
-            if not agg.get("grain"):
-                agg["grain"] = "PER CUSTOMER PER DAY"
-
+        intent_dict = normalize_intent_baseline(intent_dict, user_prompt)
         tx_type = intent_dict.get("transaction_type")
         tx_types = intent_dict.get("transaction_types")
-        if not tx_type and isinstance(intent_dict.get("filters"), dict):
-            tx_type = intent_dict["filters"].get("transaction_type")
-            tx_types = intent_dict["filters"].get("transaction_types")
-
-        # Intelligent fallback: If transaction_type and transaction_types are not directly populated, scan semantic_conditions
-        if not tx_type and not tx_types and isinstance(intent_dict.get("semantic_conditions"), list):
-            discovered_from_sc = []
-            for sc in intent_dict["semantic_conditions"]:
-                if isinstance(sc, dict):
-                    pred = str(sc.get("predicate", ""))
-                    raw = str(sc.get("raw_phrase", ""))
-                    # Pattern 1: "transaction_type is outward transfer" or "transaction type is cash deposit"
-                    m = re.search(r"transaction_?type\s+is\s+([^,;.]+)", pred, re.IGNORECASE)
-                    if m:
-                        val = m.group(1).strip()
-                        if val and val.lower() not in [d.lower() for d in discovered_from_sc]:
-                            discovered_from_sc.append(val)
-                    # Pattern 2: behavioral subject = transaction
-                    elif sc.get("logical_type") == "BEHAVIORAL" and str(sc.get("subject", "")).lower() == "transaction":
-                        if raw and raw.lower() not in [d.lower() for d in discovered_from_sc] and raw.lower() not in ("or", "and"):
-                            discovered_from_sc.append(raw)
-            if discovered_from_sc:
-                tx_types = discovered_from_sc
-                tx_type = ", ".join(discovered_from_sc)
-                intent_dict["transaction_types"] = tx_types
-                intent_dict["transaction_type"] = tx_type
-                logger.info("[TOOL: INTENT] Recovered transaction types from semantic_conditions: %s", tx_types)
-
-        if tx_types and isinstance(tx_types, list):
-            intent_dict["transaction_types"] = [str(x).strip() for x in tx_types if str(x).strip()]
-            if not tx_type:
-                intent_dict["transaction_type"] = ", ".join(intent_dict["transaction_types"])
-        elif tx_type:
-            intent_dict["transaction_type"] = tx_type
 
         explicit_codes = intent_dict.get("explanation_codes")
 

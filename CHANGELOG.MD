@@ -5,6 +5,18 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-10-17] refactor: Freeze legacy intent normalization outputs
+
+### What
+- Extracted the current deterministic normalization block into a temporary pure helper used by the intent tool.
+- Added ten frozen golden fixtures and an offline test that verifies the tool calls the helper.
+
+### Why
+- Establishes a testable output baseline before the P1 domain extraction changes normalization behavior.
+
+### Verification
+- `pytest -q services/aml_builder/tests/test_p1_intent_normalization_baseline.py`
+
 ## [2026-10-17] docs: Record owner-run legacy scenario archive and restore path
 
 ### What
