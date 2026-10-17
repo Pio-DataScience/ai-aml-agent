@@ -494,7 +494,7 @@ class ChatRequest(BaseModel):
     Args:
         messages (list[ChatMessage]): Full conversation history.
         metadata (Dict[str, str]): user_id, project_id, chat_id for thread routing.
-        reasoning_mode (str): 'instant' (fast) or 'thinking' (deep).
+        reasoning_mode (str): Accepted for compatibility and currently ignored.
     """
 
     messages: List[ChatMessage] = Field(
@@ -510,7 +510,7 @@ class ChatRequest(BaseModel):
     )
     reasoning_mode: Literal["instant", "thinking"] = Field(
         default="instant",
-        description="Reasoning depth: instant=fast, thinking=deep deliberation.",
+        description="Accepted for compatibility; currently ignored by Service A.",
     )
 
 
@@ -519,7 +519,7 @@ class SSEEvent(BaseModel):
 
     Args:
         type (str): Event category for client-side routing.
-        text (Optional[str]): Text content for 'content' and 'final_answer' events.
+        text (Optional[str]): Text content for content, plan, and error events.
         tool (Optional[str]): Tool name for 'tool_call' events.
         status (Optional[str]): Status string for 'thinking' events.
         data (Optional[Any]): Arbitrary payload for 'scenario_result' events.
@@ -529,11 +529,9 @@ class SSEEvent(BaseModel):
         "tool_call",
         "thinking",
         "content",
-        "final_answer",
         "scenario_result",
         "plan_artifact",
         "scenario_metadata_catalog",
-        "escalation_report",
         "error",
         "done",
     ] = Field(..., description="SSE event type.")

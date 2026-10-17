@@ -1,0 +1,8 @@
+version: 1
+status: demo
+version: 1
+status: demo
+locked_chat_tip: "This chat is now the record for scenario {scenario_id} (v{version}). You can view it, ask about it, or look up other scenarios. To create another scenario, start a new chat."
+locked_composer_placeholder: "This scenario is deployed. Ask a question or start a new chat."
+conflict_block: "An active scenario with the same detection logic already exists ({scenario_id})."
+conflict_warn: "{n} similar scenario(s) found. Review before continuing."

@@ -1,6 +1,6 @@
 # Canonical Project Overview
 
-> **Status:** Canonical repository-level technical overview, verified against the working-tree implementation on 2026-10-05.
+> **Status:** Canonical repository-level technical overview, verified against the working-tree implementation on 2026-10-17.
 >
 > Read this after the applicable `AGENTS.md`. Use it to navigate and reason about the system, then inspect the current code, tests, schemas, and configuration relevant to the task. Those remain authoritative. Claims below are **Verified** unless explicitly marked **Inferred** or **Unclear**.
 
@@ -44,14 +44,23 @@ The service is synchronous at several integration boundaries despite async HTTP 
 | `services/aml_builder/web/services/oracle.py` | Primary and shadow Oracle pools plus query/transaction helpers. |
 | `services/aml_builder/web/services/session_store.py` | SQLite `chat_sessions` table and sidebar CRUD. |
 | `services/aml_builder/web/services/settings.py` | Pydantic environment configuration. |
+| `services/aml_builder/web/services/config_loader.py` | Pydantic validation and mtime-based reload for the four AML YAML catalogs. |
+| `config/aml_catalogs/` | Demo parameter, filter, policy, and UI-copy catalogs. |
+| `scripts/archive_legacy.py` | Owner-run, SELECT-only Oracle export preview/extract and optional local sqlite move. |
+| `scripts/sql/` | Owner-reviewed TOAD check, backup/export, exact-ID removal, and restore runbooks. |
+| `Docs/P0_foundations.md` | P0 archive usage, verification commands, and settings reference. |
 | `services/aml_builder/web/services/prompts/` | Runtime system prompts loaded relative to the package. |
 | `run_dev.ps1` | Windows development launcher on port 8005. |
 | `run_alert_engine.py` | CLI alert-engine entry point. |
 | `app.py` | Root wrapper exporting the FastAPI `app`. |
 | `services/aml_builder/tests/test_registry_analytics.py` | Manually executable live integration check, not an offline unit suite. |
+| `services/aml_builder/tests/test_all_transaction_code_scope.py` | Offline regression test for all/any transaction-code discovery. |
+| `services/aml_builder/tests/test_config_loader.py` | Offline catalog validation, reload, and TBD status tests. |
+| `services/aml_builder/tests/test_p0_settings_and_sse.py` | Offline settings, SSE, tracing configuration, LLM defaults, and fresh-state lifespan tests. |
+| `services/aml_builder/tests/test_archive_legacy.py` | Fake-backed verification that archive queries are SELECT-only and ID-scoped. |
 | `Docs/` | Specialized runbooks, historical design notes, proposals, and SQL references; currency varies. |
 
-There is one dependency manifest, root `requirements.txt`. There is no current `services/aml_builder/requirements.txt`, `.env.example`, migration framework, `pyproject.toml`, container/orchestrator manifest, or CI workflow in the inspected tree.
+There is one dependency manifest, root `requirements.txt`. There is no current `services/aml_builder/requirements.txt`, migration framework, `pyproject.toml`, container/orchestrator manifest, or CI workflow in the inspected tree. Root `.env.example` documents the supported local settings without real credentials.
 
 ## 4. Entry points and HTTP surface
 
@@ -70,7 +79,7 @@ $env:PYTHONPATH = "services\aml_builder"
 .\.venv\Scripts\python.exe -m uvicorn web.api.main:app --reload --port 8005 --host 0.0.0.0
 ```
 
-`services.aml_builder.web.api.main:lifespan` initializes logging, the SQLite session table, primary/shadow Oracle pools, and the graph. Oracle and graph warm-up failures are logged but do not abort startup. Shutdown closes the SQLite checkpointer and both Oracle pools. The `/health` response is process health only; it does not probe Oracle, the LLM, or the external SQL service.
+`services.aml_builder.web.api.main:lifespan` exports configured LangSmith values to the process environment when absent, validates the AML catalogs, initializes logging and the SQLite session table, initializes primary/shadow Oracle pools, and warms the graph. Invalid catalogs fail startup with a clear path and validation error. Oracle and graph warm-up failures are logged but do not abort startup. Shutdown closes the SQLite checkpointer and both Oracle pools. The `/health` response is process health only; it does not probe Oracle, the LLM, or the external SQL service.
 
 `app.py` also exposes the app for `uvicorn app:app` when the repository root is importable.
 
@@ -89,7 +98,7 @@ $env:PYTHONPATH = "services\aml_builder"
 | `POST /engine/run-scenarios` | Synchronously evaluates all active scenarios or one requested scenario. |
 | `GET /engine/active-scenarios` | Lists active registry rows and governance fields. |
 
-The chat stream emits `thinking`, `tool_call`, `content`, selected artifact/result events, `error`, and `done`. Raw tool messages are suppressed. `SSEEvent` declares `final_answer` and `escalation_report`, but the current chat route does not explicitly emit those types.
+The chat stream emits `thinking`, `tool_call`, `content`, selected artifact/result events, `error`, and `done`. Raw tool messages are suppressed. The Service A `SSEEvent` schema contains only event types used by the route; `ChatRequest.reasoning_mode` remains accepted but is documented as ignored.
 
 `ChatRequest.reasoning_mode` is accepted but not used to choose a model or graph configuration. The request may contain full message history, but the route sends only the latest message content to LangGraph; prior context comes from the checkpoint for the derived thread ID. If `chat_id` is omitted, the route generates one internally but does not emit that generated ID in a dedicated response event.
 
@@ -137,7 +146,7 @@ The cache has no TTL or source-data invalidation. Changing explanation-code rows
 POST /chat/stream
   -> normalize identifiers and upsert sidebar metadata
   -> thread_id = "{project_id}_{chat_id}_{user_id}"
-  -> graph.astream(..., recursion_limit=10)
+  -> graph.astream(..., recursion_limit=settings.AGENT_RECURSION_LIMIT)
   -> LLM chooses among six tools under prompt rules
   -> route selected graph/tool messages into SSE events
   -> persist conversation state in SQLite checkpoints
@@ -221,7 +230,7 @@ When a specific `scenario_id` is requested, selection still requires `PIO_AML_PR
 
 ### SQLite
 
-`CHECKPOINT_DB_PATH` defaults to `./artifacts/checkpoints.sqlite` and is shared by:
+`STATE_DIR` defaults to `artifacts/v2`. Unless explicitly overridden, `CHECKPOINT_DB_PATH` and `APP_STATE_DB_PATH` resolve to `STATE_DIR/checkpoints.sqlite` and `STATE_DIR/app_state.sqlite`. The checkpoint database is currently shared by:
 
 - LangGraph checkpoint tables, which store conversation/agent state keyed by the composite thread string.
 - `chat_sessions`, which stores sidebar title, update time, pin, and soft-delete state.
@@ -264,7 +273,7 @@ Operationally important optional groups:
 - Oracle pools: `ORACLE_POOL_MIN`, `ORACLE_POOL_MAX`, and `SHADOW_ORACLE_DSN`, `SHADOW_ORACLE_USER`, `SHADOW_ORACLE_PASSWORD`, `SHADOW_ORACLE_POOL_MIN`, `SHADOW_ORACLE_POOL_MAX`
 - AML defaults: `AML_COUNTRY_CODE`, `AML_INST_CODE`, `AML_CREATED_BY`
 - Service B: `PIOTECH_AI_URL`, `PIOTECH_AI_TIMEOUT_SECONDS`, `PIOTECH_AI_USER_ID`, `PIOTECH_AI_PROJECT_ID`
-- State: `CHECKPOINT_DB_PATH`
+- State: `STATE_DIR`, `CHECKPOINT_DB_PATH`, `APP_STATE_DB_PATH`, `CATALOG_DIR`, `AGENT_RECURSION_LIMIT`
 - Tracing declarations: `LANGCHAIN_TRACING_V2`, `LANGCHAIN_API_KEY`, `LANGCHAIN_PROJECT`
 
 Important caveats:
@@ -272,8 +281,9 @@ Important caveats:
 - `OPENAI_API_KEY` is optional to Pydantic but required by OpenAI chat/embedding operations.
 - `run_dev.ps1` hardcodes port 8005 rather than consuming `SERVICE_PORT`.
 - Environment variables take precedence over `.env`; the generic `DEBUG` name can collide with ambient tooling variables. Any non-boolean value (the verification environment supplied `DEBUG=release`) prevents settings construction and therefore application/test import.
-- `LLM_MAX_TOKENS`, `MAX_AGENT_ITERATIONS`, and `MAX_VALIDATION_RETRIES` are declared but unused by current code; chat hardcodes `recursion_limit=10`.
-- The settings object's LangSmith fields are not passed explicitly by application code; the launcher exports `.env` variables, which third-party libraries may read independently.
+- LangSmith values loaded from `.env` through `BaseSettings` are copied to the process environment at startup under both `LANGCHAIN_*` and `LANGSMITH_*` names when the corresponding variables are absent, so LangChain's tracing integration can read them. Keys are not logged.
+- `LLM_MAX_TOKENS` is optional and only passed to the model when set; reasoning models use `max_completion_tokens`. `AGENT_RECURSION_LIMIT` (default 25) is authoritative for chat. `MAX_AGENT_ITERATIONS` is retained as a reserved overlapping setting, and `MAX_VALIDATION_RETRIES` remains configurable but unused because no validation retry path exists.
+- Startup validates all four YAML catalogs and fails with the catalog path and validation details when a catalog is invalid. The filter loader allows `TBD` only for dimensions with `status: needs_advisor_input`.
 
 ## 10. Authentication, authorization, and trust boundaries
 
@@ -289,24 +299,24 @@ Consequences for deployments:
 
 ## 11. Testing and verification model
 
-The only repository test file is `services/aml_builder/tests/test_registry_analytics.py`. It defines `run_all_checks()` and a `__main__` runner; it does not define pytest `test_*` functions. It requires live Oracle, persisted tables/data, and OpenAI for semantic search. Run it manually from the repository root only with approved live configuration:
+The repository has offline pytest checks plus one manually executable live integration check at `services/aml_builder/tests/test_registry_analytics.py`. That script defines `run_all_checks()` and a `__main__` runner; it requires live Oracle, persisted tables/data, and OpenAI for semantic search. Do not run it as routine verification. Its manual invocation from the repository root is:
 
 ```powershell
 $env:PYTHONPATH = "services\aml_builder"
 .\.venv\Scripts\python.exe services\aml_builder\tests\test_registry_analytics.py
 ```
 
-There is no offline unit, API, graph, persistence, or alert-engine regression suite. `pytest` may collect no tests; historical instructions referring to `tests/test_decomposer.py` are stale.
+Offline tests now cover transaction-code scope, P0 catalog/settings/SSE/archive contracts, and related pure behavior. The registry analytics script remains a live integration check and is not collected as a pytest test.
 
 Safe structural checks include the following. The explicit `DEBUG` override avoids unrelated ambient-variable collisions during verification and lasts only for the current PowerShell process:
 
 ```powershell
 $env:DEBUG = "false"
-.\.venv\Scripts\python.exe -m compileall -q services app.py run_alert_engine.py
-.\.venv\Scripts\python.exe -m pytest --collect-only -q
+.\.venv\Scripts\python.exe -m compileall -q services app.py run_alert_engine.py scripts\archive_legacy.py
+.\.venv\Scripts\python.exe -m pytest -q --basetemp artifacts\p0-pytest
 ```
 
-At the verified revision, collection reports `no tests collected`; it is not a passing regression suite.
+The `DEBUG` override avoids unrelated ambient-variable collisions and applies only to the current PowerShell process. The pytest suite does not call live Oracle, the LLM, or Service B.
 
 Do not run the integration script, start the app lifespan, invoke agent tools, or trigger the engine merely as a routine test: those paths can call paid APIs, query live systems, create Oracle tables, or write production data.
 

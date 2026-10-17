@@ -17,6 +17,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from services.aml_builder.web.services.graph import get_tool_driven_graph
 from services.aml_builder.web.services.schemas import ChatRequest, SSEEvent
 from services.aml_builder.web.services.session_store import upsert_chat_session
+from services.aml_builder.web.services.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +70,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
     tool_graph = await get_tool_driven_graph()
     config = {
         "configurable": {"thread_id": thread_id},
-        "recursion_limit": 10,
+        "recursion_limit": settings.AGENT_RECURSION_LIMIT,
     }
     user_msg = request.messages[-1].content if request.messages else ""
     if request.metadata_json:

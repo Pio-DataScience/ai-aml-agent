@@ -1,0 +1,34 @@
+version: 1
+status: demo
+dimensions:
+  explanation_code:
+    label: Explanation code
+    level: transaction
+    target: {table: PIO_TRANSACTIONS, column: EXPL_CODE}
+    resolver: semantic
+    match: any_of
+    polarity_allowed: false
+    required: false
+    status: confirmed
+  account_status:
+    label: Account status
+    level: account
+    target: {table: TBD, column: TBD}
+    join_hint: TBD
+    resolver: lookup
+    value_source: TBD
+    match: any_of
+    polarity_allowed: true
+    required: false
+    status: needs_advisor_input
+  customer_profession:
+    label: Customer profession
+    level: customer
+    target: {table: TBD, column: TBD}
+    join_hint: TBD
+    resolver: semantic
+    value_source: TBD
+    match: any_of
+    polarity_allowed: true
+    required: false
+    status: needs_advisor_input

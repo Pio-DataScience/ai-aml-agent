@@ -6,9 +6,11 @@ Never hardcode secrets or connection strings — per SOLID Dependency Inversion.
 """
 
 from functools import lru_cache
+import os
+from pathlib import Path
 from typing import Optional
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -66,9 +68,9 @@ class Settings(BaseSettings):
         default=0.0,
         description="Generation temperature. 0.0 for deterministic agent decisions.",
     )
-    LLM_MAX_TOKENS: int = Field(
-        default=4096,
-        description="Max tokens per LLM response.",
+    LLM_MAX_TOKENS: Optional[int] = Field(
+        default=None,
+        description="Optional max output tokens; unset preserves provider defaults.",
     )
     LLM_REASONING_EFFORT: Optional[str] = Field(
         default=None,
@@ -152,13 +154,30 @@ class Settings(BaseSettings):
     )
 
     # ─── LangGraph / State ────────────────────────────────────────────────────
-    CHECKPOINT_DB_PATH: str = Field(
-        default="./artifacts/checkpoints.sqlite",
+    STATE_DIR: Path = Field(
+        default=Path("artifacts/v2"),
+        description="Directory for new-generation local state and catalogs.",
+    )
+    CHECKPOINT_DB_PATH: Optional[Path] = Field(
+        default=None,
         description="Path to the SQLite file used by LangGraph's checkpointer.",
+    )
+    APP_STATE_DB_PATH: Optional[Path] = Field(
+        default=None,
+        description="Path to the new workflow/application state SQLite database.",
+    )
+    CATALOG_DIR: Path = Field(
+        default=Path("config/aml_catalogs"),
+        description="Directory containing versioned AML YAML catalogs.",
+    )
+    AGENT_RECURSION_LIMIT: int = Field(
+        default=25,
+        ge=1,
+        description="Authoritative LangGraph recursion limit for chat requests.",
     )
     MAX_AGENT_ITERATIONS: int = Field(
         default=25,
-        description="Hard cap on LangGraph node execution cycles per turn.",
+        description="Reserved legacy setting; AGENT_RECURSION_LIMIT is authoritative.",
     )
     MAX_VALIDATION_RETRIES: int = Field(
         default=3,
@@ -178,6 +197,19 @@ class Settings(BaseSettings):
         default="ai-aml-agent",
         description="LangSmith project name for trace grouping.",
     )
+
+    @model_validator(mode="after")
+    def set_state_database_defaults(self) -> "Settings":
+        """Place state databases under STATE_DIR unless explicitly overridden.
+
+        Returns:
+            Settings: The validated settings instance.
+        """
+        if self.CHECKPOINT_DB_PATH is None:
+            self.CHECKPOINT_DB_PATH = self.STATE_DIR / "checkpoints.sqlite"
+        if self.APP_STATE_DB_PATH is None:
+            self.APP_STATE_DB_PATH = self.STATE_DIR / "app_state.sqlite"
+        return self
 
     @field_validator("LLM_PROVIDER")
     @classmethod
@@ -214,3 +246,25 @@ def get_settings() -> Settings:
 
 # Module-level convenience alias
 settings: Settings = get_settings()
+
+
+def configure_langsmith_environment(config: Settings = settings) -> None:
+    """Expose BaseSettings LangSmith values to tracing libraries if unset.
+
+    Args:
+        config (Settings): Application settings loaded from environment or .env.
+
+    Returns:
+        None: Values are written to the process environment only when absent.
+    """
+    values = {
+        "LANGCHAIN_TRACING_V2": str(config.LANGCHAIN_TRACING_V2).lower(),
+        "LANGCHAIN_API_KEY": config.LANGCHAIN_API_KEY,
+        "LANGCHAIN_PROJECT": config.LANGCHAIN_PROJECT,
+        "LANGSMITH_TRACING": str(config.LANGCHAIN_TRACING_V2).lower(),
+        "LANGSMITH_API_KEY": config.LANGCHAIN_API_KEY,
+        "LANGSMITH_PROJECT": config.LANGCHAIN_PROJECT,
+    }
+    for key, value in values.items():
+        if value is not None and key not in os.environ:
+            os.environ[key] = value

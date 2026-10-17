@@ -1,0 +1,35 @@
+version: 1
+status: demo
+roles:
+  viewer: [chat.read]
+  creator: [chat.read, scenario.create]
+  manager: [chat.read, scenario.create, scenario.revise, scenario.rollback, scenario.delete]
+users:
+  "999": manager
+  "1001": creator
+  "1002": viewer
+default_role: viewer
+cross_user_chat_read: false
+chat_may_deploy: false
+auth_mode: dev
+relations:
+  IDENTICAL: block
+  SAME_CHAT_REDEPLOY: block
+  COVERED: warn_confirm
+  COVERS: warn_confirm
+  OVERLAP: warn_confirm
+  RELATED: info
+  SIMILAR: info
+similar_min_score: 0.85
+max_matches_shown: 5
+dimension_weights:
+  scenario_type: 3
+  grain: 3
+  metric: 3
+  aggregation: 2
+  window: 2
+  comparator: 2
+  threshold: 2
+  transaction_scope: 2
+  filters: 1
+reason_required_for: [revise, rollback, retire]

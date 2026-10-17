@@ -19,7 +19,11 @@ from services.aml_builder.web.services.graph import get_tool_driven_graph, close
 from services.aml_builder.web.services.logging_config import setup_logging
 from services.aml_builder.web.services.oracle import close_pool, close_shadow_pool, init_pool, init_shadow_pool
 from services.aml_builder.web.services.session_store import init_session_db
-from services.aml_builder.web.services.settings import settings
+from services.aml_builder.web.services.settings import (
+    configure_langsmith_environment,
+    settings,
+)
+from services.aml_builder.web.services.config_loader import load_catalogs
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +44,8 @@ async def lifespan(app: FastAPI):
         None: Control returns to FastAPI during the app's lifetime.
     """
     # Startup
+    configure_langsmith_environment(settings)
+    load_catalogs(settings.CATALOG_DIR)
     setup_logging()
     logger.info("[STARTUP] AML Builder service starting. port=%d", settings.SERVICE_PORT)
 

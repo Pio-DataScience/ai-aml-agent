@@ -5,6 +5,33 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-10-17] docs: Record owner-run legacy scenario archive and restore path
+
+### What
+- Recorded the owner-reported duplicate cleanup and the 17 remaining legacy rows archived from both scenario registries.
+- Updated the TOAD restore runbook to use the actual backup table names `PIO_AML_PROD_NIDAL_20261017_BKP` and `PIO_AML_SCEN_NIDAL_20261017_BKP`.
+- Documented that supplied SQL files lack TOAD result output and that the duplicate-removal file contains a rollback statement, so transaction history and backup/delete counts are not independently verified in this repository.
+
+### Recovery
+- Run `scripts/sql/04_restore.sql` in TOAD to inspect backup/target counts and insert missing keys. It contains no COMMIT; review results and commit or roll back manually.
+
+## [2026-10-17] feat: P0 foundations and owner-run legacy archive
+
+### What
+- Added Pydantic-validated, mtime-reloaded YAML catalogs and the four demo catalog drafts; disabled advisor-input filters may retain `TBD`, while enabled filters with placeholders fail validation.
+- Added state and catalog settings, configurable chat recursion, LangSmith environment propagation, and optional model token overrides that preserve provider defaults when unset.
+- Added a SELECT-only legacy archive helper and four TOAD runbooks for owner review, exact legacy-ID scope, backup/export, removal, and restore.
+- Removed unused Service A SSE event declarations, documented ignored `reasoning_mode`, pinned the locally verified SQLGlot version, and recorded P0 spikes.
+
+### Why
+- Establishes the clean local state/configuration base and documents a controlled, owner-run transition path before later workflow behavior changes.
+
+### Verify
+- Added offline tests for catalog validation/reload, settings, SSE, LangSmith environment propagation, token parameter selection, fresh-state startup with external services mocked, and read-only archive query scope.
+- No Oracle mutation, archive export, local-state move, or runbook statement was executed.
+
+---
+
 ## [2026-10-13] fix: Skip explanation-code discovery for all transaction scope
 
 ### What

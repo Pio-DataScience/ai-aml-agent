@@ -1,0 +1,16 @@
+version: 1
+status: demo
+skip_card_when_complete: true
+params:
+  scenario_type: {required: true, input: enum, options: [TRANSACTION, ACCOUNT, CUSTOMER], default: null}
+  grain: {required: true, input: enum, options: [customer, account, transaction], default: null}
+  metric: {required: true, input: enum, options: [transaction_amount, transaction_count], default: transaction_amount}
+  aggregation: {required: true, input: enum, options: [SUM, COUNT, MAX, AVG], default: SUM}
+  comparator: {required: true, input: enum, options: [">", ">=", "<", "<=", between], default: ">"}
+  threshold: {required: true, input: number, default: null}
+  window: {required: true, input: duration, default: null, min_days: 1, max_days: 365, all_time_allowed: false}
+  window_kind: {required: true, input: enum, options: [rolling, calendar], default: rolling}
+  transaction_scope: {required: true, input: enum, options: [specific, all], default: all}
+  baseline: {required: false, input: duration, required_if: "threshold.relative == true"}
+  exclusions: {required: false, input: text}
+  expected_alert_range: {required: false, input: range}

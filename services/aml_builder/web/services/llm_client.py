@@ -46,6 +46,8 @@ def build_llm(fast: bool = False) -> ChatOpenAI:
         kwargs["base_url"] = settings.LLM_BASE_URL or "http://127.0.0.1:1234/v1"
         kwargs["api_key"] = "lm-studio"
         kwargs["temperature"] = settings.LLM_TEMPERATURE
+        if settings.LLM_MAX_TOKENS is not None:
+            kwargs["max_tokens"] = settings.LLM_MAX_TOKENS
     else:
         kwargs["api_key"] = settings.OPENAI_API_KEY
 
@@ -54,6 +56,12 @@ def build_llm(fast: bool = False) -> ChatOpenAI:
             tag in model_name.lower()
             for tag in ("o1", "o3", "gpt-5", "reasoner", "thinking", "luna")
         )
+
+        if settings.LLM_MAX_TOKENS is not None:
+            token_parameter = (
+                "max_completion_tokens" if is_reasoning_model else "max_tokens"
+            )
+            kwargs[token_parameter] = settings.LLM_MAX_TOKENS
 
         # Configure reasoning_effort
         if settings.LLM_REASONING_EFFORT:
