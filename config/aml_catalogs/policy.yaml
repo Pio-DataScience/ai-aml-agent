@@ -8,7 +8,9 @@ users:
   "999": manager
   "1001": creator
   "1002": viewer
-default_role: viewer
+default_role:
+  dev: manager
+  jwt: viewer
 cross_user_chat_read: false
 chat_may_deploy: false
 auth_mode: dev

@@ -27,6 +27,7 @@ class ToolErrorCode(str, Enum):
     PERSIST_FAILED = "PERSIST_FAILED"
     NOT_FOUND = "NOT_FOUND"
     INTERNAL_ERROR = "INTERNAL_ERROR"
+    PERMISSION_DENIED = "PERMISSION_DENIED"
 
 
 class PayloadModel(BaseModel):
@@ -138,6 +139,8 @@ def _infer_error_code(
         )
     if payload.get("error"):
         message = str(payload["error"]).lower()
+        if "permission_denied" in message:
+            return ToolErrorCode.PERMISSION_DENIED
         if "not found" in message:
             return ToolErrorCode.NOT_FOUND
         if any(

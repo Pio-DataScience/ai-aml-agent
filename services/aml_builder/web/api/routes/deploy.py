@@ -9,7 +9,7 @@ import logging
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from services.aml_builder.web.services.graph import get_tool_driven_graph
@@ -18,6 +18,8 @@ from services.aml_builder.web.api.codec import decode_tool_result
 from services.aml_builder.web.services.production_registry import save_production_scenario
 from services.aml_builder.web.services.scenario_metadata import validate_scenario_metadata
 from services.aml_builder.web.services.settings import settings
+from services.aml_builder.web.api.dependencies import Identity, assert_identity_matches, require_identity
+from services.aml_builder.web.domain.policy import authorize
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +28,8 @@ router = APIRouter(tags=["Deployment"])
 
 class DeployRequest(BaseModel):
     session_id: str = Field(..., description="Chat session/thread ID.")
-    user_id: str = Field(default="user_dev_01", description="User ID performing deployment.")
-    project_id: str = Field(default="no_project", description="Project ID.")
+    user_id: str = Field(..., description="Canonical JWT subject performing deployment.")
+    project_id: str = Field(..., description="Trusted BFF project ID.")
     metadata_json: Dict[str, Any] = Field(..., description="Officer governance metadata JSON.")
 
 
@@ -40,12 +42,22 @@ class DeployResponse(BaseModel):
 
 
 @router.post("/scenario/deploy", response_model=DeployResponse)
-async def deploy_scenario(request: DeployRequest):
+async def deploy_scenario(
+    request: DeployRequest,
+    identity: Identity = Depends(require_identity),
+):
     """Deploy a shadow-tested AML scenario directly to the production registry.
 
     Validates the governance metadata from the side panel and performs an atomic
     dual-write into PIO_AML_PRODUCTION_SCENARIOS and PIO_AML_SCENARIO.
     """
+    assert_identity_matches(
+        identity,
+        body_user_id=request.user_id,
+        body_project_id=request.project_id,
+    )
+    if not authorize(identity.user_id, "scenario.create", user_email=identity.user_email):
+        raise HTTPException(status_code=403, detail="Permission denied.")
     logger.info(
         "[DEPLOY] Received direct deployment request: session_id=%s, user=%s",
         request.session_id,

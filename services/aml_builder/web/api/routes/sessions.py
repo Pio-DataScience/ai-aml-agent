@@ -12,7 +12,7 @@ import logging
 import os
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from services.aml_builder.web.services.graph import get_tool_driven_graph
 from services.aml_builder.web.services.schemas import (
@@ -33,6 +33,8 @@ from services.aml_builder.web.services.session_store import (
     toggle_chat_pin,
 )
 from services.aml_builder.web.services.settings import settings
+from services.aml_builder.web.api.dependencies import Identity, assert_identity_matches, require_identity
+from services.aml_builder.web.domain.policy import authorize
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +46,11 @@ def _normalize_project(project_id: str) -> str:
 
 
 @router.get("/chat/{project_id}/{chat_id}/{user_id}/history", response_model=ChatHistoryResponse)
-async def get_chat_history(project_id: str, chat_id: str, user_id: str):
+async def get_chat_history(project_id: str, chat_id: str, user_id: str, identity: Identity = Depends(require_identity)):
     """Retrieve chat history for a specific conversation."""
+    assert_identity_matches(identity, path_user_id=user_id, path_project_id=project_id)
+    if not authorize(user_id, "chat.read", {"user_id": user_id}, user_email=identity.user_email):
+        raise HTTPException(status_code=403, detail="Permission denied.")
     try:
         normalized_project = _normalize_project(project_id)
         thread_id = f"{normalized_project}_{chat_id}_{user_id}"
@@ -156,8 +161,11 @@ async def get_chat_history(project_id: str, chat_id: str, user_id: str):
 
 
 @router.get("/chats/user/{user_id}/list", response_model=ChatListResponse)
-async def list_user_chats(user_id: str, project_id: Optional[str] = None):
+async def list_user_chats(user_id: str, project_id: Optional[str] = None, identity: Identity = Depends(require_identity)):
     """List all chat sessions for a user, optionally filtered by project."""
+    assert_identity_matches(identity, path_user_id=user_id, path_project_id=project_id)
+    if not authorize(user_id, "chat.read", {"user_id": user_id}, user_email=identity.user_email):
+        raise HTTPException(status_code=403, detail="Permission denied.")
     try:
         sessions = list_chat_sessions(user_id, project_id)
         chats = [ChatSessionItem(**s) for s in sessions]
@@ -168,8 +176,11 @@ async def list_user_chats(user_id: str, project_id: Optional[str] = None):
 
 
 @router.delete("/chat/{project_id}/{chat_id}/{user_id}", response_model=DeleteChatResponse)
-async def delete_chat_session(project_id: str, chat_id: str, user_id: str):
+async def delete_chat_session(project_id: str, chat_id: str, user_id: str, identity: Identity = Depends(require_identity)):
     """Soft delete a chat session for a user by setting is_deleted = 1."""
+    assert_identity_matches(identity, path_user_id=user_id, path_project_id=project_id)
+    if not authorize(user_id, "chat.read", {"user_id": user_id}, user_email=identity.user_email):
+        raise HTTPException(status_code=403, detail="Permission denied.")
     normalized_project = _normalize_project(project_id)
     if not os.path.exists(settings.CHECKPOINT_DB_PATH):
         raise HTTPException(status_code=404, detail="Database not found")
@@ -182,8 +193,11 @@ async def delete_chat_session(project_id: str, chat_id: str, user_id: str):
 
 
 @router.put("/chat/{project_id}/{chat_id}/{user_id}/rename", response_model=RenameChatResponse)
-async def rename_chat_session_route(project_id: str, chat_id: str, user_id: str, request: RenameChatRequest):
+async def rename_chat_session_route(project_id: str, chat_id: str, user_id: str, request: RenameChatRequest, identity: Identity = Depends(require_identity)):
     """Rename a chat session by updating its title."""
+    assert_identity_matches(identity, path_user_id=user_id, path_project_id=project_id)
+    if not authorize(user_id, "chat.read", {"user_id": user_id}, user_email=identity.user_email):
+        raise HTTPException(status_code=403, detail="Permission denied.")
     normalized_project = _normalize_project(project_id)
     if not os.path.exists(settings.CHECKPOINT_DB_PATH):
         raise HTTPException(status_code=404, detail="Database not found")
@@ -201,8 +215,11 @@ async def rename_chat_session_route(project_id: str, chat_id: str, user_id: str,
 
 
 @router.put("/chat/{project_id}/{chat_id}/{user_id}/pin", response_model=TogglePinResponse)
-async def toggle_chat_pin_route(project_id: str, chat_id: str, user_id: str):
+async def toggle_chat_pin_route(project_id: str, chat_id: str, user_id: str, identity: Identity = Depends(require_identity)):
     """Toggle the pin status of a chat session."""
+    assert_identity_matches(identity, path_user_id=user_id, path_project_id=project_id)
+    if not authorize(user_id, "chat.read", {"user_id": user_id}, user_email=identity.user_email):
+        raise HTTPException(status_code=403, detail="Permission denied.")
     normalized_project = _normalize_project(project_id)
     if not os.path.exists(settings.CHECKPOINT_DB_PATH):
         raise HTTPException(status_code=404, detail="Database not found")

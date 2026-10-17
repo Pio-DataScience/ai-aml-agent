@@ -38,6 +38,14 @@ class Settings(BaseSettings):
         default=8005,
         description="Port this FastAPI service listens on.",
     )
+    SERVICE_AUTH_TOKEN: Optional[str] = Field(
+        default=None,
+        description="Shared secret required on BFF-to-Service-A requests.",
+    )
+    CORS_ALLOWED_ORIGINS: str = Field(
+        default="http://localhost:3000",
+        description="Comma-separated browser origins permitted by CORS.",
+    )
     DEBUG: bool = Field(
         default=False,
         description="Enables verbose debug logging when True.",

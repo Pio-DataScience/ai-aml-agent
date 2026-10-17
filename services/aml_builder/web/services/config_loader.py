@@ -71,7 +71,7 @@ class PolicyCatalog(CatalogModel):
 
     roles: dict[str, list[str]]
     users: dict[str, str]
-    default_role: str
+    default_role: str | dict[str, str]
     cross_user_chat_read: bool
     chat_may_deploy: bool
     auth_mode: Literal["dev", "jwt"]

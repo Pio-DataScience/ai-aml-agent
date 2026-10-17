@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from services.aml_builder.web.api.routes import chat, sessions, engine, deploy
+from services.aml_builder.web.api.routes import chat, sessions, engine, deploy, me
 from services.aml_builder.web.services.graph import get_tool_driven_graph, close_checkpointer
 from services.aml_builder.web.services.logging_config import setup_logging
 from services.aml_builder.web.services.oracle import close_pool, close_shadow_pool, init_pool, init_shadow_pool
@@ -26,6 +26,21 @@ from services.aml_builder.web.services.settings import (
 from services.aml_builder.web.services.config_loader import load_catalogs
 
 logger = logging.getLogger(__name__)
+
+
+def ensure_service_auth_token(service_token: str | None) -> None:
+    """Fail startup with clear guidance when the BFF shared secret is missing.
+
+    Args:
+        service_token: Configured Service A/BFF shared token.
+
+    Raises:
+        RuntimeError: When no non-empty token is configured.
+    """
+    if not service_token:
+        raise RuntimeError(
+            "SERVICE_AUTH_TOKEN is required. Configure the same server-side token in the UI and Service A."
+        )
 
 
 # =============================================================================
@@ -44,6 +59,7 @@ async def lifespan(app: FastAPI):
         None: Control returns to FastAPI during the app's lifetime.
     """
     # Startup
+    ensure_service_auth_token(settings.SERVICE_AUTH_TOKEN)
     configure_langsmith_environment(settings)
     load_catalogs(settings.CATALOG_DIR)
     setup_logging()
@@ -101,7 +117,11 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Restrict in production to known frontend origins
+    allow_origins=[
+        origin.strip()
+        for origin in settings.CORS_ALLOWED_ORIGINS.split(",")
+        if origin.strip()
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -111,6 +131,7 @@ app.include_router(chat.router)
 app.include_router(sessions.router)
 app.include_router(engine.router)
 app.include_router(deploy.router)
+app.include_router(me.router)
 
 
 # =============================================================================

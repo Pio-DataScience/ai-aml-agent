@@ -10,7 +10,7 @@ import json
 import logging
 import uuid
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
@@ -19,6 +19,12 @@ from services.aml_builder.web.services.schemas import ChatRequest, SSEEvent
 from services.aml_builder.web.services.session_store import upsert_chat_session
 from services.aml_builder.web.services.settings import settings
 from services.aml_builder.web.api.sse_mapper import map_tool_result_to_sse
+from services.aml_builder.web.api.dependencies import (
+    Identity,
+    assert_identity_matches,
+    require_identity,
+)
+from services.aml_builder.web.domain.policy import authorize
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +32,10 @@ router = APIRouter(tags=["Chat"])
 
 
 @router.post("/chat/stream")
-async def chat_stream(request: ChatRequest) -> StreamingResponse:
+async def chat_stream(
+    request: ChatRequest,
+    identity: Identity = Depends(require_identity),
+) -> StreamingResponse:
     """Stream a chat response from the AML Scenario Agent.
 
     Accepts the user's message and conversation history, invokes the
@@ -50,9 +59,16 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
         StreamingResponse: An SSE stream of JSON-encoded events.
     """
     metadata = request.metadata
-    user_id = metadata.get("user_id", "anonymous")
+    assert_identity_matches(
+        identity,
+        body_user_id=metadata.get("user_id"),
+        body_project_id=metadata.get("project_id"),
+    )
+    if not authorize(identity.user_id, "chat.read", {"user_id": identity.user_id}, user_email=identity.user_email):
+        raise HTTPException(status_code=403, detail="Permission denied.")
+    user_id = identity.user_id
     chat_id = metadata.get("chat_id", uuid.uuid4().hex)
-    project_id = metadata.get("project_id", "0")
+    project_id = identity.project_id
     if not project_id or project_id in ("0", "None"):
         project_id = "no_project"
 
@@ -70,7 +86,12 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
 
     tool_graph = await get_tool_driven_graph()
     config = {
-        "configurable": {"thread_id": thread_id},
+        "configurable": {
+            "thread_id": thread_id,
+            "user_id": identity.user_id,
+            "user_email": identity.user_email,
+            "project_id": identity.project_id,
+        },
         "recursion_limit": settings.AGENT_RECURSION_LIMIT,
     }
     user_msg = request.messages[-1].content if request.messages else ""

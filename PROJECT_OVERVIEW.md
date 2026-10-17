@@ -27,7 +27,9 @@ The service is synchronous at several integration boundaries despite async HTTP 
 
 | Path | Responsibility |
 |---|---|
-| `services/aml_builder/web/api/main.py` | FastAPI app, lifespan, CORS, router registration, `/health`. |
+| `services/aml_builder/web/api/main.py` | FastAPI app, required service-token startup check, configured CORS, router registration, `/health`. |
+| `services/aml_builder/web/api/dependencies.py` | Validates BFF service-token/identity headers and rejects body/path ID mismatches. |
+| `services/aml_builder/web/api/routes/me.py` | `GET /me/permissions` returns the caller's YAML policy role and allowed actions. |
 | `services/aml_builder/web/api/routes/chat.py` | `POST /chat/stream`; converts graph messages and selected tool results to SSE events. |
 | `services/aml_builder/web/api/routes/sessions.py` | Checkpoint-backed history reconstruction and sidebar list/rename/pin/soft-delete endpoints. |
 | `services/aml_builder/web/api/routes/deploy.py` | Direct side-panel deployment by recovering SQL/intent from checkpoint messages. |
@@ -42,6 +44,7 @@ The service is synchronous at several integration boundaries despite async HTTP 
 | `services/aml_builder/web/domain/metadata_rules.py` | Pure metadata seeding, normalization, and validation rules; Oracle lookups stay in the service adapter. |
 | `services/aml_builder/web/domain/window.py` | Shared pure time-window conversion used by the tool and deploy route. |
 | `services/aml_builder/web/domain/hashing.py` | Canonical SQL normalization and stable JSON SHA-256 hashing. |
+| `services/aml_builder/web/domain/policy.py` | YAML-backed role lookup, action authorization, and own-chat read scope. |
 | `services/aml_builder/web/services/schemas.py` | `AMLIntent` domain contract plus chat and SSE Pydantic models. |
 | `services/aml_builder/web/services/plan_renderer.py` | Deterministic 11-section Markdown plan renderer. |
 | `services/aml_builder/web/services/explanation_code_search.py` | Oracle-backed explanation-code embedding cache, similarity search, and LLM reranking. |
@@ -98,6 +101,7 @@ $env:PYTHONPATH = "services\aml_builder"
 | Method and path | Current behavior |
 |---|---|
 | `GET /health` | Returns static service/version health data. |
+| `GET /me/permissions` | Requires BFF identity headers; returns policy role and allowed actions. |
 | `POST /chat/stream` | Runs the ReAct graph and streams SSE. |
 | `GET /chat/{project_id}/{chat_id}/{user_id}/history` | Reconstructs user/assistant turns and artifacts from the graph checkpoint. |
 | `GET /chats/user/{user_id}/list` | Lists non-deleted sidebar sessions, optionally filtered by project query parameter. |
@@ -278,7 +282,7 @@ Required at settings construction:
 
 Operationally important optional groups:
 
-- Service/logging: `SERVICE_NAME`, `SERVICE_PORT`, `DEBUG`
+- Service/logging/auth: `SERVICE_NAME`, `SERVICE_PORT`, `DEBUG`, `SERVICE_AUTH_TOKEN`, `CORS_ALLOWED_ORIGINS`
 - Chat model: `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_MODEL`, `LLM_MODEL_FAST`, `OPENAI_API_KEY`, `LLM_TEMPERATURE`, `LLM_REASONING_EFFORT`
 - Oracle pools: `ORACLE_POOL_MIN`, `ORACLE_POOL_MAX`, and `SHADOW_ORACLE_DSN`, `SHADOW_ORACLE_USER`, `SHADOW_ORACLE_PASSWORD`, `SHADOW_ORACLE_POOL_MIN`, `SHADOW_ORACLE_POOL_MAX`
 - AML defaults: `AML_COUNTRY_CODE`, `AML_INST_CODE`, `AML_CREATED_BY`
@@ -290,6 +294,7 @@ Important caveats:
 
 - `OPENAI_API_KEY` is optional to Pydantic but required by OpenAI chat/embedding operations.
 - `run_dev.ps1` hardcodes port 8005 rather than consuming `SERVICE_PORT`.
+- Service A startup requires a non-empty `SERVICE_AUTH_TOKEN` shared with the UI BFF; `CORS_ALLOWED_ORIGINS` defaults to `http://localhost:3000` and accepts comma-separated origins.
 - Environment variables take precedence over `.env`; the generic `DEBUG` name can collide with ambient tooling variables. Any non-boolean value (the verification environment supplied `DEBUG=release`) prevents settings construction and therefore application/test import.
 - LangSmith values loaded from `.env` through `BaseSettings` are copied to the process environment at startup under both `LANGCHAIN_*` and `LANGSMITH_*` names when the corresponding variables are absent, so LangChain's tracing integration can read them. Keys are not logged.
 - `LLM_MAX_TOKENS` is optional and only passed to the model when set; reasoning models use `max_completion_tokens`. `AGENT_RECURSION_LIMIT` (default 25) is authoritative for chat. `MAX_AGENT_ITERATIONS` is retained as a reserved overlapping setting, and `MAX_VALIDATION_RETRIES` remains configurable but unused because no validation retry path exists.
@@ -297,15 +302,13 @@ Important caveats:
 
 ## 10. Authentication, authorization, and trust boundaries
 
-No authentication middleware, token validation, role checks, or authorization dependencies are present. `user_id`, `project_id`, `chat_id`, deploy identity, and path identities are accepted from the caller. CORS allows all origins, methods, and headers while enabling credentials.
+The UI middleware requires a valid `pio_session` JWT for every `/api/*` route except `/api/auth/login` and `/api/auth/register`. UI BFF handlers verify the JWT again, use `sub` as the canonical user ID, and forward `X-User-Id`, `X-User-Email`, the fixed `X-Project-Id`, and `X-Service-Token`. The shared service token is server-side only.
 
-Consequences for deployments:
+Service A requires the configured `SERVICE_AUTH_TOKEN` during startup. Its chat stream, session routes, deploy route, and `/me/permissions` require the matching token header plus user and project identity headers. They return HTTP 403 for invalid/missing service identity or body/path IDs that disagree with the headers. CORS origins come from comma-separated `CORS_ALLOWED_ORIGINS`, defaulting to `http://localhost:3000`.
 
-- This service must be treated as behind a trusted/authenticated gateway until server-side identity and authorization are added.
-- Session path/query identifiers are routing keys, not verified principals.
-- `/scenario/deploy` and `/engine/run-scenarios` perform sensitive writes/queries without local authorization.
-- Generated SQL is accepted from an external service and guarded only by `run_*_readonly` requiring the text to begin with `SELECT` or `WITH`. The parser is not a full SQL policy validator; database credentials and grants are the final containment boundary.
-- Governance and analytics joins often match scenario ID/code without country and institution predicates. **Unclear:** whether IDs are globally unique enough in the deployed data model to make this safe.
+`domain/policy.py` reads roles and user mappings only from `policy.yaml`; JWT database-role labels do not grant access. A user map key can be a JWT subject or email. Unknown users default to `manager` in `dev` mode and `viewer` in `jwt` mode. `authorize()` checks the five configured actions and keeps `chat.read` scoped to the caller when `cross_user_chat_read` is false. Chat creation tools and direct deployment enforce `scenario.create`; the registry tool enforces `chat.read`. Rename, pin, and soft-hide of a caller's own chat use `chat.read`, not `scenario.delete`.
+
+Remaining boundary: `/health` and the standalone `/engine/*` routes are not part of the P2 BFF workflow dependency set and do not require `require_identity`. The shared token is a service-to-service trust boundary; callers able to obtain it can assert identity headers, so it must remain secret and Service A should only be reachable from trusted network paths.
 
 ## 11. Testing and verification model
 

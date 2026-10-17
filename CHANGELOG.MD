@@ -5,6 +5,19 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-10-17] feat: P2 trusted identity and mock role authorization
+
+### What
+- Added the Service A BFF identity dependency, shared-token startup guard, configured CORS allowlist, YAML-backed role authorization, and `/me/permissions`.
+- Bound chat, session, deploy, and tool permissions to verified header identity; viewers retain read-only registry access and own-chat access.
+- Added offline identity/policy tests and documented setup and manual role checks in `Docs/P2_identity_roles.md`.
+
+### Verification
+- `python -m compileall -q services app.py run_alert_engine.py`
+- `python -m pytest -q` (offline suite; results recorded in `Docs/refactor_status.md`)
+- UI `npm run lint` and `npm run build` (results recorded in `Docs/refactor_status.md`)
+- No live Oracle, LLM, or Service B call was made.
+
 ## [2026-10-17] refactor: P1 typed tool envelope and domain extraction
 
 ### What

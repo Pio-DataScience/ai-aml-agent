@@ -23,6 +23,7 @@ import uuid
 import httpx
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
+from langchain_core.runnables import RunnableConfig
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -47,6 +48,7 @@ from services.aml_builder.web.domain.intent_normalize import normalize_intent
 from services.aml_builder.web.domain.window import time_window_days
 from services.aml_builder.web.services.plan_renderer import build_plan_markdown
 from services.aml_builder.web.services.prompts.loader import load_prompt
+from services.aml_builder.web.domain.policy import authorize
 from services.aml_builder.web.services.scenario_metadata import (
     seed_scenario_metadata,
     build_metadata_catalog,
@@ -62,11 +64,30 @@ from services.aml_builder.web.services.scenario_registry_analytics import (
 logger = logging.getLogger(__name__)
 
 
+def _permission_error(config: RunnableConfig, action: str) -> str | None:
+    """Return an error payload when the current caller lacks a tool action.
+
+    Args:
+        config: LangGraph run configuration carrying trusted request identity.
+        action: Policy action required by the tool.
+
+    Returns:
+        JSON error payload, or None when authorized.
+    """
+    configurable = config.get("configurable", {})
+    user_id = str(configurable.get("user_id", ""))
+    user_email = str(configurable.get("user_email", "")) or None
+    if authorize(user_id, action, user_email=user_email):
+        return None
+    return json.dumps({"error": f"PERMISSION_DENIED: action {action} is not allowed for this user."})
+
+
 @tool
 def analyze_intent_and_discover_explanation_codes(
     user_prompt: str,
     existing_intent_json: Optional[str] = None,
     existing_metadata_json: Optional[str] = None,
+    config: RunnableConfig = {},
 ) -> str:
     """Extract scenario intent, conditionally discover codes, and seed governance metadata.
 
@@ -93,6 +114,9 @@ def analyze_intent_and_discover_explanation_codes(
         str: JSON object containing 'enriched_intent' dict, 'explanation_code_checkpoint' markdown
              table, and 'scenario_metadata' dict (PIO_AML_SCENARIO field values seeded so far).
     """
+    denied = _permission_error(config, "scenario.create")
+    if denied:
+        return denied
     logger.info(
         "[TOOL: INTENT] Extracting scenario parameters and running vector search..."
     )
@@ -235,6 +259,7 @@ def analyze_intent_and_discover_explanation_codes(
 def generate_scenario_execution_plan(
     intent_json: str,
     explanation_code_checkpoint: Optional[str] = None,
+    config: RunnableConfig = {},
 ) -> str:
     """Generate a human-readable markdown implementation plan artifact for frontend side panel display.
 
@@ -255,6 +280,9 @@ def generate_scenario_execution_plan(
     Returns:
         str: JSON containing 'plan_artifact' markdown string and 'plan_conditions' list.
     """
+    denied = _permission_error(config, "scenario.create")
+    if denied:
+        return denied
     logger.info("[TOOL: PLANNER] Generating implementation plan artifact...")
 
     try:
@@ -326,7 +354,7 @@ def generate_scenario_execution_plan(
 
 
 @tool
-def execute_oracle_dwh_shadow_test(intent_json: str) -> str:
+def execute_oracle_dwh_shadow_test(intent_json: str, config: RunnableConfig = {}) -> str:
     """Generate production-grade Oracle DWH SQL via PioTech AI text-to-SQL service and execute
     a live shadow test against Oracle BI_DWH to compute real alert volume metrics.
 
@@ -340,6 +368,9 @@ def execute_oracle_dwh_shadow_test(intent_json: str) -> str:
         str: JSON containing 'raw_sql', 'header_alert_count', 'transaction_detail_count',
              'alert_density_ratio', and 'validation_success'.
     """
+    denied = _permission_error(config, "scenario.create")
+    if denied:
+        return denied
     logger.info("[TOOL: SQL_BRIDGE] Requesting SQL generation from PioTech AI...")
 
     # -----------------------------------------------------------
@@ -493,7 +524,7 @@ def execute_oracle_dwh_shadow_test(intent_json: str) -> str:
 
 
 @tool
-def prepare_scenario_metadata_for_persistence(metadata_json: str) -> str:
+def prepare_scenario_metadata_for_persistence(metadata_json: str, config: RunnableConfig = {}) -> str:
     """Build the live PIO_AML_SCENARIO governance field catalog for the side panel / chat fallback.
 
     Call this ONLY after the user has approved the shadow test results and before calling
@@ -521,6 +552,9 @@ def prepare_scenario_metadata_for_persistence(metadata_json: str) -> str:
         str: JSON containing 'metadata' (current values), 'fields' (full catalog with live
              lookup options), 'missing_mandatory_fields', and 'ready_for_persistence'.
     """
+    denied = _permission_error(config, "scenario.create")
+    if denied:
+        return denied
     logger.info("[TOOL: METADATA] Building PIO_AML_SCENARIO field catalog...")
 
     try:
@@ -544,7 +578,7 @@ def prepare_scenario_metadata_for_persistence(metadata_json: str) -> str:
 
 @tool
 def persist_and_validate_scenario_in_dwh(
-    intent_json: str, raw_sql: str, metadata_json: str
+    intent_json: str, raw_sql: str, metadata_json: str, config: RunnableConfig = {}
 ) -> str:
     """Persist the confirmed, shadow-tested AML scenario atomically into both
     PIO_AML_PRODUCTION_SCENARIOS (for the automated daily ETL runner) and
@@ -575,6 +609,9 @@ def persist_and_validate_scenario_in_dwh(
              'write_verification', and 'created_at' on success, or 'validation_errors'
              (list of str) and 'write_success': false if the metadata failed validation.
     """
+    denied = _permission_error(config, "scenario.create")
+    if denied:
+        return denied
     logger.info(
         "[TOOL: PERSISTER] Writing confirmed scenario to PIO_AML_PRODUCTION_SCENARIOS + PIO_AML_SCENARIO..."
     )
@@ -671,6 +708,7 @@ def query_production_scenario_registry(
     date_to: Optional[str] = None,
     customer_number: Optional[str] = None,
     limit: int = 5,
+    config: RunnableConfig = {},
 ) -> str:
     """Query this agent's own persisted scenario registry — inventory, search, detail, and alert telemetry.
 
@@ -708,6 +746,9 @@ def query_production_scenario_registry(
     Returns:
         str: JSON object with the mode-specific result, or {'error': ...} if the request was invalid.
     """
+    denied = _permission_error(config, "chat.read")
+    if denied:
+        return denied
     logger.info("[TOOL: REGISTRY] query_type=%s", query_type)
 
     try:

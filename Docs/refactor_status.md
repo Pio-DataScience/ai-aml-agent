@@ -1,5 +1,19 @@
 # Refactor Status
 
+## P2 — Identity and mock roles
+
+- **Branches:** Service A `refactor/p2-identity-roles`; UI `refactor/master` (the existing UI branch was retained).
+- **Status:** Implemented; no next package started.
+- **Files changed:**
+  - Service A: `.env.example`, `CHANGELOG.MD`, `PROJECT_OVERVIEW.md`, `Docs/P2_identity_roles.md`, `Docs/refactor_status.md`, `config/aml_catalogs/policy.yaml`, `services/aml_builder/tests/test_p0_settings_and_sse.py`, `services/aml_builder/tests/test_p2_identity_policy.py`, `services/aml_builder/web/api/codec.py`, `services/aml_builder/web/api/dependencies.py`, `services/aml_builder/web/api/main.py`, `services/aml_builder/web/api/routes/chat.py`, `services/aml_builder/web/api/routes/deploy.py`, `services/aml_builder/web/api/routes/me.py`, `services/aml_builder/web/api/routes/sessions.py`, `services/aml_builder/web/domain/policy.py`, `services/aml_builder/web/services/config_loader.py`, `services/aml_builder/web/services/settings.py`, `services/aml_builder/web/services/tools.py`.
+  - UI: `.env.example`, `CHANGELOG.md`, `middleware.ts`, `package.json`, `package-lock.json`, `src/app/api/auth/login/route.ts`, `src/app/api/auth/register/route.ts`, `src/app/api/chat/[sessionId]/pin/route.ts`, `src/app/api/chat/[sessionId]/rename/route.ts`, `src/app/api/chat/[sessionId]/route.ts`, `src/app/api/chat/deploy/route.ts`, `src/app/api/chat/history/route.ts`, `src/app/api/chat/route.ts`, `src/app/api/chat/status/route.ts`, `src/app/api/chats/list/route.ts`, `src/app/api/me/permissions/route.ts`, `src/app/chat/[sessionId]/page.tsx`, `src/app/providers.tsx`, `src/components/ChatBubble.tsx`, `src/components/MarkdownRenderer.tsx`, `src/components/ScenarioGovernanceTabs.tsx`, `src/components/Sidebar.tsx`, `src/components/metadata/ScenarioMetadataPanel.tsx`, `src/hooks/useChatStream.ts`, `src/lib/db.ts`, `src/lib/serviceIdentity.ts`, `src/state/PermissionsContext.tsx`, `src/types/chat.ts`.
+- **Tests added:** `test_p2_identity_policy.py` covers policy role/action matrix, dev/jwt defaults, ID/email mappings, cross-user denial, trusted-header checks, forged/missing token rejection, body/path mismatch rejection, and viewer tool denial. Updated P0 settings tests cover required service token, CORS default, and mode-based policy defaults. No UI test runner was present; manual role checks are documented in `Docs/P2_identity_roles.md`.
+- **Deviations and notes:**
+  - Applied the user's clarifications to the section 6 draft: `default_role` is mode-specific (`dev: manager`, `jwt: viewer`); dev still requires a valid UI login; no test emails were added; JWT `sub` is the canonical user ID; policy roles ignore database/JWT role labels; deploy uses `scenario.create`; own-chat rename/pin/soft-hide use `chat.read`; project ID is fixed to `default`; and viewer checks are enforced in Service A tools.
+  - Added `eslint-plugin-react-hooks` as a UI dev dependency because `npm run lint` could not resolve the configured plugin. The production build also exposed optional artifact callback data types in `ChatBubble`; non-null assertions were added at the already guarded render sites.
+  - CORS defaults to `http://localhost:3000`; Service A refuses startup without `SERVICE_AUTH_TOKEN`. Both examples contain the server-side token and CORS variables. No Service B files or live Oracle/LLM/Service B calls were used.
+- **Verification:** Service A `compileall` passed; P2 tests passed **28**; related P0 settings/SSE tests passed **9** with the Windows-sensitive fresh-state cases deselected. UI `npm run lint` passed with existing warnings; `npm run build` passed with existing warnings. `git diff --check` passed in both repos.
+
 ## P1 — Typed envelope, codec, domain extraction
 
 - **Branch:** `refactor/p1-typed-envelope-domain`

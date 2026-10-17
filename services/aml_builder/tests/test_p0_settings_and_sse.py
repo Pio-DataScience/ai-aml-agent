@@ -25,6 +25,7 @@ def _required_settings(**overrides: object) -> Settings:
         "ORACLE_DSN": "unused",
         "ORACLE_USER": "unused",
         "ORACLE_PASSWORD": "unused",
+        "SERVICE_AUTH_TOKEN": "test-service-token",
         "_env_file": None,
     }
     values.update(overrides)
@@ -45,6 +46,13 @@ def test_state_database_defaults_follow_state_dir(tmp_path: Path) -> None:
     assert settings.MAX_AGENT_ITERATIONS == 25
     assert settings.MAX_VALIDATION_RETRIES == 3
     assert settings.LLM_MAX_TOKENS is None
+    assert settings.CORS_ALLOWED_ORIGINS == "http://localhost:3000"
+
+
+def test_service_startup_fails_clearly_without_service_token() -> None:
+    """Service A refuses startup when the BFF shared token is not configured."""
+    with pytest.raises(RuntimeError, match="SERVICE_AUTH_TOKEN is required"):
+        aml_main.ensure_service_auth_token(None)
 
 
 def test_unknown_environment_keys_do_not_break_settings(
@@ -180,7 +188,10 @@ def test_fresh_state_directory_initializes_catalogs_and_checkpoint_store(
     monkeypatch.setattr(session_store, "settings", config)
     from services.aml_builder.web.services.config_loader import load_catalogs
 
-    assert load_catalogs(config.CATALOG_DIR).policy.default_role == "viewer"
+    assert load_catalogs(config.CATALOG_DIR).policy.default_role == {
+        "dev": "manager",
+        "jwt": "viewer",
+    }
     session_store.init_session_db()
 
     assert config.CHECKPOINT_DB_PATH is not None
