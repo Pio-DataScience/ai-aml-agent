@@ -1,4 +1,4 @@
-"""Pure characterization helper for the legacy intent normalization behavior."""
+"""Pure characterization helper for legacy intent normalization."""
 
 import re
 from copy import deepcopy
@@ -12,14 +12,15 @@ def normalize_intent_baseline(
 
     Args:
         raw_intent: Parsed model output before the legacy inline normalization.
-        user_prompt: Original user request used by the legacy detection-logic fallback.
+        user_prompt: Original request for the legacy detection-logic fallback.
 
     Returns:
         A new dictionary with the legacy normalization rules applied.
     """
     intent_dict = deepcopy(raw_intent)
 
-    # Sanitize optional dict/model fields that might be serialized as "" or invalid empty types
+    # Sanitize optional dict/model fields that might be serialized as "" or
+    # invalid empty types.
     for dict_field in ("baseline_window", "aggregation", "time_window"):
         if dict_field in intent_dict and not isinstance(
             intent_dict[dict_field], dict
@@ -42,7 +43,8 @@ def normalize_intent_baseline(
             "scenario_name", user_prompt
         )
 
-    # Normalize thresholds keys if LLM used key variations (type -> field, comparison -> operator, value -> value_from)
+    # Normalize threshold keys if the LLM used aliases (type -> field,
+    # comparison -> operator, value -> value_from).
     thresholds = intent_dict.get("thresholds")
     if isinstance(thresholds, list):
         for threshold in thresholds:
@@ -53,7 +55,9 @@ def normalize_intent_baseline(
                     threshold["field"] = "transaction_amount"
                 if "comparison" in threshold and "operator" not in threshold:
                     threshold["operator"] = str(threshold.pop("comparison"))
-                if "operator" not in threshold or not threshold.get("operator"):
+                if "operator" not in threshold or not threshold.get(
+                    "operator"
+                ):
                     threshold["operator"] = ">"
                 if "value" in threshold and "value_from" not in threshold:
                     value = threshold.pop("value")
@@ -90,7 +94,7 @@ def normalize_intent_baseline(
         transaction_type = intent_dict["filters"].get("transaction_type")
         transaction_types = intent_dict["filters"].get("transaction_types")
 
-    # Intelligent fallback: scan semantic_conditions if transaction types are absent.
+    # Scan semantic conditions when transaction types are absent.
     if (
         not transaction_type
         and not transaction_types
@@ -120,7 +124,9 @@ def normalize_intent_baseline(
                     if (
                         raw_phrase
                         and raw_phrase.lower()
-                        not in [item.lower() for item in discovered_from_conditions]
+                        not in [
+                            item.lower() for item in discovered_from_conditions
+                        ]
                         and raw_phrase.lower() not in ("or", "and")
                     ):
                         discovered_from_conditions.append(raw_phrase)
@@ -132,7 +138,9 @@ def normalize_intent_baseline(
 
     if transaction_types and isinstance(transaction_types, list):
         intent_dict["transaction_types"] = [
-            str(value).strip() for value in transaction_types if str(value).strip()
+            str(value).strip()
+            for value in transaction_types
+            if str(value).strip()
         ]
         if not transaction_type:
             intent_dict["transaction_type"] = ", ".join(

@@ -18,7 +18,7 @@ The application has four practical layers:
 
 1. **HTTP interface:** FastAPI startup and routes under `services/aml_builder/web/api/` expose chat/SSE, session history and sidebar operations, direct deployment, alert-engine execution, and health.
 2. **Agent orchestration:** `services/aml_builder/web/services/graph.py:get_tool_driven_graph` builds one process-level ReAct agent with six tools and an `AsyncSqliteSaver`. There is no deterministic multi-node workflow in Python. Tool order and approval pauses are directed by `prompts/tool_driven_system.md` and tool descriptions.
-3. **Domain and integration services:** intent schemas, deterministic plan rendering, explanation-code search, metadata validation, registry analytics, SQL extraction, external text-to-SQL calls, and alert processing live under `web/services/`.
+3. **Domain and integration services:** pure intent normalization, code binding, metadata rules, window conversion, SQL extraction and hashing live under `web/domain/`. Oracle-backed metadata lookups, deterministic plan rendering, explanation-code search, registry analytics, external text-to-SQL calls, and alert processing remain under `web/services/`.
 4. **Persistence:** SQLite stores LangGraph checkpoints and chat-sidebar metadata; Oracle stores source/lookups, scenario definitions and governance records, and generated alerts.
 
 The service is synchronous at several integration boundaries despite async HTTP routes: Oracle helpers, OpenAI/LangChain invocations inside tools, the `httpx.Client` call to the text-to-SQL service, and alert-engine execution are synchronous. FastAPI engine routes invoke that work directly rather than enqueueing it.
@@ -31,9 +31,17 @@ The service is synchronous at several integration boundaries despite async HTTP 
 | `services/aml_builder/web/api/routes/chat.py` | `POST /chat/stream`; converts graph messages and selected tool results to SSE events. |
 | `services/aml_builder/web/api/routes/sessions.py` | Checkpoint-backed history reconstruction and sidebar list/rename/pin/soft-delete endpoints. |
 | `services/aml_builder/web/api/routes/deploy.py` | Direct side-panel deployment by recovering SQL/intent from checkpoint messages. |
+| `services/aml_builder/web/api/codec.py` | Versioned tool-result envelope, per-tool payload models, and legacy checkpoint decoding. |
+| `services/aml_builder/web/api/sse_mapper.py` | Maps decoded tool results to the existing UI-visible SSE events. |
 | `services/aml_builder/web/api/routes/engine.py` | Synchronous alert-engine trigger and active-scenario listing. |
 | `services/aml_builder/web/services/graph.py` | ReAct graph/checkpointer singleton lifecycle and six-tool registration. |
 | `services/aml_builder/web/services/tools.py` | Agent-facing intent, plan, shadow-test, metadata, persistence, and registry-query tools. |
+| `services/aml_builder/web/domain/intent_normalize.py` | Pure intent normalization with default provenance and `applied_defaults` entries. |
+| `services/aml_builder/web/domain/code_binding.py` | Pure transaction-scope selection and explanation-code binding. |
+| `services/aml_builder/web/domain/sql_extract.py` | Pure extraction of SQL from response text; `services/sql_extraction.py` remains a compatibility export. |
+| `services/aml_builder/web/domain/metadata_rules.py` | Pure metadata seeding, normalization, and validation rules; Oracle lookups stay in the service adapter. |
+| `services/aml_builder/web/domain/window.py` | Shared pure time-window conversion used by the tool and deploy route. |
+| `services/aml_builder/web/domain/hashing.py` | Canonical SQL normalization and stable JSON SHA-256 hashing. |
 | `services/aml_builder/web/services/schemas.py` | `AMLIntent` domain contract plus chat and SSE Pydantic models. |
 | `services/aml_builder/web/services/plan_renderer.py` | Deterministic 11-section Markdown plan renderer. |
 | `services/aml_builder/web/services/explanation_code_search.py` | Oracle-backed explanation-code embedding cache, similarity search, and LLM reranking. |
@@ -55,6 +63,8 @@ The service is synchronous at several integration boundaries despite async HTTP 
 | `app.py` | Root wrapper exporting the FastAPI `app`. |
 | `services/aml_builder/tests/test_registry_analytics.py` | Manually executable live integration check, not an offline unit suite. |
 | `services/aml_builder/tests/test_all_transaction_code_scope.py` | Offline regression test for all/any transaction-code discovery. |
+| `services/aml_builder/tests/test_p1_intent_normalization_baseline.py` | Frozen legacy normalization fixtures and default provenance checks. |
+| `services/aml_builder/tests/test_p1_codec_domain.py` | Offline codec, history, SSE, hashing, SQL extraction, metadata, and window tests. |
 | `services/aml_builder/tests/test_config_loader.py` | Offline catalog validation, reload, and TBD status tests. |
 | `services/aml_builder/tests/test_p0_settings_and_sse.py` | Offline settings, SSE, tracing configuration, LLM defaults, and fresh-state lifespan tests. |
 | `services/aml_builder/tests/test_archive_legacy.py` | Fake-backed verification that archive queries are SELECT-only and ID-scoped. |

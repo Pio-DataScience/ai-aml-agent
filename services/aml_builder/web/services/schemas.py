@@ -66,7 +66,7 @@ class Threshold(BaseModel):
                 return v_clean
         return v
 
-    provenance: Literal["stated", "assumed_default", "needs_user"] = Field(
+    provenance: Literal["stated", "assumed_default", "needs_user", "default"] = Field(
         default="stated",
         description=(
             "Where this value came from: 'stated' (user gave it), "
@@ -124,7 +124,7 @@ class TimeWindow(BaseModel):
         default=True,
         description="True = rolling from SYSDATE. False = fixed calendar period.",
     )
-    provenance: Literal["stated", "assumed_default", "needs_user"] = Field(
+    provenance: Literal["stated", "assumed_default", "needs_user", "default"] = Field(
         default="stated",
         description="stated | assumed_default | needs_user (see Threshold.provenance).",
     )
@@ -143,6 +143,7 @@ class BaselineWindow(BaseModel):
         offset_days (int): Equal to the current observation window size (e.g., 30 for 30-day window).
         sql_date_formula (Optional[str]): Explicit SQL predicate formula for non-overlapping date range.
         description (Optional[str]): Plain English description of baseline range.
+        provenance (str): stated | assumed_default | needs_user | default.
     """
 
     unit: Literal["DAYS", "WEEKS", "MONTHS", "YEARS"] = Field(
@@ -165,6 +166,10 @@ class BaselineWindow(BaseModel):
 
     duration: int = Field(
         ..., description="Duration of historical baseline window in units."
+    )
+    provenance: Literal["stated", "assumed_default", "needs_user", "default"] = Field(
+        default="stated",
+        description="Where the baseline window value came from.",
     )
     exclude_current_window: bool = Field(
         default=True,
@@ -207,7 +212,7 @@ class AggregationProfile(BaseModel):
         default=None, description="sum | count | count distinct | max | None."
     )
     grain: str = Field(..., description="Evaluation grain, plain English.")
-    provenance: Literal["stated", "assumed_default", "needs_user"] = Field(
+    provenance: Literal["stated", "assumed_default", "needs_user", "default"] = Field(
         default="stated"
     )
 
@@ -249,7 +254,7 @@ class SemanticCondition(BaseModel):
         default=None,
         description="Specific compliance explanation codes bound directly to this semantic condition.",
     )
-    provenance: Literal["stated", "assumed_default", "needs_user"] = Field(
+    provenance: Literal["stated", "assumed_default", "needs_user", "default"] = Field(
         default="stated"
     )
 
@@ -376,6 +381,10 @@ class AMLIntent(BaseModel):
     applied_defaults: List[str] = Field(
         default_factory=list,
         description="Business defaults the parser assumed, shown to the user.",
+    )
+    field_provenance: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Provenance for scalar intent fields that lack nested provenance models.",
     )
     ready_for_handoff: bool = Field(
         default=True,

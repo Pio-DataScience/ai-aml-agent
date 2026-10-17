@@ -44,9 +44,9 @@ def test_any_transaction_scope_skips_explanation_code_search(monkeypatch):
         )
     )
 
-    enriched = result["enriched_intent"]
-    assert result["discovered_explanation_codes"] == []
-    assert result["explanation_code_checkpoint"] is None
+    enriched = result["payload"]["enriched_intent"]
+    assert result["payload"]["discovered_explanation_codes"] == []
+    assert result["payload"]["explanation_code_checkpoint"] is None
     assert enriched["explanation_codes"] is None
     assert enriched["explanation_codes_by_type"] is None
     assert enriched["thresholds"][0]["explanation_codes"] is None

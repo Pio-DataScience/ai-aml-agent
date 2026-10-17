@@ -17,7 +17,6 @@ Notes:
   independent of the sequential scenario-creation workflow above.
 """
 
-import re
 import json
 import logging
 import uuid
@@ -26,23 +25,26 @@ from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_core.tools import tool
 
 from services.aml_builder.web.services.settings import settings
+from services.aml_builder.web.api.codec import typed_tool as tool
 from services.aml_builder.web.services.schemas import AMLIntent
 from services.aml_builder.web.services.explanation_code_search import (
     select_relevant_explanation_codes,
     format_explanation_code_checkpoint,
 )
-from services.aml_builder.web.services.oracle import run_readonly, run_shadow_readonly
+from services.aml_builder.web.services.oracle import run_shadow_readonly
 from services.aml_builder.web.services.production_registry import (
     save_production_scenario,
 )
 from services.aml_builder.web.services.llm_client import build_llm, safe_parse_json
 from services.aml_builder.web.services.sql_extraction import extract_sql
-from services.aml_builder.web.services._intent_normalization_baseline import (
-    normalize_intent_baseline,
+from services.aml_builder.web.domain.code_binding import (
+    bind_channels_and_codes_to_intent,
+    specific_transaction_types,
 )
+from services.aml_builder.web.domain.intent_normalize import normalize_intent
+from services.aml_builder.web.domain.window import time_window_days
 from services.aml_builder.web.services.plan_renderer import build_plan_markdown
 from services.aml_builder.web.services.prompts.loader import load_prompt
 from services.aml_builder.web.services.scenario_metadata import (
@@ -58,108 +60,6 @@ from services.aml_builder.web.services.scenario_registry_analytics import (
 )
 
 logger = logging.getLogger(__name__)
-
-_ALL_TRANSACTION_SCOPE_LABELS = {
-    "ALL",
-    "ALL TRANSACTION",
-    "ALL TRANSACTIONS",
-    "ALL TYPES",
-    "ALL TRANSACTION TYPES",
-    "ANY",
-    "ANY TRANSACTION",
-    "ANY TRANSACTIONS",
-    "ANY TYPE",
-    "ANY TYPES",
-    "ANY TRANSACTION TYPE",
-    "ANY TRANSACTION TYPES",
-}
-
-
-def _specific_transaction_types(transaction_type: Any) -> List[str]:
-    """Return specific transaction types, excluding all/any scope labels.
-
-    Args:
-        transaction_type: One transaction type or a list of transaction types.
-
-    Returns:
-        Specific transaction types that can be used for code discovery.
-    """
-    values = (
-        transaction_type if isinstance(transaction_type, list) else [transaction_type]
-    )
-    return [
-        normalized
-        for value in values
-        if value and (normalized := " ".join(str(value).strip().upper().split()))
-        and normalized not in _ALL_TRANSACTION_SCOPE_LABELS
-    ]
-
-
-# =============================================================================
-def _bind_channels_and_codes_to_intent(
-    intent_dict: Dict[str, Any],
-    discovered_codes: List[Dict[str, Any]],
-    codes_by_type: Dict[str, List[str]],
-) -> None:
-    """Bind channel-specific explanation codes directly to individual thresholds and semantic conditions."""
-    if not codes_by_type or len(codes_by_type) <= 0:
-        return
-
-    # 1. Bind to semantic_conditions
-    sc_list = intent_dict.get("semantic_conditions")
-    if isinstance(sc_list, list):
-        for sc in sc_list:
-            if not isinstance(sc, dict):
-                continue
-            text = f"{sc.get('raw_phrase', '')} {sc.get('predicate', '')}".lower()
-            for tx_key, codes in codes_by_type.items():
-                tx_lower = tx_key.lower()
-                tx_words = [w for w in tx_lower.split() if len(w) > 3]
-                if any(w in text for w in tx_words) or tx_lower in text:
-                    if not sc.get("transaction_type"):
-                        sc["transaction_type"] = tx_key
-                    if not sc.get("explanation_codes"):
-                        sc["explanation_codes"] = codes
-                    break
-
-    # 2. Bind to thresholds
-    thresholds = intent_dict.get("thresholds")
-    if isinstance(thresholds, list):
-        for idx, t in enumerate(thresholds):
-            if not isinstance(t, dict):
-                continue
-            existing_tx = t.get("transaction_type")
-            if existing_tx and existing_tx in codes_by_type:
-                t["explanation_codes"] = codes_by_type[existing_tx]
-                continue
-
-            matched_tx = None
-
-            # Check correlation with semantic conditions that already have transaction_type
-            if isinstance(sc_list, list):
-                for sc in sc_list:
-                    if isinstance(sc, dict) and sc.get("transaction_type"):
-                        raw_sc = str(sc.get("raw_phrase", "")).lower()
-                        pred_sc = str(sc.get("predicate", "")).lower()
-                        val_str = str(t.get("value_from", ""))
-                        if (
-                            val_str in raw_sc
-                            or val_str in pred_sc
-                            or (">" in str(t.get("operator", "")) and ("exceed" in pred_sc or "over" in raw_sc))
-                            or ("<" in str(t.get("operator", "")) and ("below" in pred_sc or "under" in raw_sc))
-                        ):
-                            matched_tx = sc["transaction_type"]
-                            break
-
-            # Fallback by index alignment if threshold count matches types count
-            if not matched_tx and len(thresholds) == len(codes_by_type):
-                types_keys = list(codes_by_type.keys())
-                if idx < len(types_keys):
-                    matched_tx = types_keys[idx]
-
-            if matched_tx and matched_tx in codes_by_type:
-                t["transaction_type"] = matched_tx
-                t["explanation_codes"] = codes_by_type[matched_tx]
 
 
 @tool
@@ -232,7 +132,7 @@ def analyze_intent_and_discover_explanation_codes(
         elif "intent" in intent_dict and isinstance(intent_dict["intent"], dict):
             intent_dict = intent_dict["intent"]
 
-        intent_dict = normalize_intent_baseline(intent_dict, user_prompt)
+        intent_dict = normalize_intent(intent_dict, user_prompt)
         tx_type = intent_dict.get("transaction_type")
         tx_types = intent_dict.get("transaction_types")
 
@@ -242,7 +142,7 @@ def analyze_intent_and_discover_explanation_codes(
         expl_checkpoint = None
 
         target_types = tx_types if tx_types else tx_type
-        specific_types = _specific_transaction_types(target_types)
+        specific_types = specific_transaction_types(target_types)
 
         # If user explicitly confirmed/selected codes via LLM resolution, preserve them & skip re-discovery checkpoint
         if (
@@ -280,7 +180,7 @@ def analyze_intent_and_discover_explanation_codes(
                 intent_dict["explanation_codes_by_type"] = codes_by_type
 
                 # Bind channel-specific explanation codes directly to individual thresholds and semantic conditions
-                _bind_channels_and_codes_to_intent(intent_dict, discovered_codes, codes_by_type)
+                bind_channels_and_codes_to_intent(intent_dict, discovered_codes, codes_by_type)
 
                 logger.info(
                     "[TOOL: INTENT] Vector search discovered %d codes across %d channels: %s",
@@ -316,19 +216,12 @@ def analyze_intent_and_discover_explanation_codes(
             intent.model_dump(), existing_metadata
         )
 
-        plan_md = build_plan_markdown(intent.model_dump(), expl_checkpoint)
-        logger.info(
-            "[TOOL: INTENT] Plan artifact generated alongside intent (%d chars).",
-            len(plan_md),
-        )
-
         return json.dumps(
             {
                 "enriched_intent": intent.model_dump(),
                 "explanation_code_checkpoint": expl_checkpoint,
                 "discovered_explanation_codes": discovered_codes,
                 "scenario_metadata": scenario_metadata,
-                "plan_artifact": plan_md,
             },
             ensure_ascii=False,
             indent=2,
@@ -369,6 +262,12 @@ def generate_scenario_execution_plan(
             json.loads(intent_json) if isinstance(intent_json, str) else intent_json
         )
         if isinstance(intent, dict):
+            if isinstance(intent.get("payload"), dict):
+                if not explanation_code_checkpoint:
+                    explanation_code_checkpoint = intent["payload"].get(
+                        "explanation_code_checkpoint"
+                    )
+                intent = intent["payload"]
             # Unwrap if full tool result of analyze_intent_and_discover_explanation_codes was passed directly
             if "enriched_intent" in intent and isinstance(
                 intent["enriched_intent"], dict
@@ -451,6 +350,8 @@ def execute_oracle_dwh_shadow_test(intent_json: str) -> str:
             json.loads(intent_json) if isinstance(intent_json, str) else intent_json
         )
         if isinstance(intent_dict, dict):
+            if isinstance(intent_dict.get("payload"), dict):
+                intent_dict = intent_dict["payload"]
             # Unwrap if wrapped under enriched_intent, AMLIntent, or intent
             if "enriched_intent" in intent_dict and isinstance(
                 intent_dict["enriched_intent"], dict
@@ -680,6 +581,10 @@ def persist_and_validate_scenario_in_dwh(
 
     try:
         intent_dict = json.loads(intent_json)
+        if isinstance(intent_dict.get("payload"), dict):
+            intent_dict = intent_dict["payload"]
+        if isinstance(intent_dict.get("enriched_intent"), dict):
+            intent_dict = intent_dict["enriched_intent"]
     except json.JSONDecodeError as exc:
         logger.error("[TOOL: PERSISTER] Invalid intent JSON: %s", exc)
         return json.dumps({"error": f"Invalid intent JSON: {exc}"})
@@ -707,13 +612,7 @@ def persist_and_validate_scenario_in_dwh(
     detection_logic: str = intent_dict.get("detection_logic", scenario_name)
 
     # Compute time_window_days from the intent time_window block
-    tw: Dict[str, Any] = intent_dict.get("time_window") or {}
-    tw_value: int = int(tw.get("value", 0) or 0)
-    tw_unit: str = str(tw.get("unit", "DAYS")).upper()
-    unit_to_days: Dict[str, int] = {"DAYS": 1, "WEEKS": 7, "MONTHS": 30, "YEARS": 365}
-    time_window_days: Optional[int] = (
-        tw_value * unit_to_days.get(tw_unit, 1) if tw_value else None
-    )
+    time_window_days_value = time_window_days(intent_dict.get("time_window"))
 
     # Generate a human-readable unique scenario ID — shared as SCENARIO_CODE on PIO_AML_SCENARIO
     scenario_id = f"PRD_{uuid.uuid4().hex[:8].upper()}"
@@ -726,7 +625,7 @@ def persist_and_validate_scenario_in_dwh(
         detection_logic=detection_logic,
         raw_sql=raw_sql,
         scenario_metadata=metadata_dict,
-        time_window_days=time_window_days,
+        time_window_days=time_window_days_value,
         created_by=settings.AML_CREATED_BY,
     )
 
@@ -747,7 +646,7 @@ def persist_and_validate_scenario_in_dwh(
             "scenario_id": scenario_id,
             "scenario_name": scenario_name,
             "scenario_type": scenario_type,
-            "time_window_days": time_window_days,
+            "time_window_days": time_window_days_value,
             "raw_sql_preview": raw_sql[:200] if raw_sql else "",
             "write_success": success,
             "write_verification": {

@@ -18,6 +18,7 @@ from services.aml_builder.web.services.graph import get_tool_driven_graph
 from services.aml_builder.web.services.schemas import ChatRequest, SSEEvent
 from services.aml_builder.web.services.session_store import upsert_chat_session
 from services.aml_builder.web.services.settings import settings
+from services.aml_builder.web.api.sse_mapper import map_tool_result_to_sse
 
 logger = logging.getLogger(__name__)
 
@@ -124,39 +125,21 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                             tool_call_id = getattr(m, "tool_call_id", None)
                             tool_name = tool_call_id_to_name.get(tool_call_id, "")
 
-                            if tool_name in ("generate_scenario_execution_plan", "analyze_intent_and_discover_explanation_codes") or (isinstance(getattr(m, "content", None), str) and "plan_artifact" in m.content):
-                                # Emit plan to side panel
-                                try:
-                                    payload = json.loads(getattr(m, "content", "{}"))
-                                    plan_md = payload.get("plan_artifact", "")
-                                    if plan_md:
-                                        yield _sse(SSEEvent(type="plan_artifact", text=plan_md))
-                                        logger.info("[API] Emitted plan_artifact SSE from %s tool output (%d chars).", tool_name or "tool", len(plan_md))
-                                except Exception as exc:
-                                    logger.warning("[API] Could not parse plan_artifact from ToolMessage: %s", exc)
-
-                            elif tool_name == "prepare_scenario_metadata_for_persistence":
-                                # Emit the PIO_AML_SCENARIO field catalog to the side panel
-                                try:
-                                    payload = json.loads(getattr(m, "content", "{}"))
-                                    if "fields" in payload:
-                                        yield _sse(SSEEvent(type="scenario_metadata_catalog", data=payload))
-                                        logger.info(
-                                            "[API] Emitted scenario_metadata_catalog SSE. missing=%s",
-                                            payload.get("missing_mandatory_fields"),
-                                        )
-                                except Exception as exc:
-                                    logger.warning("[API] Could not parse scenario_metadata_catalog from ToolMessage: %s", exc)
-
-                            elif tool_name in ("execute_oracle_dwh_shadow_test", "persist_and_validate_scenario_in_dwh"):
-                                # Emit shadow test results or scenario persistence confirmation card
-                                try:
-                                    payload = json.loads(getattr(m, "content", "{}"))
-                                    if "raw_sql" in payload or payload.get("write_success") or "shadow_test_metrics" in payload:
-                                        yield _sse(SSEEvent(type="scenario_result", data=payload))
-                                        logger.info("[API] Emitted scenario_result SSE from %s.", tool_name)
-                                except Exception as exc:
-                                    logger.warning("[API] Could not parse scenario_result from ToolMessage: %s", exc)
+                            try:
+                                mapped_events = map_tool_result_to_sse(
+                                    tool_name, getattr(m, "content", "{}")
+                                )
+                                for mapped_event in mapped_events:
+                                    yield _sse(mapped_event)
+                                    logger.info(
+                                        "[API] Emitted %s SSE from %s.",
+                                        mapped_event.type,
+                                        tool_name or "tool",
+                                    )
+                            except Exception as exc:
+                                logger.warning(
+                                    "[API] Could not map ToolMessage to SSE: %s", exc
+                                )
 
                             # All other ToolMessages are suppressed — raw JSON stays internal
 

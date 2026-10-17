@@ -22,6 +22,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from services.aml_builder.web.services.oracle import run_readonly
 from services.aml_builder.web.services.settings import settings
+from services.aml_builder.web.domain.metadata_rules import (
+    normalize_and_validate_metadata,
+    seed_metadata_defaults,
+)
+from services.aml_builder.web.domain.window import map_period
 
 logger = logging.getLogger(__name__)
 
@@ -143,9 +148,6 @@ SCENARIO_METADATA_FIELDS: List[FieldSpec] = [
 ]
 
 
-_UNIT_TO_PERIOD_TYPE: Dict[str, str] = {"DAYS": "D", "MONTHS": "M", "YEARS": "Y"}
-
-
 def _map_period(time_window: Optional[Dict[str, Any]]) -> Tuple[Optional[str], Optional[int]]:
     """Map AMLIntent.time_window to (PERIOD_TYPE, PERIOD_NUM).
 
@@ -159,15 +161,7 @@ def _map_period(time_window: Optional[Dict[str, Any]]) -> Tuple[Optional[str], O
         Tuple[Optional[str], Optional[int]]: (PERIOD_TYPE, PERIOD_NUM), both
             None if time_window is absent or has no numeric value.
     """
-    if not time_window:
-        return None, None
-    unit = str(time_window.get("unit", "")).upper()
-    value = time_window.get("value")
-    if value is None:
-        return None, None
-    if unit == "WEEKS":
-        return "D", int(value) * 7
-    return _UNIT_TO_PERIOD_TYPE.get(unit), int(value)
+    return map_period(time_window)
 
 
 def seed_scenario_metadata(
@@ -187,10 +181,6 @@ def seed_scenario_metadata(
         Dict[str, Any]: Merged metadata dict, one key per PIO_AML_SCENARIO
             column. Fields that couldn't be derived are simply absent.
     """
-    metadata: Dict[str, Any] = dict(existing or {})
-
-    scenario_desc = (intent.get("detection_logic") or intent.get("scenario_name") or "").strip()
-
     derived_defaults: Dict[str, Any] = {
         "COUNTRY_CODE": settings.AML_COUNTRY_CODE,
         "INST_CODE": settings.AML_INST_CODE,
@@ -211,15 +201,8 @@ def seed_scenario_metadata(
         "SCE_TYPE_CODE": "1",
         "DEGREE_RISK_FLAG": "H",
         "VIOLATION_LEVEL": "H",
-        "SCENARIO_DES_ENG": scenario_desc[:400] if scenario_desc else None,
-        "SCENARIO_DES_NAT_LAN": scenario_desc[:400] if scenario_desc else None,
     }
-
-    for key, value in derived_defaults.items():
-        if value is not None and metadata.get(key) is None:
-            metadata[key] = value
-
-    return metadata
+    return seed_metadata_defaults(intent, existing, derived_defaults)
 
 
 def fetch_lookup_options(lookup: LookupTableConfig) -> List[Dict[str, str]]:
@@ -319,59 +302,21 @@ def validate_scenario_metadata(metadata: Dict[str, Any]) -> Tuple[bool, List[str
     Returns:
         Tuple[bool, List[str]]: (True, []) if valid, else (False, [problem descriptions]).
     """
-    problems: List[str] = []
-
-    # Ensure system defaults exist
-    if not metadata.get("COUNTRY_CODE"):
-        metadata["COUNTRY_CODE"] = settings.AML_COUNTRY_CODE
-    if not metadata.get("INST_CODE"):
-        metadata["INST_CODE"] = settings.AML_INST_CODE
-    if not metadata.get("CREATED_BY"):
-        metadata["CREATED_BY"] = settings.AML_CREATED_BY
-    if not metadata.get("UPDATED_BY"):
-        metadata["UPDATED_BY"] = settings.AML_CREATED_BY
-
-    # Normalize friendly names for VIOLATION_LEVEL
-    viol_map = {"HIGH": "H", "MEDIUM": "M", "LOW": "L", "H": "H", "M": "M", "L": "L"}
-    viol_raw = str(metadata.get("VIOLATION_LEVEL") or "").strip().upper()
-    if viol_raw in viol_map:
-        metadata["VIOLATION_LEVEL"] = viol_map[viol_raw]
-
-    # Normalize friendly names for DEGREE_RISK_FLAG
-    risk_map = {"HIGH": "H", "MEDIUM": "M", "LOW": "L", "DIRECT": "D", "H": "H", "M": "M", "L": "L", "D": "D"}
-    risk_raw = str(metadata.get("DEGREE_RISK_FLAG") or "").strip().upper()
-    if risk_raw in risk_map:
-        metadata["DEGREE_RISK_FLAG"] = risk_map[risk_raw]
-
-    # Normalize ACTIVE_FLAG
-    active_map = {"ACTIVE": "1", "INACTIVE": "0", "1": "1", "0": "0"}
-    active_raw = str(metadata.get("ACTIVE_FLAG") or "1").strip().upper()
-    if active_raw in active_map:
-        metadata["ACTIVE_FLAG"] = active_map[active_raw]
-
-    for spec in SCENARIO_METADATA_FIELDS:
-        value = metadata.get(spec.name)
-
-        if spec.mandatory and (value is None or value == ""):
-            problems.append(f"{spec.name} is mandatory but was not provided.")
-            continue
-
-        if value is None:
-            continue
-
-        if spec.kind == "static_enum":
-            if str(value) not in (spec.allowed_values or []):
-                problems.append(
-                    f"{spec.name}='{value}' is not one of the allowed values {spec.allowed_values}."
-                )
-        elif spec.kind == "oracle_lookup" and spec.lookup:
-            valid_codes = {opt["code"] for opt in fetch_lookup_options(spec.lookup)}
-            if not valid_codes:
-                problems.append(
-                    f"{spec.name}: could not verify '{value}' against {spec.lookup.table} "
-                    f"(lookup query returned no rows — confirm table/column configuration)."
-                )
-            elif str(value) not in valid_codes:
-                problems.append(f"{spec.name}='{value}' is not a valid code in {spec.lookup.table}.")
-
+    lookup_values = {
+        spec.name: [option["code"] for option in fetch_lookup_options(spec.lookup)]
+        for spec in SCENARIO_METADATA_FIELDS
+        if spec.kind == "oracle_lookup" and spec.lookup and metadata.get(spec.name) is not None
+    }
+    normalized, problems = normalize_and_validate_metadata(
+        metadata,
+        SCENARIO_METADATA_FIELDS,
+        {
+            "COUNTRY_CODE": settings.AML_COUNTRY_CODE,
+            "INST_CODE": settings.AML_INST_CODE,
+            "CREATED_BY": settings.AML_CREATED_BY,
+            "UPDATED_BY": settings.AML_CREATED_BY,
+        },
+        lookup_values,
+    )
+    metadata.update(normalized)
     return (len(problems) == 0, problems)

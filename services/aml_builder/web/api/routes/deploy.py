@@ -5,17 +5,16 @@ Handles the direct 'Deploy Scenario to Production' action from the
 frontend Governance Metadata sidebar panel.
 """
 
-import json
 import logging
-import os
 import uuid
 from typing import Any, Dict, List, Optional
-from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
 from services.aml_builder.web.services.graph import get_tool_driven_graph
+from services.aml_builder.web.domain.window import time_window_days
+from services.aml_builder.web.api.codec import decode_tool_result
 from services.aml_builder.web.services.production_registry import save_production_scenario
 from services.aml_builder.web.services.scenario_metadata import validate_scenario_metadata
 from services.aml_builder.web.services.settings import settings
@@ -91,7 +90,7 @@ async def deploy_scenario(request: DeployRequest):
                     content_str = getattr(m, "content", "")
                     if isinstance(content_str, str) and content_str.strip().startswith("{"):
                         try:
-                            payload = json.loads(content_str)
+                            payload = decode_tool_result(content_str).payload
                             if "raw_sql" in payload and not raw_sql:
                                 raw_sql = payload.get("raw_sql")
                             if "sql" in payload and not raw_sql:
@@ -121,13 +120,7 @@ async def deploy_scenario(request: DeployRequest):
     scenario_type = intent_dict.get("scenario_type", "CUSTOMER")
     detection_logic = intent_dict.get("detection_logic", scenario_name)
 
-    tw: Dict[str, Any] = intent_dict.get("time_window") or {}
-    tw_value: int = int(tw.get("value", 0) or 0)
-    tw_unit: str = str(tw.get("unit", "DAYS")).upper()
-    unit_to_days: Dict[str, int] = {"DAYS": 1, "WEEKS": 7, "MONTHS": 30, "YEARS": 365}
-    time_window_days: Optional[int] = (
-        tw_value * unit_to_days.get(tw_unit, 1) if tw_value else None
-    )
+    window_days = time_window_days(intent_dict.get("time_window"))
 
     scenario_id = f"PRD_{uuid.uuid4().hex[:8].upper()}"
 
@@ -138,7 +131,7 @@ async def deploy_scenario(request: DeployRequest):
         detection_logic=detection_logic,
         raw_sql=raw_sql,
         scenario_metadata=request.metadata_json,
-        time_window_days=time_window_days,
+        time_window_days=window_days,
         created_by=str(request.metadata_json.get("CREATED_BY") or settings.AML_CREATED_BY),
     )
 

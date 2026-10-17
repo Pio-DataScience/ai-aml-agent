@@ -25,6 +25,7 @@ from services.aml_builder.web.services.schemas import (
     RenameChatResponse,
     TogglePinResponse,
 )
+from services.aml_builder.web.api.codec import decode_tool_result
 from services.aml_builder.web.services.session_store import (
     list_chat_sessions,
     rename_chat_session,
@@ -124,7 +125,8 @@ async def get_chat_history(project_id: str, chat_id: str, user_id: str):
                     content_raw = getattr(msg, "content", "")
                     if content_raw:
                         try:
-                            payload = json.loads(content_raw) if isinstance(content_raw, str) else content_raw
+                            result = decode_tool_result(content_raw, tool_name)
+                            payload = result.payload
                             if isinstance(payload, dict):
                                 if tool_name == "generate_scenario_execution_plan" or "plan_artifact" in payload:
                                     if payload.get("plan_artifact"):
@@ -138,7 +140,7 @@ async def get_chat_history(project_id: str, chat_id: str, user_id: str):
                                         pending_metadata_catalog = build_metadata_catalog(payload["scenario_metadata"])
                                 elif tool_name in ("persist_and_validate_scenario_in_dwh", "execute_oracle_dwh_shadow_test") or "write_success" in payload or "header_alert_count" in payload:
                                     pending_scenario_result = payload
-                        except (json.JSONDecodeError, Exception):
+                        except (json.JSONDecodeError, TypeError, ValueError):
                             pass
 
         logger.info("[HISTORY] Retrieved %d conversation-level messages.", len(chat_messages))

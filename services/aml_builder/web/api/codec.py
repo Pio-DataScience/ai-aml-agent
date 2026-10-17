@@ -1,0 +1,258 @@
+"""Versioned, typed envelope for agent tool results."""
+
+import json
+from enum import Enum
+from functools import wraps
+from typing import Any, Callable, Dict, Optional, Type
+
+from langchain_core.tools import tool as langchain_tool
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class ToolStatus(str, Enum):
+    """Status of a tool result."""
+
+    OK = "ok"
+    ERROR = "error"
+    BLOCKED = "blocked"
+
+
+class ToolErrorCode(str, Enum):
+    """Small stable set of machine-readable tool failure codes."""
+
+    INVALID_INPUT = "INVALID_INPUT"
+    UPSTREAM_ERROR = "UPSTREAM_ERROR"
+    SHADOW_FAILED = "SHADOW_FAILED"
+    VALIDATION_FAILED = "VALIDATION_FAILED"
+    PERSIST_FAILED = "PERSIST_FAILED"
+    NOT_FOUND = "NOT_FOUND"
+    INTERNAL_ERROR = "INTERNAL_ERROR"
+
+
+class PayloadModel(BaseModel):
+    """Base class for typed payloads that preserves legacy extra keys."""
+
+    model_config = ConfigDict(extra="allow")
+
+
+class IntentPayload(PayloadModel):
+    """Intent extraction result."""
+
+    enriched_intent: Optional[Dict[str, Any]] = None
+    explanation_code_checkpoint: Optional[str] = None
+    discovered_explanation_codes: Optional[list[Dict[str, Any]]] = None
+    scenario_metadata: Optional[Dict[str, Any]] = None
+
+
+class PlanPayload(PayloadModel):
+    """Deterministic scenario plan result."""
+
+    plan_artifact: Optional[str] = None
+    plan_conditions: Optional[list[Dict[str, str]]] = None
+
+
+class ShadowPayload(PayloadModel):
+    """SQL generation and shadow-test result."""
+
+    raw_sql: Optional[str] = None
+    header_alert_count: Optional[int] = None
+    transaction_detail_count: Optional[int] = None
+    alert_density_ratio: Optional[float] = None
+    validation_success: Optional[bool] = None
+    error: Optional[str] = None
+
+
+class MetadataPayload(PayloadModel):
+    """Governance metadata field catalog result."""
+
+    metadata: Optional[Dict[str, Any]] = None
+    fields: Optional[list[Dict[str, Any]]] = None
+    missing_mandatory_fields: Optional[list[str]] = None
+    ready_for_persistence: Optional[bool] = None
+
+
+class PersistencePayload(PayloadModel):
+    """Scenario persistence result."""
+
+    scenario_id: Optional[str] = None
+    scenario_name: Optional[str] = None
+    scenario_type: Optional[str] = None
+    time_window_days: Optional[int] = None
+    raw_sql_preview: Optional[str] = None
+    write_success: Optional[bool] = None
+    write_verification: Optional[Dict[str, Any]] = None
+    created_at: Optional[str] = None
+    validation_errors: Optional[list[str]] = None
+
+
+class RegistryPayload(PayloadModel):
+    """Dynamic scenario registry query result."""
+
+    result: Optional[Any] = None
+
+
+TOOL_PAYLOAD_MODELS: Dict[str, Type[PayloadModel]] = {
+    "analyze_intent_and_discover_explanation_codes": IntentPayload,
+    "generate_scenario_execution_plan": PlanPayload,
+    "execute_oracle_dwh_shadow_test": ShadowPayload,
+    "prepare_scenario_metadata_for_persistence": MetadataPayload,
+    "persist_and_validate_scenario_in_dwh": PersistencePayload,
+    "query_production_scenario_registry": RegistryPayload,
+}
+
+
+class ToolResult(BaseModel):
+    """Versioned result envelope shared by tools and API consumers."""
+
+    schema_version: int = Field(default=1)
+    status: ToolStatus = ToolStatus.OK
+    error_code: Optional[ToolErrorCode] = None
+    payload: Dict[str, Any] = Field(default_factory=dict)
+
+
+def _infer_error_code(
+    tool_name: Optional[str], payload: Dict[str, Any]
+) -> Optional[ToolErrorCode]:
+    """Infer a stable code from legacy-shaped tool output.
+
+    Args:
+        tool_name: Producing tool, when known.
+        payload: Legacy tool payload.
+
+    Returns:
+        Error code for a failed result, otherwise None.
+    """
+    if (
+        tool_name == "execute_oracle_dwh_shadow_test"
+        and payload.get("validation_success") is False
+    ):
+        return ToolErrorCode.SHADOW_FAILED
+    if (
+        tool_name == "persist_and_validate_scenario_in_dwh"
+        and payload.get("write_success") is False
+    ):
+        return (
+            ToolErrorCode.VALIDATION_FAILED
+            if payload.get("validation_errors")
+            else ToolErrorCode.PERSIST_FAILED
+        )
+    if payload.get("error"):
+        message = str(payload["error"]).lower()
+        if "not found" in message:
+            return ToolErrorCode.NOT_FOUND
+        if any(
+            token in message
+            for token in ("invalid", "required", "unknown query_type")
+        ):
+            return ToolErrorCode.INVALID_INPUT
+        if "piotech" in message or "http error" in message:
+            return ToolErrorCode.UPSTREAM_ERROR
+        return ToolErrorCode.INTERNAL_ERROR
+    return None
+
+
+def _validate_payload(
+    tool_name: Optional[str], payload: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Validate a result payload with its tool-specific model.
+
+    Args:
+        tool_name: Producing tool name, if available.
+        payload: Tool payload dictionary.
+
+    Returns:
+        Payload dictionary with all original keys retained.
+    """
+    model = TOOL_PAYLOAD_MODELS.get(tool_name or "")
+    if model is None:
+        return payload
+    return model.model_validate(payload).model_dump(exclude_unset=True)
+
+
+def encode_tool_result(
+    tool_name: str,
+    payload: Dict[str, Any],
+    status: Optional[ToolStatus] = None,
+    error_code: Optional[ToolErrorCode] = None,
+) -> str:
+    """Encode a tool payload as a JSON ToolResult envelope.
+
+    Args:
+        tool_name: Tool name used to select its typed payload model.
+        payload: Legacy-shaped payload to retain inside the envelope.
+        status: Explicit status override, if already known.
+        error_code: Explicit error code override, if already known.
+
+    Returns:
+        Indented UTF-8 JSON envelope string.
+    """
+    validated_payload = _validate_payload(tool_name, payload)
+    inferred_code = error_code or _infer_error_code(
+        tool_name, validated_payload
+    )
+    result_status = status or (
+        ToolStatus.ERROR if inferred_code else ToolStatus.OK
+    )
+    envelope = ToolResult(
+        status=result_status,
+        error_code=inferred_code,
+        payload=validated_payload,
+    )
+    return envelope.model_dump_json(indent=2, exclude_none=True)
+
+
+def decode_tool_result(
+    content: Any, tool_name: Optional[str] = None
+) -> ToolResult:
+    """Decode a current envelope or wrap a legacy tool message.
+
+    Args:
+        content: JSON string, dictionary, or message content.
+        tool_name: Producing tool name for payload typing and legacy errors.
+
+    Returns:
+        Decoded, versioned ToolResult.
+
+    Raises:
+        ValueError: When content is not valid JSON or an object.
+    """
+    try:
+        decoded = json.loads(content) if isinstance(content, str) else content
+    except json.JSONDecodeError as exc:
+        raise ValueError("Tool result content is not valid JSON.") from exc
+    if not isinstance(decoded, dict):
+        raise ValueError("Tool result content must decode to a JSON object.")
+    if "schema_version" not in decoded:
+        payload = _validate_payload(tool_name, decoded)
+        error_code = _infer_error_code(tool_name, payload)
+        return ToolResult(
+            status=ToolStatus.ERROR if error_code else ToolStatus.OK,
+            error_code=error_code,
+            payload=payload,
+        )
+    return ToolResult.model_validate(decoded)
+
+
+def typed_tool(function: Callable[..., str]) -> Any:
+    """Wrap a LangChain tool's JSON result in the common typed envelope.
+
+    Args:
+        function: Existing tool function returning JSON text.
+
+    Returns:
+        LangChain tool with the same name and argument contract.
+    """
+
+    @wraps(function)
+    def wrapped(*args: Any, **kwargs: Any) -> str:
+        """Run the original tool and encode its JSON result."""
+        raw_result = function(*args, **kwargs)
+        try:
+            payload = json.loads(raw_result)
+        except (json.JSONDecodeError, TypeError):
+            payload = {"error": str(raw_result)}
+        if not isinstance(payload, dict):
+            payload = {"result": payload}
+        return encode_tool_result(function.__name__, payload)
+
+    return langchain_tool(wrapped)

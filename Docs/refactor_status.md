@@ -1,5 +1,45 @@
 # Refactor Status
 
+## P1 — Typed envelope, codec, domain extraction
+
+- **Branch:** `refactor/p1-typed-envelope-domain`
+- **Status:** Implemented; no next package started.
+- **Baseline commit:** `2c45cb1 test: freeze legacy intent normalization outputs`.
+- **Files changed:**
+  - `CHANGELOG.MD`
+  - `PROJECT_OVERVIEW.md`
+  - `Docs/P1_typed_envelope.md`
+  - `Docs/refactor_status.md`
+  - `services/aml_builder/web/api/codec.py`
+  - `services/aml_builder/web/api/sse_mapper.py`
+  - `services/aml_builder/web/api/routes/chat.py`
+  - `services/aml_builder/web/api/routes/deploy.py`
+  - `services/aml_builder/web/api/routes/sessions.py`
+  - `services/aml_builder/web/domain/__init__.py`
+  - `services/aml_builder/web/domain/code_binding.py`
+  - `services/aml_builder/web/domain/hashing.py`
+  - `services/aml_builder/web/domain/intent_normalize.py`
+  - `services/aml_builder/web/domain/metadata_rules.py`
+  - `services/aml_builder/web/domain/sql_extract.py`
+  - `services/aml_builder/web/domain/window.py`
+  - `services/aml_builder/web/services/_intent_normalization_baseline.py`
+  - `services/aml_builder/web/services/prompts/tool_driven_system.md`
+  - `services/aml_builder/web/services/scenario_metadata.py`
+  - `services/aml_builder/web/services/schemas.py`
+  - `services/aml_builder/web/services/sql_extraction.py`
+  - `services/aml_builder/web/services/tools.py`
+  - `services/aml_builder/tests/fixtures/p1_intent_normalization_golden.json`
+  - `services/aml_builder/tests/test_all_transaction_code_scope.py`
+  - `services/aml_builder/tests/test_p1_codec_domain.py`
+  - `services/aml_builder/tests/test_p1_intent_normalization_baseline.py`
+- **Tests added:** frozen outputs for ten legacy intent samples; tool-to-domain-helper delegation; default provenance and `applied_defaults`; codec round trip and legacy decode; error status/code behavior; failed-shadow `scenario_result` SSE snapshot; plan/catalog SSE snapshots; synthetic history reconstruction; unchanged tool names; SQL extraction compatibility; SQL and JSON hashing; both legacy window conversion fixtures; pure metadata seeding and validation.
+- **Deviations:**
+  - Added `field_provenance` to `AMLIntent` for scalar fields that do not have a nested provenance model; nested defaults carry `provenance="default"`. `applied_defaults` remains `list[str]`.
+  - Kept the temporary characterization helper after the baseline commit because repository global rules prohibit deleting files. It is no longer used by runtime tool code; the final domain normalizer is covered against its frozen outputs.
+  - Kept `services/sql_extraction.py` as the approved compatibility export. `plan_renderer.py` remains in place and is called only by the plan tool.
+  - The original tools.py and deploy.py window conversions were identical for the checked fixtures; one shared `time_window_days()` now serves both.
+- **Verification:** `python -m compileall -q services app.py run_alert_engine.py` completed successfully. Full `pytest -q` passed **38 tests**. Black check passed for the new P1 modules and tests; flake8 passed with existing `E501` baseline findings and Black's `W503` wrapping ignored. The isolated synthetic history test required execution outside the Windows sandbox and passed. No live Oracle, LLM, or Service B call was made.
+
 ## P0 — Foundations, archive, config loader, spikes
 
 - **Branch:** `refactor/p0-foundations-archive`

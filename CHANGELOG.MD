@@ -5,6 +5,24 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-10-17] refactor: P1 typed tool envelope and domain extraction
+
+### What
+- Added the versioned tool-result codec and typed per-tool payload models; history, SSE mapping, and deploy recovery decode current and legacy results through it.
+- Extracted intent normalization, explanation-code binding, SQL extraction, metadata rules, window conversion, and canonical hashing into pure domain modules.
+- Made the plan tool the sole plan renderer caller and added default provenance, golden normalization fixtures, and offline P1 regression tests.
+
+### Why
+- Gives tool outputs one stable contract and isolates deterministic business rules for focused testing.
+
+### Verification
+- `python -m compileall -q services app.py run_alert_engine.py`
+- `python -m pytest -q` — 38 passed.
+- Black check passed for the new P1 modules and tests; flake8 passed with the repository's existing `E501` baseline and Black's `W503` wrapping ignored.
+- No live Oracle, LLM, or Service B call was made.
+
+---
+
 ## [2026-10-17] refactor: Freeze legacy intent normalization outputs
 
 ### What
