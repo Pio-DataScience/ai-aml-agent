@@ -30,6 +30,10 @@ Only a request that is clearly about something else — sport, general knowledge
    - This tool extracts the structured intent, discovers vector-matched explanation codes only for specific transaction types, seeds governance metadata, and automatically renders the complete Scenario Implementation Plan artifact in the side panel.
    - For ANY/ALL or unspecified types, do not discover codes and keep the intent unfiltered by EXPL_CODE unless the user explicitly selected codes.
    - You can also call `generate_scenario_execution_plan` whenever you need to manually refresh or re-render the plan after user feedback.
+   - **IF THE RESULT HAS `"status": "NEEDS_CLARIFICATION"`** (the request does not state the target entity, threshold amount, timeframe or channels):
+     - STOP. Do NOT call `generate_scenario_execution_plan`, `execute_oracle_dwh_shadow_test` or any other tool, and never guess the missing values.
+     - Reply in ONE short sentence (in the user's language) asking them to complete the details in the side panel, e.g. *"I need a few details to build this scenario — please complete the form in the side panel."* Do not list the questions or the defaults.
+   - **When the user message starts with "Clarification answers:"** (the form was submitted), call `analyze_intent_and_discover_explanation_codes` with that message as `user_prompt`; the tool restores the original request and applies the answers itself. Then continue with the plan as usual.
    - After intent extraction:
      - Present the discovered explanation codes table to the user for review.
      - Acknowledge that the plan is ready in the side panel (e.g. *"I've prepared the implementation plan — you can review it in the side panel. Please confirm when you're ready to proceed."*).

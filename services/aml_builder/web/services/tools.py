@@ -26,6 +26,7 @@ from datetime import date, datetime
 from typing import Annotated, Any, Dict, Final, List, Literal, Optional, Tuple
 
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from langgraph.prebuilt import InjectedState
 
@@ -49,6 +50,14 @@ from services.aml_builder.web.services.business_dates import (
     to_date,
 )
 from services.aml_builder.web.services.sql_dates import anchor_sql, bind_values, pin_period
+from services.aml_builder.web.services.clarification import (
+    answered_fields,
+    apply_answers,
+    clarification_payload,
+    describe_answers,
+    find_gaps,
+    pending_clarification,
+)
 from services.aml_builder.web.services.attribute_filters import (
     apply_attribute_filters,
     drop_covered_transaction_types,
@@ -188,6 +197,8 @@ def analyze_intent_and_discover_explanation_codes(
     user_prompt: str,
     existing_intent_json: Optional[str] = None,
     existing_metadata_json: Optional[str] = None,
+    state: Annotated[Optional[Dict[str, Any]], InjectedState] = None,
+    config: RunnableConfig = None,  # type: ignore[assignment]
 ) -> str:
     """Extract scenario intent, conditionally discover codes, and seed governance metadata.
 
@@ -210,13 +221,38 @@ def analyze_intent_and_discover_explanation_codes(
             accumulated so far (side panel clicks, prior turns). Already-set values are never
             overwritten by re-seeding — pass this on every refinement turn so officer picks persist.
 
+        state: Injected agent state (never passed by the model); used to find an open clarification.
+        config: Injected run config (never passed by the model); carries the clarification-form
+            answers of this turn under configurable.clarification_answers.
+
     Returns:
-        str: JSON object containing 'enriched_intent' dict, 'explanation_code_checkpoint' markdown
-             table, and 'scenario_metadata' dict (PIO_AML_SCENARIO field values seeded so far).
+        str: JSON object containing 'status': 'COMPLETE', 'enriched_intent' dict,
+             'explanation_code_checkpoint' markdown table, and 'scenario_metadata' dict
+             (PIO_AML_SCENARIO field values seeded so far). When a mandatory parameter (target
+             entity, threshold amount, timeframe, channels) is not stated: 'status':
+             'NEEDS_CLARIFICATION' with 'understood_summary', 'missing_fields' and 'questions';
+             then STOP and do not call any other tool.
     """
     logger.info(
         "[TOOL: INTENT] Extracting scenario parameters and running vector search..."
     )
+    # Clarification answers (from the form) complete the request that asked for them.
+    answers = ((config or {}).get("configurable") or {}).get("clarification_answers") or None
+    pending = pending_clarification((state or {}).get("messages", [])) if answers else None
+    original_request = user_prompt
+    known_intent: Optional[Dict[str, Any]] = None
+    if pending:
+        earlier = str(pending.get("original_request") or "").strip()
+        if earlier and earlier not in user_prompt:
+            original_request = earlier
+            user_prompt = earlier + "\n\n" + describe_answers(answers)
+        if not existing_intent_json and pending.get("partial_intent"):
+            existing_intent_json = json.dumps(pending["partial_intent"], ensure_ascii=False)
+    elif existing_intent_json:
+        try:
+            known_intent = json.loads(existing_intent_json)
+        except json.JSONDecodeError:
+            known_intent = None
     llm = build_llm()
 
     system_instruction = load_prompt("intent_extraction.md")
@@ -362,6 +398,20 @@ def analyze_intent_and_discover_explanation_codes(
             tx_types = intent_dict.get("transaction_types")
             tx_type = intent_dict.get("transaction_type")
 
+        # Clarification flow: never guess a mandatory parameter the user did not state.
+        if answers:
+            intent_dict = apply_answers(intent_dict, answers)
+            tx_types = intent_dict.get("transaction_types")
+            tx_type = intent_dict.get("transaction_type")
+        if settings.AML_CLARIFICATION_FLOW:
+            gaps = find_gaps(intent_dict, user_prompt, known=known_intent, answered=answered_fields(answers))
+            if gaps:
+                logger.info("[TOOL: INTENT] Clarification needed for: %s", gaps)
+                return json.dumps(
+                    clarification_payload(intent_dict, gaps, original_request),
+                    ensure_ascii=False, indent=2, default=str,
+                )
+
         explicit_codes = intent_dict.get("explanation_codes")
 
         discovered_codes = []
@@ -456,6 +506,7 @@ def analyze_intent_and_discover_explanation_codes(
 
         return json.dumps(
             {
+                "status": "COMPLETE",
                 "enriched_intent": intent.model_dump(),
                 "explanation_code_checkpoint": expl_checkpoint,
                 "discovered_explanation_codes": discovered_codes,

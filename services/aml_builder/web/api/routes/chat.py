@@ -17,6 +17,7 @@ from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from services.aml_builder.web.services import scope_guard
+from services.aml_builder.web.services.clarification import clarification_event_data, describe_answers
 from services.aml_builder.web.services.graph import get_tool_driven_graph
 from services.aml_builder.web.services.schemas import ChatRequest, SSEEvent
 from services.aml_builder.web.services.session_store import upsert_chat_session
@@ -24,6 +25,13 @@ from services.aml_builder.web.services.session_store import upsert_chat_session
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Chat"])
+
+# Conversations with a run in progress. One run per conversation: a second request for the same
+# thread (a double submit, a second tab, a retry) is answered with a short notice instead of a
+# second, concurrent agent run on the same history.
+_ACTIVE_THREADS: set = set()
+BUSY_NOTICE = "Your previous message in this chat is still being processed. Please wait for it to finish."
+
 
 
 async def _scope_refusal(tool_graph: Any, config: Dict[str, Any], message: str) -> Optional[str]:
@@ -77,6 +85,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
     - ``content``                    — streaming text chunks
     - ``plan_artifact``              — structured markdown execution plan (side panel)
     - ``scenario_metadata_catalog``  — PIO_AML_SCENARIO field catalog + live lookup options (side panel)
+    - ``clarification_request``      — mandatory parameters are missing: the form to show (side panel)
     - ``scenario_result``            — structured scenario + validation data (JSON)
     - ``error``                      — error details
     - ``done``                       — stream termination signal
@@ -107,11 +116,14 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
     )
 
     tool_graph = await get_tool_driven_graph()
+    answers = request.clarification_answers or None
     config = {
-        "configurable": {"thread_id": thread_id},
+        "configurable": {"thread_id": thread_id, "clarification_answers": answers},
         "recursion_limit": 10,
     }
     user_msg = request.messages[-1].content if request.messages else ""
+    if answers and not user_msg.strip():
+        user_msg = describe_answers(answers)
     typed_msg = user_msg  # what the user typed, before sidebar metadata is appended
     if request.metadata_json:
         metadata_str = json.dumps(request.metadata_json, ensure_ascii=False)
@@ -133,12 +145,20 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
         # routed by which tool produced them.
         tool_call_id_to_name: dict = {}
 
+        # Check and claim in one step (no await in between), so two requests cannot both pass.
+        if thread_id in _ACTIVE_THREADS:
+            logger.warning("[API] Duplicate request for a busy thread ignored: %s", thread_id)
+            yield _sse(SSEEvent(type="content", text=BUSY_NOTICE))
+            yield _sse(SSEEvent(type="done"))
+            return
+        _ACTIVE_THREADS.add(thread_id)
+
         try:
             yield _sse(SSEEvent(type="thinking", status="Analyzing your request..."))
 
             # Scope guard: a message clearly unrelated to AML scenarios gets a fixed refusal
-            # and never reaches the agent. A sidebar governance submission is always in scope.
-            if not request.metadata_json:
+            # and never reaches the agent. Sidebar governance and clarification answers are always in scope.
+            if not request.metadata_json and not answers:
                 refusal = await _scope_refusal(tool_graph, config, typed_msg)
                 if refusal:
                     yield _sse(SSEEvent(type="content", text=refusal))
@@ -176,6 +196,10 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                                 # Emit plan to side panel
                                 try:
                                     payload = json.loads(getattr(m, "content", "{}"))
+                                    if payload.get("status") == "NEEDS_CLARIFICATION":
+                                        yield _sse(SSEEvent(type="clarification_request", data=clarification_event_data(payload)))
+                                        logger.info("[API] Emitted clarification_request SSE. missing=%s", payload.get("missing_fields"))
+                                        continue
                                     plan_md = payload.get("plan_artifact", "")
                                     if plan_md:
                                         yield _sse(SSEEvent(type="plan_artifact", text=plan_md))
@@ -213,6 +237,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
             yield _sse(SSEEvent(type="error", text=str(exc)))
 
         finally:
+            _ACTIVE_THREADS.discard(thread_id)
             yield _sse(SSEEvent(type="done"))
 
     return StreamingResponse(

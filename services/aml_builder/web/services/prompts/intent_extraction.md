@@ -84,4 +84,19 @@ Output ONLY a valid JSON object matching AMLIntent schema with mandatory root ke
     - When the user asks for 'any', 'all', or does not restrict transaction type, represent the scope as ANY/ALL (or null when no type is stated) and leave explanation_codes and explanation_codes_by_type empty/null unless the user explicitly selected specific codes.
     - Never invent a specific transaction type to enable explanation-code discovery.
 
+15. MANDATORY PARAMETER GAP ANALYSIS (provenance):
+    Four parameters decide which alerts fire: TARGET ENTITY (each transaction, per customer, per account), THRESHOLD
+    AMOUNT, TIMEFRAME (lookback window or fixed period) and CHANNELS (transaction types). For each one:
+    - Stated by the user -> extract it and set 'provenance': 'stated' on its threshold / time_window.
+    - NOT stated -> never invent it as if stated. You may propose a value, but then set 'provenance':
+      'assumed_default' on that threshold / time_window; leave 'transaction_types' null when no channel is named
+      (do not infer CASH DEPOSIT from "deposits" unless the user says cash; "any / all transactions" is stated).
+    - Numbers in 'value_from' must be numbers the user wrote (after rule 2 conversion); a year (2016) is never an amount.
+    A separate check asks the user for every parameter that is not stated, so a guess is never needed.
+
+16. CLARIFICATION ANSWERS:
+    - A message starting "Clarification answers:" completes the request in Existing Intent Payload. Apply each answer
+      (target entity -> scenario_type, threshold amount -> the amount threshold, timeframe -> time_window, channels ->
+      transaction_types) with 'provenance': 'stated', and keep every other stated field.
+
 Do not wrap in markdown fences.

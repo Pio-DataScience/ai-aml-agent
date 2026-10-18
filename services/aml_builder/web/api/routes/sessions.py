@@ -14,6 +14,7 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 
+from services.aml_builder.web.services.clarification import clarification_event_data
 from services.aml_builder.web.services.graph import get_tool_driven_graph
 from services.aml_builder.web.services.schemas import (
     ChatHistoryResponse,
@@ -68,6 +69,7 @@ async def get_chat_history(project_id: str, chat_id: str, user_id: str):
             pending_scenario_result = None
             pending_metadata_catalog = None
             pending_escalation_report = None
+            pending_clarification = None
 
             for msg in messages_data:
                 msg_class = msg.__class__.__name__
@@ -108,9 +110,11 @@ async def get_chat_history(project_id: str, chat_id: str, user_id: str):
                     if not esc_rep and pending_escalation_report:
                         esc_rep = pending_escalation_report
                         pending_escalation_report = None
+                    clar_req = pending_clarification
+                    pending_clarification = None
 
                     # Skip if message is entirely empty (no text and no artifacts)
-                    if not content.strip() and not (plan_art or val_res or esc_rep or meta_cat):
+                    if not content.strip() and not (plan_art or val_res or esc_rep or meta_cat or clar_req):
                         continue
 
                     chat_messages.append(ChatMessage(
@@ -120,6 +124,7 @@ async def get_chat_history(project_id: str, chat_id: str, user_id: str):
                         scenario_metadata_catalog=meta_cat,
                         scenario_result=val_res,
                         escalation_report=esc_rep,
+                        clarification_request=clar_req,
                         timestamp=msg.additional_kwargs.get("timestamp") if hasattr(msg, "additional_kwargs") else None
                     ))
                 elif msg_class == "ToolMessage" or getattr(msg, "type", None) == "tool":
@@ -130,7 +135,9 @@ async def get_chat_history(project_id: str, chat_id: str, user_id: str):
                         try:
                             payload = json.loads(content_raw) if isinstance(content_raw, str) else content_raw
                             if isinstance(payload, dict):
-                                if tool_name == "generate_scenario_execution_plan" or "plan_artifact" in payload:
+                                if payload.get("status") == "NEEDS_CLARIFICATION":
+                                    pending_clarification = clarification_event_data(payload)
+                                elif tool_name == "generate_scenario_execution_plan" or "plan_artifact" in payload:
                                     if payload.get("plan_artifact"):
                                         pending_plan_artifact = payload.get("plan_artifact")
                                 elif tool_name == "prepare_scenario_metadata_for_persistence" or "fields" in payload:

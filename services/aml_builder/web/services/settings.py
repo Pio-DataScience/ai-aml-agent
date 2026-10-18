@@ -176,6 +176,27 @@ class Settings(BaseSettings):
         default=3,
         description="Maximum automatic correction rounds per shadow test before the refusal is shown.",
     )
+    AML_CLARIFICATION_FLOW: bool = Field(
+        default=True,
+        description=(
+            "Ask the user for the mandatory scenario parameters (target entity, threshold amount, timeframe, "
+            "channel) when the request does not state them, instead of assuming defaults. False restores the "
+            "assumed-default behaviour."
+        ),
+    )
+    CLARIFICATION_DEFAULT_AMOUNT: float = Field(
+        default=10000.0, description="'Apply Industry Defaults' value for the threshold amount (JOD)."
+    )
+    CLARIFICATION_DEFAULT_WINDOW_DAYS: int = Field(
+        default=30, description="'Apply Industry Defaults' value for the lookback window (days)."
+    )
+    CLARIFICATION_DEFAULT_CHANNELS: str = Field(
+        default="CASH DEPOSIT,CASH WITHDRAWAL",
+        description="'Apply Industry Defaults' value for the channels (comma-separated transaction types).",
+    )
+    CLARIFICATION_DEFAULT_ENTITY: str = Field(
+        default="CUSTOMER", description="'Apply Industry Defaults' value for the target entity."
+    )
     AML_SCOPE_GUARD: bool = Field(
         default=True,
         description=(

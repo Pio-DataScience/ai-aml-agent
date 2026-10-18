@@ -5,6 +5,31 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-10-18] feat: Clarification Question Flow; one run per conversation
+
+### What
+- **Ask, never guess**: when a request does not state the target entity, threshold amount, timeframe or channels,
+  the intent tool returns `NEEDS_CLARIFICATION` (understood summary, missing fields, questions with industry defaults:
+  per customer, 10,000 JOD, 30 days, cash deposit + withdrawal) before code discovery, the plan and the shadow test.
+  The gap decision is made in code (`web/services/clarification.py`); an LLM-filled value the user did not write is a gap.
+- **Answers**: `ChatRequest.clarification_answers` → run config → the intent tool restores the original request and
+  applies the answers (they override the LLM); the chat shows them as a readable "Clarification answers: …" message.
+- **API/SSE**: new `clarification_request` event; history restores the form on its message (`ChatMessage.clarification_request`).
+- **Schemas**: `ClarificationQuestion`, `ClarificationResponse`, `ScenarioIntentResponse`; complete intents carry `status: COMPLETE`.
+- **Prompts**: intent rules 15 (gap analysis / provenance) and 16 (answers); agent: on NEEDS_CLARIFICATION stop and
+  reply in one sentence.
+- **One run per conversation** (`routes/chat.py`): a second request for a busy chat gets a notice instead of a second
+  concurrent run (the duplicate "go ahead" answer of 2026-10-18 10:33).
+- **Frontend** (`AI_AML_INTERFACE`, branch `feat/clarification-flow`): `ClarificationForm` side panel with Apply Industry
+  Defaults; answers sent with the next request; hook-level send lock; Enter auto-repeat ignored. `tsc` clean, `next build`
+  OK, `npm run test:clarification` 6 passed.
+- Settings: `AML_CLARIFICATION_FLOW` (default true), `CLARIFICATION_DEFAULT_*`.
+- Supersedes, for these four parameters only, the 2026-10-17 assumed-default behaviour; PioTech auto-correction unchanged.
+- Tests: `tests/test_clarification.py` (24); full suite 169 passed. Live on port 8005: vague request → form →
+  defaults submitted → plan; 5 fully stated demo prompts pass without questions. Doc: `Docs/11_clarification_flow.md`.
+
+---
+
 ## [2026-10-18] change: Attribute filters take priority over explanation codes
 
 ### What
