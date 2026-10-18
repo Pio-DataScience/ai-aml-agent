@@ -9,6 +9,9 @@ predictable document regardless of which model produced the intent.
 import re
 from typing import Optional
 
+from services.aml_builder.web.services.attribute_filters import describe_filters
+from services.aml_builder.web.services.business_dates import period_of
+
 
 def _clean_explanation_checkpoint(checkpoint: Optional[str]) -> Optional[str]:
     """
@@ -90,8 +93,22 @@ def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]
     if segs:
         lines.append(f"| **Customer Segments** | {', '.join(f'`{s}`' for s in segs)} |")
 
+    for line in describe_filters(intent.get("attribute_filters") or []):
+        label, values = line.split(": ", 1)
+        lines.append(f"| **{label}** | `{values}` |")
+
     anchor = intent.get("anchor_date")
-    lines.append(f"| **Evaluation Mode** | {'🕐 Shadow Test — Anchor: `' + anchor + '`' if anchor else '🟢 Production (SYSDATE)'} |")
+    period = period_of(intent)
+    if period:
+        lines.append(
+            f"| **Evaluation Mode** | 📅 Fixed period `{period[0].isoformat()}` to `{period[1].isoformat()}`"
+            f" (evaluation date `{period[1].isoformat()}`) |"
+        )
+    else:
+        lines.append(
+            f"| **Evaluation Mode** | {'🕐 Business date: `' + anchor + '`' if anchor else '🟢 Business date of each run'}"
+            " (windows count business days, Sun–Thu) |"
+        )
     lines.append("")
 
     # ─────────────────────────────────────────
@@ -114,7 +131,12 @@ def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]
     lines.append("")
     tw = intent.get("time_window")
     if tw:
-        rolling_label = "Rolling (from SYSDATE)" if tw.get("is_rolling") else "Fixed Calendar Period"
+        if period:
+            rolling_label = f"Fixed Calendar Period ({period[0].isoformat()} to {period[1].isoformat()})"
+        elif tw.get("is_rolling"):
+            rolling_label = "Rolling (back from the business date)"
+        else:
+            rolling_label = "Fixed Calendar Period"
         provenance_tw = tw.get("provenance", "stated")
         prov_badge = " *(assumed default)*" if provenance_tw == "assumed_default" else ""
         lines.append(f"- **Window Size:** `{tw.get('value')} {tw.get('unit')}`{prov_badge}")

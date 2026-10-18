@@ -5,6 +5,11 @@
 
 ---
 
+> **Update 2026-10-17:** `UNRESOLVED` (conflicting or ambiguous phrase, open question) and `REQUEST_REJECTED`
+> (invalid value such as a time window of 0) are now auto-corrected as well, by `resolve_intent`: the quoted
+> free-text phrase is removed, `needs_user` values become assumed defaults, a 0 window becomes 1 business day.
+> Default correction rounds: 3. Section 2 below is superseded for those two kinds.
+
 ## 1. What and why
 
 The PioTech DWH Scenario Agent refuses (`NOT_IMPLEMENTABLE`) any condition it cannot verify on the data — for

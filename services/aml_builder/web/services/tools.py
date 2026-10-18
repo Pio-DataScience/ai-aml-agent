@@ -22,8 +22,8 @@ import json
 import logging
 import uuid
 import httpx
-from datetime import datetime
-from typing import Annotated, Any, Dict, List, Literal, Optional
+from datetime import date, datetime
+from typing import Annotated, Any, Dict, Final, List, Literal, Optional, Tuple
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
@@ -41,13 +41,27 @@ from services.aml_builder.web.services.production_registry import (
 )
 from services.aml_builder.web.services.llm_client import build_llm, safe_parse_json
 from services.aml_builder.web.services.sql_extraction import extract_sql
-from services.aml_builder.web.services.intent_autocorrect import auto_correct_intent
+from services.aml_builder.web.services.intent_autocorrect import auto_correct_intent, resolve_intent
+from services.aml_builder.web.services.business_dates import (
+    apply_fixed_period,
+    clean_for_sql_service,
+    period_of,
+    to_date,
+)
+from services.aml_builder.web.services.sql_dates import anchor_sql, bind_values, pin_period
+from services.aml_builder.web.services.attribute_filters import (
+    apply_attribute_filters,
+    drop_covered_transaction_types,
+    resolve_attribute_filters,
+    strip_attribute_phrases,
+    top_level_clauses,
+    validate_filters,
+)
 from services.aml_builder.web.services.piotech_report import (
     build_http_rejection,
     build_rejection,
     build_unavailable_rejection,
     normalize_scenario_report,
-    render_rejection_markdown,
     summarize_rejection,
 )
 from services.aml_builder.web.services.plan_renderer import build_plan_markdown
@@ -338,6 +352,16 @@ def analyze_intent_and_discover_explanation_codes(
         elif tx_type:
             intent_dict["transaction_type"] = tx_type
 
+        # Attribute filters first ("dormant accounts", "corporate customers", "credit transactions"),
+        # resolved against the lookup tables. They take priority over explanation codes: a "type" that is
+        # only a filter's value (CREDIT, DEBIT) is handled by the filter and never searched as codes.
+        attribute_filters = resolve_attribute_filters(user_prompt, *_period_texts(intent_dict))
+        intent_dict["attribute_filters"] = attribute_filters
+        intent_dict, dropped_types = drop_covered_transaction_types(intent_dict, attribute_filters)
+        if dropped_types:
+            tx_types = intent_dict.get("transaction_types")
+            tx_type = intent_dict.get("transaction_type")
+
         explicit_codes = intent_dict.get("explanation_codes")
 
         discovered_codes = []
@@ -403,6 +427,12 @@ def analyze_intent_and_discover_explanation_codes(
                     for condition in conditions:
                         if isinstance(condition, dict):
                             condition["explanation_codes"] = None
+
+        # An explicit period ("between 2016 and 2022", "in 2019") sets the evaluation date to its
+        # last day and the window to its exact length, instead of a window back from today.
+        intent_dict, fixed_period = apply_fixed_period(intent_dict, user_prompt, *_period_texts(intent_dict))
+        if fixed_period:
+            logger.info("[TOOL: INTENT] Fixed period %s to %s", fixed_period[0], fixed_period[1])
 
         intent = AMLIntent(**intent_dict)
 
@@ -526,6 +556,167 @@ def generate_scenario_execution_plan(
     except Exception as exc:
         logger.error("[TOOL: PLANNER] Plan generation failed: %s", exc)
         return json.dumps({"error": str(exc)})
+
+
+_latest_transaction_date: Optional[date] = None
+
+
+# Per-customer count columns a rule aggregated per customer may return.
+_RESULT_COUNT_COLUMNS: Final = ("EVENT_COUNT", "TXN_COUNT", "TRANSACTION_COUNT", "TRA_COUNT")
+# Columns that only a per-transaction result has.
+_TRANSACTION_COLUMNS: Final = ("TRA_SEQ1", "TRA_SEQ2", "TRA_DATE")
+
+
+def _shadow_metrics(sql: str, binds: Dict[str, Any]) -> Dict[str, Any]:
+    """Measure what a scenario's SQL matches: transaction rows and distinct customers.
+
+    The result is either one row per transaction (it has TRA_DATE / TRA_SEQ1) or one row per
+    customer with a count column such as EVENT_COUNT. The alert engine raises one header alert per
+    distinct customer, so ``header_alert_count`` is the distinct customer count.
+
+    Args:
+        sql (str): The anchored scenario SQL.
+        binds (Dict[str, Any]): Its business-date bind values.
+
+    Returns:
+        Dict[str, Any]: 'matched_transaction_count' (None when a per-customer result carries no
+            count column), 'alerted_customer_count' (None without CUS_NUM), 'result_row_count',
+            'header_alert_count', 'transaction_detail_count', 'alert_density_ratio' (transactions
+            per customer) and 'metrics_summary' (e.g. '120 transactions across 65 distinct customers').
+
+    Raises:
+        Exception: Any database error from the read-only queries.
+    """
+    columns, _ = run_shadow_readonly(f"SELECT * FROM ({sql}) shadow_query WHERE 1 = 0", binds)
+    names = {str(c).upper() for c in columns}
+    count_column = next((c for c in _RESULT_COUNT_COLUMNS if c in names), None)
+    per_transaction = any(c in names for c in _TRANSACTION_COLUMNS)
+
+    selects = ["COUNT(*)"]
+    if "CUS_NUM" in names:
+        selects.append("COUNT(DISTINCT shadow_query.CUS_NUM)")
+    if not per_transaction and count_column:
+        selects.append(f"SUM(shadow_query.{count_column})")
+    _, rows = run_shadow_readonly(f"SELECT {', '.join(selects)} FROM ({sql}) shadow_query", binds)
+    values = list(rows[0]) if rows else [0] * len(selects)
+
+    row_count = int(values[0] or 0)
+    customers = int(values[1] or 0) if "CUS_NUM" in names else None
+    transactions: Optional[int] = None
+    if per_transaction:
+        transactions = row_count
+    elif count_column:
+        transactions = int(values[-1] or 0)
+    elif "CUS_NUM" in names:
+        # One row per customer and no count column: count the rule's own rows for those customers.
+        count_sql = _transactions_behind_customers_sql(sql)
+        if count_sql:
+            _, count_rows = run_shadow_readonly(count_sql, binds)
+            transactions = int(count_rows[0][0] or 0) if count_rows else 0
+
+    if transactions is not None and customers is not None:
+        summary = f"{transactions:,} transactions across {customers:,} distinct customers"
+    elif customers is not None:
+        summary = f"{customers:,} distinct customers (the rule returns one row per customer, without a transaction count)"
+    else:
+        summary = f"{row_count:,} matching rows"
+    ratio = round(transactions / customers, 2) if transactions is not None and customers else None
+
+    return {
+        "matched_transaction_count": transactions,
+        "alerted_customer_count": customers,
+        "result_row_count": row_count,
+        "header_alert_count": customers if customers is not None else row_count,
+        "transaction_detail_count": transactions,
+        "alert_density_ratio": ratio,
+        "metrics_summary": summary,
+    }
+
+
+def _transactions_behind_customers_sql(sql: str) -> Optional[str]:
+    """Build a count of the rule's own rows for the customers a per-customer rule returns.
+
+    ``SELECT t.CUS_NUM FROM T t WHERE <filters> GROUP BY ... [HAVING ...]`` becomes
+    ``SELECT COUNT(*) FROM T t WHERE <filters> AND t.CUS_NUM IN (SELECT CUS_NUM FROM (<rule>))``:
+    the transactions that put each alerted customer in the result.
+
+    Args:
+        sql (str): The anchored scenario SQL, aggregated per customer.
+
+    Returns:
+        Optional[str]: The count SQL, or None when the rule has no top-level GROUP BY on a
+            CUS_NUM column, or is not a single-table SELECT.
+    """
+    clauses = top_level_clauses(sql)
+    if not clauses or "GROUP BY" not in clauses:
+        return None
+    group_start, group_end = clauses["GROUP BY"]
+    customer = next(
+        (e.strip() for e in sql[group_start + len("GROUP BY"):group_end].split(",") if re.search(r"\bCUS_NUM\s*$", e.strip(), re.I)),
+        None,
+    )
+    if not customer:
+        return None
+    from_start = clauses["FROM"][0]
+    body = sql[from_start:clauses["WHERE"][1]] if "WHERE" in clauses else sql[from_start:clauses["FROM"][1]]
+    link = "AND" if "WHERE" in clauses else "WHERE"
+    return (
+        f"SELECT COUNT(*) {body.rstrip()} {link} {customer} IN "
+        f"(SELECT shadow_query.CUS_NUM FROM ({sql}) shadow_query)"
+    )
+
+
+def _period_texts(intent: Dict[str, Any]) -> List[str]:
+    """Free text of an intent that can state an explicit period.
+
+    Args:
+        intent (Dict[str, Any]): The scenario intent.
+
+    Returns:
+        List[str]: The detection logic, then the scenario name, then each condition phrase.
+    """
+    texts = [str(intent.get("detection_logic") or ""), str(intent.get("scenario_name") or "")]
+    for condition in intent.get("semantic_conditions") or []:
+        if isinstance(condition, dict):
+            texts.append(str(condition.get("raw_phrase") or ""))
+    return texts
+
+
+def _shadow_anchor(intent: Dict[str, Any]) -> Tuple[date, str]:
+    """Choose the business date a shadow test is evaluated for.
+
+    Order: the scenario's ``anchor_date``; the ``SHADOW_ANCHOR_DATE`` setting; the latest
+    transaction date in PIO_TRANSACTIONS for the configured country and institution (looked
+    up once per process, read-only); today, only if no transaction date can be found.
+
+    Args:
+        intent (Dict[str, Any]): The scenario intent sent to PioTech.
+
+    Returns:
+        Tuple[date, str]: The business date and a short description of where it came from.
+    """
+    global _latest_transaction_date
+    for value, source in ((intent.get("anchor_date"), "scenario anchor_date"),
+                          (settings.SHADOW_ANCHOR_DATE, "SHADOW_ANCHOR_DATE setting")):
+        try:
+            parsed = to_date(value)
+        except ValueError:
+            logger.warning("[TOOL: SQL_BRIDGE] Ignoring invalid %s: %r", source, value)
+            parsed = None
+        if parsed:
+            return parsed, source
+    if _latest_transaction_date is None:
+        try:
+            _, rows = run_shadow_readonly(
+                "SELECT MAX(TRA_DATE) FROM BI_DWH.PIO_TRANSACTIONS WHERE COUNTRY_CODE = :cc AND INST_CODE = :ic",
+                {"cc": settings.AML_COUNTRY_CODE, "ic": settings.AML_INST_CODE},
+            )
+            _latest_transaction_date = to_date(rows[0][0]) if rows and rows[0][0] else None
+        except Exception as exc:  # any lookup failure falls back to today rather than failing the test
+            logger.warning("[TOOL: SQL_BRIDGE] Could not read the latest transaction date: %s", exc)
+    if _latest_transaction_date:
+        return _latest_transaction_date, "latest transaction date in the data"
+    return date.today(), "today (no transaction date found)"
 
 
 def _request_piotech_sql(intent_dict: Dict[str, Any]) -> Dict[str, Any]:
@@ -652,14 +843,13 @@ def _rejection_result(
             before this final refusal, if any.
 
     Returns:
-        str: JSON with 'error' (one-line summary), 'rejection' (structured), 'rejection_report'
-            (markdown for the UI side panel) and 'scenario_report' (raw, may be null).
+        str: JSON with 'error' (one-line summary), 'rejection' (structured) and
+            'scenario_report' (raw, may be null).
     """
     return json.dumps(
         {
             "error": f"PioTech AI did not generate SQL: {summarize_rejection(rejection)}",
             "rejection": rejection,
-            "rejection_report": render_rejection_markdown(rejection),
             "scenario_report": scenario_report,
             "auto_corrections_tried": corrections or [],
         },
@@ -690,10 +880,11 @@ def execute_oracle_dwh_shadow_test(intent_json: str) -> str:
         intent_json (str): Serialized AMLIntent payload dictionary JSON string.
 
     Returns:
-        str: JSON containing 'raw_sql', 'header_alert_count', 'transaction_detail_count',
-             'alert_density_ratio', and 'validation_success'. When no SQL was generated:
-             JSON with 'error' (one-line summary), 'rejection' (structured explanation) and
-             'rejection_report' (markdown for the side panel).
+        str: JSON containing 'raw_sql', the measured counts ('matched_transaction_count',
+             'alerted_customer_count', 'header_alert_count' = distinct customers,
+             'transaction_detail_count', 'alert_density_ratio' = transactions per customer,
+             'metrics_summary'), and 'validation_success'. When no SQL was generated:
+             JSON with 'error' (one-line summary) and 'rejection' (structured explanation).
     """
     logger.info("[TOOL: SQL_BRIDGE] Requesting SQL generation from PioTech AI...")
 
@@ -721,23 +912,37 @@ def execute_oracle_dwh_shadow_test(intent_json: str) -> str:
         return json.dumps({"error": f"Invalid intent JSON: {exc}"})
 
     # -----------------------------------------------------------
-    # Step 2-3: Generate SQL via PioTech AI, auto-correcting NOT_IMPLEMENTABLE refusals
+    # Step 2-3: Generate SQL via PioTech AI, auto-correcting refusals that a change to the
+    # intent can clear: NOT_IMPLEMENTABLE (unsupported condition), UNRESOLVED (ambiguous or
+    # contradictory phrase, open question) and REQUEST_REJECTED (invalid value such as a 0 window)
     # -----------------------------------------------------------
-    sent_intent = intent_dict
+    correctors = {
+        "NOT_IMPLEMENTABLE": auto_correct_intent,
+        "UNRESOLVED": resolve_intent,
+        "REQUEST_REJECTED": resolve_intent,
+    }
+    sent_intent, fixed_period = apply_fixed_period(intent_dict, *_period_texts(intent_dict))
+    # Attribute filters are applied by the AML Builder (below), never by PioTech.
+    attribute_filters = validate_filters(intent_dict.get("attribute_filters"))
     corrections: List[Dict[str, Any]] = []
     attempts = 0
     while True:
-        outcome = _request_piotech_sql(sent_intent)
+        # Period wording is removed from the text PioTech reads, so its years are never taken
+        # for amounts; the period itself travels in anchor_date and time_window. Attribute
+        # phrases are removed too, so PioTech neither refuses nor re-applies them.
+        to_piotech = clean_for_sql_service(sent_intent) if fixed_period else sent_intent
+        outcome = _request_piotech_sql(strip_attribute_phrases(to_piotech, attribute_filters))
         if outcome["sql"]:
             break
         rejection = outcome["rejection"]
+        corrector = correctors.get(rejection["kind"])
         if (
             not settings.PIOTECH_AUTO_CORRECT
-            or rejection["kind"] != "NOT_IMPLEMENTABLE"
+            or corrector is None
             or attempts >= settings.PIOTECH_AUTO_CORRECT_MAX_ATTEMPTS
         ):
             return _rejection_result(rejection, outcome["report"], corrections)
-        corrected, applied = auto_correct_intent(sent_intent, rejection)
+        corrected, applied = corrector(sent_intent, rejection)
         if not applied:
             logger.warning(
                 "[TOOL: SQL_BRIDGE] Auto-correction found nothing to change for: %s",
@@ -782,32 +987,61 @@ def execute_oracle_dwh_shadow_test(intent_json: str) -> str:
     )
 
     # -----------------------------------------------------------
-    # Step 4: Execute shadow test — wrap in COUNT query for volume metrics
+    # Step 3b: Anchor the SQL to a business date (no SYSDATE, Sun-Thu business-day windows)
     # -----------------------------------------------------------
     try:
-        shadow_sql = f"SELECT COUNT(*) FROM ({sql}) shadow_query"
-        _, shadow_rows = run_shadow_readonly(shadow_sql)
-        header_count = shadow_rows[0][0] if shadow_rows else 0
-
-        # Estimate transaction detail rows (4x matches QB engine output ratio)
-        detail_count = header_count * 4
-        ratio = (
-            round(detail_count / max(header_count, 1), 2) if header_count > 0 else 0.0
+        sql = anchor_sql(sql, sent_intent)
+    except ValueError as exc:
+        logger.error("[TOOL: SQL_BRIDGE] Could not anchor SQL to a business date: %s", exc)
+        return json.dumps(
+            {"raw_sql": sql, "validation_success": False, "error": f"Date anchoring failed: {exc}", **correction_fields},
+            ensure_ascii=False,
+            indent=2,
         )
+    # Pin only when the window is the period itself; a shorter stated window ("within 7 days")
+    # stays a window ending on the period's last day.
+    pinned = False
+    if fixed_period and period_of(sent_intent) == fixed_period:
+        sql, pinned = pin_period(sql, fixed_period[0], fixed_period[1])
+        if not pinned:
+            logger.warning(
+                "[TOOL: SQL_BRIDGE] Fixed period %s to %s not pinned: the SQL has no single window start",
+                fixed_period[0],
+                fixed_period[1],
+            )
+    sql, filters_applied = apply_attribute_filters(sql, attribute_filters)
+    if filters_applied:
+        logger.info("[TOOL: SQL_BRIDGE] Attribute filters applied: %s", filters_applied)
+    anchor, anchor_source = _shadow_anchor(sent_intent)
+    binds = bind_values(sql, anchor)
+    date_fields: Dict[str, Any] = {
+        "evaluation_date": anchor.isoformat(),
+        "evaluation_date_source": anchor_source,
+        "window_dates": {name: value.isoformat() for name, value in binds.items()},
+    }
+    if fixed_period:
+        date_fields["fixed_period"] = {
+            "start": fixed_period[0].isoformat(),
+            "end": fixed_period[1].isoformat(),
+            "pinned_in_sql": pinned,
+        }
+    if filters_applied:
+        # Returned with the dates so both the success and the failure result carry them.
+        date_fields["attribute_filters_applied"] = filters_applied
+    logger.info("[TOOL: SQL_BRIDGE] Business date %s (%s); window binds %s", anchor, anchor_source, date_fields["window_dates"])
 
-        logger.info(
-            "[TOOL: SQL_BRIDGE] Shadow test complete. header_alerts=%d, detail_txns=%d, ratio=%.2f",
-            header_count,
-            detail_count,
-            ratio,
-        )
+    # -----------------------------------------------------------
+    # Step 4: Execute shadow test — measured transaction and customer counts
+    # -----------------------------------------------------------
+    try:
+        metrics = _shadow_metrics(sql, binds)
+        logger.info("[TOOL: SQL_BRIDGE] Shadow test complete: %s", metrics["metrics_summary"])
         return json.dumps(
             {
                 "raw_sql": sql,
-                "header_alert_count": header_count,
-                "transaction_detail_count": detail_count,
-                "alert_density_ratio": ratio,
+                **metrics,
                 "validation_success": True,
+                **date_fields,
                 **correction_fields,
             },
             ensure_ascii=False,
@@ -821,9 +1055,12 @@ def execute_oracle_dwh_shadow_test(intent_json: str) -> str:
                 "raw_sql": sql,
                 "header_alert_count": None,
                 "transaction_detail_count": None,
+                "matched_transaction_count": None,
+                "alerted_customer_count": None,
                 "alert_density_ratio": None,
                 "validation_success": False,
                 "error": str(exc),
+                **date_fields,
                 **correction_fields,
             },
             ensure_ascii=False,

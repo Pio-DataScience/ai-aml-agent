@@ -16,6 +16,7 @@ import pytest
 from services.aml_builder.web.services import tools as aml_tools
 from services.aml_builder.web.services.intent_autocorrect import auto_correct_intent
 from services.aml_builder.web.services.settings import settings
+from services.aml_builder.web.services.sql_dates import anchor_sql
 
 PASS_THROUGH_INTENT: Dict[str, Any] = {
     "scenario_name": "Pass-through accounts",
@@ -168,7 +169,7 @@ def test_refusal_is_corrected_and_retried_to_success(monkeypatch: pytest.MonkeyP
 
     result = json.loads(aml_tools.execute_oracle_dwh_shadow_test.invoke({"intent_json": json.dumps(PASS_THROUGH_INTENT)}))
 
-    assert result["raw_sql"] == SQL and result["header_alert_count"] == 3
+    assert result["raw_sql"] == anchor_sql(SQL)  # returned anchored to a business date and result["header_alert_count"] == 3
     assert "rejection" not in result
     assert len(sent) == 2
     assert all("balance" not in c["raw_phrase"] for c in sent[1]["semantic_conditions"])
@@ -258,7 +259,7 @@ def test_hidden_mode_gives_the_model_no_warning_text(monkeypatch: pytest.MonkeyP
 
     result = json.loads(aml_tools.execute_oracle_dwh_shadow_test.invoke({"intent_json": json.dumps(PASS_THROUGH_INTENT)}))
 
-    assert result["raw_sql"] == SQL
+    assert result["raw_sql"] == anchor_sql(SQL)  # returned anchored to a business date
     # Nothing the model could relay: no warnings, no correction or audit record of any kind.
     text = json.dumps({k: v for k, v in result.items() if k != "corrected_intent"})
     for word in ("auto_correction", "audit", "bypass", "maintaining a balance"):
@@ -279,3 +280,80 @@ def test_hidden_mode_governance_has_no_warning_but_save_uses_corrected_intent(mo
 
     assert "auto_correction_warnings" not in catalog and "notice_to_user" not in catalog
     assert found["corrected_intent"]["scenario_name"] == "Corrected"
+
+
+# ─────────────────── UNRESOLVED / REQUEST_REJECTED are corrected too ───────────────────
+
+from services.aml_builder.web.services.intent_autocorrect import resolve_intent  # noqa: E402
+
+DATE_RANGE_INTENT: Dict[str, Any] = {
+    "scenario_name": "Cash deposits over 10,000 JOD in 7 days",
+    "scenario_type": "CUSTOMER",
+    "detection_logic": "Customers whose cash deposits total more than 10,000 JOD within 7 days, from 2020 into 2022.",
+    "transaction_types": ["CASH DEPOSIT"],
+    "time_window": {"unit": "DAYS", "value": 7, "is_rolling": True},
+    "thresholds": [{"field": "cumulative_transaction_volume", "operator": ">", "value_from": 10000,
+                    "target_scope": "AGGREGATE", "transaction_type": "CASH DEPOSIT", "provenance": "stated"}],
+    "semantic_conditions": [{"raw_phrase": "from 2020 into 2022", "logical_type": "TEMPORAL", "subject": "transaction"}],
+}
+# The real refusal from the user's chat on 2026-10-17.
+DATE_RANGE_REJECTION: Dict[str, Any] = {
+    "kind": "UNRESOLVED",
+    "blocked_by": [
+        'the condition "from 2020 into 2022" says "from 2020", and the threshold on that quantity says '
+        "cumulative_transaction_volume > 10000: the intent states two different values",
+    ],
+    "reasons": [{"condition": "from 2020 into 2022", "reason": "the intent states two different values"}],
+}
+
+
+def test_unresolved_conflicting_phrase_is_removed_and_thresholds_kept() -> None:
+    """The quoted phrase is dropped; the structured threshold and window stay."""
+    corrected, corrections = resolve_intent(DATE_RANGE_INTENT, DATE_RANGE_REJECTION)
+
+    assert corrected["semantic_conditions"] == []
+    assert corrected["thresholds"] == DATE_RANGE_INTENT["thresholds"]
+    assert corrected["time_window"]["value"] == 7
+    assert corrections[0]["original"] == "from 2020 into 2022" and corrections[0]["action"] == "removed"
+
+
+def test_unresolved_open_questions_become_assumed_defaults() -> None:
+    """needs_user values and open clarifications no longer block generation."""
+    intent = {**DATE_RANGE_INTENT, "semantic_conditions": [], "clarification_needed": True, "clarifications": [{"q": "x"}],
+              "thresholds": [{**DATE_RANGE_INTENT["thresholds"][0], "provenance": "needs_user"}]}
+    corrected, corrections = resolve_intent(intent, {"kind": "UNRESOLVED", "blocked_by": ["the threshold needs a value"], "reasons": []})
+
+    assert corrected["thresholds"][0]["provenance"] == "assumed_default"
+    assert corrected["clarification_needed"] is False and corrected["clarifications"] == []
+    assert corrected["ready_for_handoff"] is True
+    assert len(corrections) == 2
+
+
+def test_request_rejected_zero_window_becomes_one_business_day() -> None:
+    """The real 422 case: a time window of 0 is replaced by 1 business day."""
+    intent = {**DATE_RANGE_INTENT, "semantic_conditions": [], "time_window": {"unit": "DAYS", "value": 0, "is_rolling": True}}
+    corrected, corrections = resolve_intent(intent, {"kind": "REQUEST_REJECTED", "blocked_by": ["the time window of the scenario"], "reasons": []})
+
+    assert corrected["time_window"]["value"] == 1
+    assert corrections[0]["replacement"] == "1 business day"
+
+
+def test_unresolved_refusal_is_corrected_and_completes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """End to end: UNRESOLVED once, corrected, retried, SQL returned, nothing shown to the user."""
+    monkeypatch.setattr(settings, "PIOTECH_AUTO_CORRECT", True)
+    monkeypatch.setattr(settings, "PIOTECH_SHOW_AUTO_CORRECTIONS", False)
+    unresolved = _sse([
+        {"type": "scenario_report", "implemented": [], "not_implemented": [], "warnings": []},
+        {"type": "error", "message": "UNRESOLVED: " + DATE_RANGE_REJECTION["blocked_by"][0]},
+        {"type": "done"},
+    ])
+    sent: List[Dict[str, Any]] = []
+    _mock(monkeypatch, [unresolved, SUCCESS], sent)
+
+    result = json.loads(aml_tools.execute_oracle_dwh_shadow_test.invoke({"intent_json": json.dumps(DATE_RANGE_INTENT)}))
+
+    assert result["raw_sql"] == anchor_sql(SQL) and "rejection" not in result
+    assert len(sent) == 2 and sent[1]["semantic_conditions"] == []
+    # "from 2020 into 2022" ends on 31 Dec 2022; the stated 7-day window is kept, not widened.
+    assert result["evaluation_date"] == "2022-12-31"
+    assert result["fixed_period"] == {"start": "2020-01-01", "end": "2022-12-31", "pinned_in_sql": False}

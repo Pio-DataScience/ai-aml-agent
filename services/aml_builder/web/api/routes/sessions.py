@@ -140,9 +140,9 @@ async def get_chat_history(project_id: str, chat_id: str, user_id: str):
                                     if not pending_metadata_catalog:
                                         from services.aml_builder.web.services.scenario_metadata import build_metadata_catalog
                                         pending_metadata_catalog = build_metadata_catalog(payload["scenario_metadata"])
-                                elif payload.get("rejection_report"):
-                                    # PioTech generated no SQL: restore its explanation panel.
-                                    pending_escalation_report = payload["rejection_report"]
+                                elif payload.get("rejection"):
+                                    # PioTech generated no SQL: nothing to show in the side panel.
+                                    pass
                                 elif tool_name in ("persist_and_validate_scenario_in_dwh", "execute_oracle_dwh_shadow_test") or "write_success" in payload or "header_alert_count" in payload:
                                     pending_scenario_result = payload
                         except (json.JSONDecodeError, Exception):

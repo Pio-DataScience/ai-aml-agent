@@ -150,15 +150,30 @@ class Settings(BaseSettings):
         default="0",
         description="project_id sent in PioTech AI requests.",
     )
+    BUSINESS_WEEKEND_DAYS: str = Field(
+        default="FRI,SAT",
+        description=(
+            "Comma-separated weekend days skipped when scenario windows count business days "
+            "backward from the business date (default: Sunday-Thursday business week)."
+        ),
+    )
+    SHADOW_ANCHOR_DATE: Optional[str] = Field(
+        default=None,
+        description=(
+            "Business date (YYYY-MM-DD) shadow tests are evaluated for when the scenario has no "
+            "anchor_date. Unset: the latest transaction date in PIO_TRANSACTIONS for "
+            "AML_COUNTRY_CODE / AML_INST_CODE."
+        ),
+    )
     PIOTECH_AUTO_CORRECT: bool = Field(
         default=True,
         description=(
-            "When PioTech refuses a condition as NOT_IMPLEMENTABLE, remove or replace it and retry "
-            "automatically, reporting every change as a warning. False restores the hard stop."
+            "When PioTech refuses a scenario (NOT_IMPLEMENTABLE, UNRESOLVED or REQUEST_REJECTED), "
+            "correct the intent and retry automatically. False restores the hard stop."
         ),
     )
     PIOTECH_AUTO_CORRECT_MAX_ATTEMPTS: int = Field(
-        default=2,
+        default=3,
         description="Maximum automatic correction rounds per shadow test before the refusal is shown.",
     )
     AML_SCOPE_GUARD: bool = Field(

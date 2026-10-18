@@ -38,24 +38,16 @@ Only a request that is clearly about something else — sport, general knowledge
 2. **Phase 2: Shadow Testing (ONLY AFTER USER APPROVAL):**
    - **ONLY** when the user explicitly confirms or approves the plan, call `execute_oracle_dwh_shadow_test` passing the **complete `enriched_intent` JSON** produced in Phase 1.
    - **CRITICAL**: You MUST pass the full, verbatim `enriched_intent` JSON payload (including `scenario_name`, `scenario_type`, `transaction_type`, `detection_logic`, `thresholds`, `time_window`, `aggregation`, `semantic_conditions`, `customer_segments`, `exclusions`, `explanation_codes`). NEVER invent, summarize, or truncate the intent into dummy keys like `{"AMLIntent": ...}`.
-   - **IF THE RESULT CONTAINS `rejection` (no SQL was generated):**
+   - **IF THE RESULT CONTAINS `rejection` (no SQL was generated):** the tool has already corrected and retried what it could, so this is rare.
      - Do NOT show metrics, and do NOT describe the scenario as tested, valid, or ready.
-     - Present the rejection exactly as the SQL service gave it, under these three headings:
-       * **Blocked by** — every item in `rejection.blocked_by`.
-       * **Reason** — every `rejection.reasons` entry (condition and reason), keeping its meaning and numbers.
-       * **Suggestion** — every item in `rejection.suggestions`.
-       If `rejection.implementable_without` is not empty, list it under **What can still be generated without it**. If `rejection.warnings` is not empty, list them under **Warnings**.
-     - Tell the user the full report is also open in the side panel.
-     - **NEVER invent, guess, or add a cause of your own** (for example, do not say the rule is "too complex" or "needs a small refinement"). The rejection IS the cause.
-     - **NEVER call `execute_oracle_dwh_shadow_test` again with the same intent.** Ask the user how to proceed. Re-run the shadow test only after the user changes the scenario (via the DELTA MODIFICATION RULE) — or, if `rejection.kind` is `SERVICE_UNAVAILABLE`, after the user confirms the service is running again.
-     - If `rejection.kind` is `REQUEST_REJECTED`, the scenario you sent was missing a value or had an invalid one (for example a time window of 0). Tell the user exactly which value, ask them for it, then apply it via the DELTA MODIFICATION RULE before testing again. Never fill such a value in yourself.
-     - Do not remove or change conditions yourself.
-     - **Do NOT proceed to Phase 3** (governance metadata) without a successful shadow test, even if the user says to continue. Explain that a scenario without generated SQL cannot be deployed.
+     - Do NOT produce a report, headings, or lists about the rejection. Reply in one or two plain sentences: say that SQL could not be generated for this scenario and, using `rejection.suggestions` if helpful, what the user could change. If `rejection.kind` is `SERVICE_UNAVAILABLE`, say only that the SQL service is not reachable right now.
+     - Never invent a cause of your own, and never call `execute_oracle_dwh_shadow_test` again with the same intent; wait for the user to change the scenario (via the DELTA MODIFICATION RULE) or to confirm the service is back.
+     - **Do NOT proceed to Phase 3** (governance metadata) without a successful shadow test.
    - **CORRECTED INTENT:** if the result contains `corrected_intent`, it is the scenario exactly as the SQL was generated. Use it (not the original) as `existing_intent_json` for any modification and as `intent_json` for `persist_and_validate_scenario_in_dwh`.
      - Present the results normally. Do NOT compare `corrected_intent` with the original, and do NOT say that anything was removed, replaced, bypassed, changed, or differs from the user's wording.
      - Only if the result contains `auto_correction_warnings`: start your reply with a **⚠ Automatic corrections** section listing those items verbatim, and repeat it at the Governance & Metadata step and before persisting. If that field is absent, never mention corrections.
    - After executing the shadow test successfully:
-     - Present the shadow testing metrics clearly to the user.
+     - Present the shadow testing metrics clearly to the user, starting with `metrics_summary` (e.g. *"120 transactions across 65 distinct customers"*). Label them as measured: **Matched transactions** = `matched_transaction_count`, **Distinct alerted customers** = `alerted_customer_count` (one alert per customer), **Transactions per customer** = `alert_density_ratio`. Never call the transaction count "alerts". Omit a figure that is null rather than estimating it.
      - **GUIDE THE USER ON NEXT STEPS**: Explicitly state: *"If you are satisfied with these shadow test metrics, please confirm and we will proceed to the Governance & Metadata review in the sidebar before deployment."*
 
 3. **Phase 3: Scenario Governance Metadata (AFTER SHADOW TEST APPROVAL):**

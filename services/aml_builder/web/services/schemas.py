@@ -276,6 +276,30 @@ class Clarification(BaseModel):
     options: Optional[List[str]] = Field(default=None)
 
 
+class AttributeFilter(BaseModel):
+    """A restriction on a customer, account or transaction attribute, resolved from a lookup table.
+
+    Args:
+        attribute (str): Registry key in ``attribute_filters.ATTRIBUTES`` (e.g. 'account_status').
+        label (str): Business name of the attribute.
+        entity (str): CUSTOMER, ACCOUNT or TRANSACTION.
+        column (str): Source column (e.g. 'STA_CODE').
+        operator (str): IN or NOT IN.
+        codes (list[str]): Lookup codes to match.
+        descriptions (list[str]): Description of each code, for display.
+        phrase (Optional[str]): The words of the request that state the restriction.
+    """
+
+    attribute: str
+    label: str
+    entity: Literal["CUSTOMER", "ACCOUNT", "TRANSACTION"]
+    column: str
+    operator: Literal["IN", "NOT IN"] = "IN"
+    codes: List[str] = Field(default_factory=list)
+    descriptions: List[str] = Field(default_factory=list)
+    phrase: Optional[str] = None
+
+
 class AMLIntent(BaseModel):
     """Fully structured, unambiguous AML detection intent.
 
@@ -346,6 +370,14 @@ class AMLIntent(BaseModel):
         default=None,
         description="Explicit rules about what to exclude from detection.",
     )
+    attribute_filters: List[AttributeFilter] = Field(
+        default_factory=list,
+        description=(
+            "Customer / account / transaction attribute restrictions resolved from the lookup tables "
+            "(account status, nature, product, type; individual/corporate, profession, occupation, "
+            "marital status, classification, city; debit/credit). Applied to the SQL by the AML Builder."
+        ),
+    )
     mapped_keywords: Optional[Dict[str, str]] = Field(
         default=None,
         description="Descriptive terms mapped to their resolved numeric thresholds.",
@@ -396,9 +428,10 @@ class AMLIntent(BaseModel):
         default=None,
         description=(
             "Optional evaluation anchor date in 'YYYY-MM-DD' format. "
-            "When null (default), SQL is generated with TRUNC(SYSDATE) for production. "
-            "When populated (e.g. '2024-01-04'), SQL uses DATE '<value>' as the temporal "
-            "anchor — used during shadow testing against seeded/historical DWH snapshots."
+            "The business date the scenario is evaluated for in the shadow test. Generated SQL "
+            "never uses SYSDATE: its windows are bound to a business date and counted across "
+            "business days (Sunday-Thursday). When null, the shadow test uses SHADOW_ANCHOR_DATE "
+            "or the latest transaction date; the alert engine uses its evaluation date."
         ),
     )
 

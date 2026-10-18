@@ -92,7 +92,109 @@ def auto_correct_intent(
     return corrected, corrections
 
 
+def resolve_intent(
+    intent: Dict[str, Any], rejection: Dict[str, Any]
+) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    """Correct an intent PioTech refused as UNRESOLVED or REQUEST_REJECTED, so it can be retried.
+
+    UNRESOLVED (an ambiguous or contradictory request): every free-text semantic condition the
+    refusal quotes is removed — the structured thresholds, window and types still carry the rule —
+    and values marked as needing the user are treated as assumed defaults.
+
+    REQUEST_REJECTED (the intent broke PioTech's contract): a time window of 0 or less becomes
+    1 business day, and an invalid baseline window is dropped.
+
+    Args:
+        intent (Dict[str, Any]): The refused AMLIntent (not modified).
+        rejection (Dict[str, Any]): The rejection from ``piotech_report``.
+
+    Returns:
+        Tuple[Dict[str, Any], List[Dict[str, Any]]]: The corrected intent (a deep copy) and the
+            corrections applied, in the same record shape as :func:`auto_correct_intent`. An empty
+            list means nothing could be changed, so retrying would not help.
+    """
+    corrected = copy.deepcopy(intent)
+    corrections: List[Dict[str, Any]] = []
+    reason = "; ".join(r.get("reason", "") for r in rejection.get("reasons") or [])[:300]
+
+    def record(original: str, action: str, replacement: Optional[str] = None) -> None:
+        corrections.append({
+            "original": original, "action": action, "replacement": replacement, "reason": reason,
+            "warning": f'"{original}" was automatically {action}'
+                       + (f' with "{replacement}"' if replacement else "") + " to generate a valid operational query.",
+        })
+
+    if rejection.get("kind") == "UNRESOLVED":
+        quoted = {_key(q) for item in rejection.get("blocked_by") or [] for q in re.findall(r'"([^"]+)"', str(item))}
+        kept = []
+        for cond in corrected.get("semantic_conditions") or []:
+            phrase = cond.get("raw_phrase", "") if isinstance(cond, dict) else str(cond)
+            if quoted and isinstance(cond, dict) and any(_matches(q, phrase, cond.get("predicate")) for q in quoted):
+                record(phrase, "removed")
+            else:
+                kept.append(cond)
+        if corrected.get("semantic_conditions") is not None:
+            corrected["semantic_conditions"] = kept
+        if _assume_user_values(corrected):
+            record("values marked as needing your answer", "assumed")
+        if corrected.get("clarifications") or corrected.get("clarification_needed"):
+            corrected["clarifications"] = []
+            corrected["clarification_needed"] = False
+            corrected["ready_for_handoff"] = True
+            record("open clarification questions", "assumed")
+
+    elif rejection.get("kind") == "REQUEST_REJECTED":
+        window = corrected.get("time_window")
+        if isinstance(window, dict) and _number_or_zero(window.get("value")) <= 0:
+            window["value"], window["unit"], window["provenance"] = 1, "DAYS", "assumed_default"
+            record("a time window of 0", "replaced", "1 business day")
+        baseline = corrected.get("baseline_window")
+        if isinstance(baseline, dict) and _number_or_zero(baseline.get("duration")) <= 0:
+            corrected["baseline_window"] = None
+            record("an empty baseline window", "removed")
+
+    if corrections:
+        notes = list(corrected.get("auto_corrections") or [])
+        notes += [{k: c[k] for k in ("original", "action", "replacement")} for c in corrections]
+        corrected["auto_corrections"] = notes
+    return corrected, corrections
+
+
 # ─────────────────────────────── helpers ────────────────────────────────
+
+
+def _number_or_zero(value: Any) -> float:
+    """Parse a number, treating anything unparsable as 0.
+
+    Args:
+        value (Any): The value.
+
+    Returns:
+        float: The number, or 0.0.
+    """
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _assume_user_values(intent: Dict[str, Any]) -> bool:
+    """Turn every ``provenance: needs_user`` into ``assumed_default`` (modified in place).
+
+    Args:
+        intent (Dict[str, Any]): The intent being corrected.
+
+    Returns:
+        bool: Whether anything was changed.
+    """
+    changed = False
+    items: List[Any] = list(intent.get("thresholds") or []) + list(intent.get("semantic_conditions") or [])
+    items += [intent.get(k) for k in ("time_window", "baseline_window", "aggregation")]
+    for item in items:
+        if isinstance(item, dict) and item.get("provenance") == "needs_user":
+            item["provenance"] = "assumed_default"
+            changed = True
+    return changed
 
 
 def _key(text: str) -> str:

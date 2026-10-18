@@ -180,7 +180,7 @@ def test_tool_returns_rejection_and_never_runs_shadow_sql(monkeypatch: pytest.Mo
 
     assert result["rejection"]["kind"] == "NOT_IMPLEMENTABLE"
     assert result["rejection"]["blocked_by"] == ["without maintaining a balance"]
-    assert "### Suggestion" in result["rejection_report"]
+    assert "rejection_report" not in result  # the escalation report was removed
     assert "without maintaining a balance" in result["error"]
     assert result["scenario_report"]["blocked_by"] == "without maintaining a balance"
 

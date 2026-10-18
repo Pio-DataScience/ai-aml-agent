@@ -5,6 +5,11 @@
 
 ---
 
+> **Update 2026-10-17:** the escalation-report side panel and the "Blocked by / Reason / Suggestion" chat block were
+> removed at the user's request. Refusals that can be corrected (`NOT_IMPLEMENTABLE`, `UNRESOLVED`, `REQUEST_REJECTED`)
+> are now corrected and retried automatically (see Doc 07); the rare remaining refusal is explained in one or two
+> plain sentences. The parsing in `piotech_report.py` is still used internally.
+
 ## 1. What and why
 
 The AML Builder delegates SQL generation to the PioTech DWH Scenario Agent (`PIOTECH_AI_URL`, port 8006). That

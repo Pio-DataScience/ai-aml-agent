@@ -5,6 +5,162 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-10-18] change: Attribute filters take priority over explanation codes
+
+### What
+- **Problem**: "credit transactions above 500,000 JOD in 2019" produced both `Transaction Types: CREDIT, DEBIT` and
+  the `Debit / credit` filter. The code search then picked 30 loosely related codes (credit cards, transfers ...),
+  so the SQL kept only credit legs of those codes: 8 transactions / 2 customers.
+- **Fix**: the intent tool resolves attribute filters before the explanation-code search, and
+  `attribute_filters.drop_covered_transaction_types` removes every transaction type that is only a filter's value
+  (CREDIT, DEBIT, "credit transactions"), with its codes and its tag on thresholds and conditions. Real types that
+  share a word (CREDIT CARD, CREDIT TRANSFER) and other types (CASH WITHDRAWAL) keep their codes. No type left = all
+  transaction types, restricted by the filter.
+- Result: 543 transactions / 68 customers, equal to a hand query; the plan shows only `Debit / credit`.
+- Tests: 12 added to `tests/test_attribute_filters.py`; full suite 145 passed.
+
+---
+
+## [2026-10-18] feat: Customer, account and transaction attribute filters; demo lookup fill
+
+### What
+- **New `web/services/attribute_filters.py`**: 11 attributes next to the explanation-code filter: account status,
+  nature, product, type; individual/corporate (fixed list); profession, occupation, marital status, classification,
+  city; debit/credit. Resolved at intent time by the fast LLM against the live country-400 catalogs (codes validated),
+  stored as `AMLIntent.attribute_filters`, shown in the plan, removed from the text sent to PioTech, and added to the
+  generated SQL as semi-joins on each account's / customer's latest snapshot. Result: `attribute_filters_applied`.
+- **Live findings fixed on the way**: PioTech re-applied "dormant" as an inactivity rule and refused a threshold
+  `account_status = CLOSED` restated by the intent LLM; restriction words are now removed from every free-text field
+  and restating thresholds dropped. `business_dates`: a singular unit from the LLM (`YEAR`) was read as days, so
+  "between 2016 and 2022" became 2017-2022; units are normalized.
+- **Demo lookup fill** (`fill_demo_lookups.py`, insert-only, `NOT EXISTS`-guarded): 513 rows for country 400 / inst 1
+  in 9 lookups. Record `demo_data/lookup_fills_20261018_095008.json`, rollback script (not executed) next to it.
+  Nothing updated or deleted.
+- **Coverage**: account filters work (79% of transacting accounts are in `PIO_ACCOUNTS`); customer filters match few
+  customers (1,067 of 154,254 transacting customers are in `PIO_CUSTOMERS`).
+- Tests: `tests/test_attribute_filters.py` (26) + 1 in `test_business_dates.py`; full suite 133 passed. Live:
+  "cash deposit above 10,000 JOD into closed accounts between 2016 and 2019" = 48 transactions / 31 customers, equal
+  to a hand query. Doc: `Docs/10_attribute_filters.md`.
+
+---
+
+## [2026-10-17] fix: Measured shadow-test metrics; no commission codes in cash-withdrawal scenarios
+
+### What
+- **Problem 1**: the shadow test reported `COUNT(*)` of the rule's rows as "header alerts" and an invented
+  `transaction_detail_count = header_count * 4` (ratio always 4.0). For "single cash withdrawal above 50,000
+  between 2016 and 2022" it showed 120 alerts / 480 details; the data has 120 transactions from 65 customers.
+- **Fix** (`tools._shadow_metrics`): probes the result columns (`WHERE 1 = 0`), then measures
+  - `alerted_customer_count` = `COUNT(DISTINCT CUS_NUM)`; `header_alert_count` now equals it (the alert engine raises
+    one header per customer);
+  - `matched_transaction_count` (= `transaction_detail_count`): the row count of a per-transaction result,
+    `SUM(EVENT_COUNT)` of a per-customer result, or, for a per-customer result without a count column, the rule's own
+    `FROM ... WHERE` rows for the customers it returns (single-table rules only; otherwise null, never estimated);
+  - `alert_density_ratio` = transactions per customer; `metrics_summary` e.g. "120 transactions across 65 distinct
+    customers". The prompt tells the agent to present these labels and never call transactions "alerts".
+- **Problem 2**: code discovery for "CASH WITHDRAWAL" returned 11 commission/fee codes
+  (119, 141, 340, 429, 2109, 2110, 2116, 2119, 2143, 2146, 3020).
+- **Fix** (`explanation_code_search`): `is_cash_withdrawal_type` + `drop_withdrawal_fee_codes` remove those codes,
+  and any code whose description names a commission, fee or charge, only for withdrawal types. Kept: 2, 466, 467,
+  2164, 2114, 2108, 3. Deposits, transfers, an explicit "withdrawal commission/fees" request and user-confirmed codes
+  are unaffected.
+- Tests: 22 added (`test_business_dates.py`, `test_all_transaction_code_scope.py`); full suite 106 passed.
+  Live read-only check on OPENBI2: tool 120 transactions / 65 customers = independent hand query. No database changes.
+
+---
+
+## [2026-10-17] feat: Explicit fixed date ranges ("between 2016 and 2022", "in 2019")
+
+### What
+- **Problem**: "Flag any single cash withdrawal above 50,000 between 2016 and 2022" got a 7-year window with no
+  `anchor_date`, so the shadow test counted 7 years back from the latest transaction (2019-01-13 to 2026-01-13).
+- **`business_dates.py`**: `find_fixed_period` (year, month and day ranges and single periods; amounts such as
+  "8,000 and 9,999", "2000 JOD", "$2000" are never read as years), `window_for_period` (exact YEARS/MONTHS/DAYS,
+  non-rolling), `period_of`, `apply_fixed_period`, `clean_for_sql_service`.
+- **Intent tool**: a stated period sets `anchor_date` to its last day (e.g. 2022-12-31) and `time_window` to its
+  exact length. A stated window much shorter than the period ("within 7 days") is kept.
+- **Shadow test**: period wording is removed from the text sent to PioTech; the anchored SQL is pinned to
+  `DATE 'start'` / `DATE 'end'` by the new `sql_dates.pin_period`; the result adds `fixed_period`.
+- **Plan**: Evaluation Mode shows "Fixed period `start` to `end`"; "Rolling (from SYSDATE)" now reads
+  "Rolling (back from the business date)".
+- Tests: 28 added to `tests/test_business_dates.py` (now 43); `test_intent_autocorrect.py` updated (the "from 2020 into 2022"
+  case is now evaluated on 2022-12-31). Full suite 84 passed. Live read-only check on OPENBI2: SQL bounded to
+  2016-01-01..2022-12-31, evaluation date 2022-12-31, 65 customers. No database changes.
+
+---
+
+## [2026-10-17] change: Escalation report removed; UNRESOLVED and REQUEST_REJECTED are auto-corrected too
+
+### What
+- **Problem**: a request such as "… within 7 days from 2020 into 2022" sent "from 2020 into 2022" to PioTech as a free-text
+  condition; PioTech read 2020/2022 as amounts conflicting with the 10,000 threshold and refused it as `UNRESOLVED`.
+  Auto-correction covered only `NOT_IMPLEMENTABLE`, so the officer got the escalation report and no scenario.
+- **Escalation report removed**: `routes/chat.py` no longer emits the `escalation_report` side panel for a rejection,
+  `routes/sessions.py` no longer restores it, and the shadow-test result no longer carries `rejection_report`.
+  The prompt no longer asks for "Blocked by / Reason / Suggestion"; for the rare refusal that remains, the agent
+  replies in one or two plain sentences.
+- **New `intent_autocorrect.resolve_intent`** (retry loop in `tools.py` now dispatches by refusal kind):
+  - `UNRESOLVED`: removes every free-text semantic condition the refusal quotes (structured thresholds, window and
+    types are kept), turns `provenance: needs_user` into `assumed_default`, and clears open clarifications.
+  - `REQUEST_REJECTED`: a time window of 0 or less becomes 1 business day; an empty baseline window is dropped.
+- Corrections follow `PIOTECH_SHOW_AUTO_CORRECTIONS` (hidden by default; audit in `logs/app.log`).
+  `PIOTECH_AUTO_CORRECT_MAX_ATTEMPTS` default raised from 2 to 3 (one refusal can reveal another on retry).
+- `sql_dates.py`: `ADD_MONTHS(TRUNC(SYSDATE, 'YYYY'), -N)` is now recognised as a window start and gets the upper bound.
+- Still a stop: `SERVICE_UNAVAILABLE`, and refusals that 3 correction rounds cannot clear.
+
+### Note
+A dropped phrase is not applied: "from 2020 into 2022" is removed, so the rule runs on its own 7-day window at the
+business date. To test a past period, give one date ("test it as of 30 June 2019") or set `SHADOW_ANCHOR_DATE`.
+
+### Verify
+- 59 unit tests pass (new: the real 2020/2022 refusal, needs_user values, a 0 window, UNRESOLVED end to end; the
+  rejection test now asserts no report is returned).
+- Live: the user's refused intent, replayed through the tool against PioTech/OPENBI2, now returns SQL. Through
+  `/chat/stream` the same request completes the shadow test and no `escalation_report` event is sent.
+
+## [2026-10-16] feat: Scenario SQL bound to a business date, with Sunday–Thursday business-day windows
+
+### What
+- **Problem**: generated SQL used `SYSDATE` (`TRA_DATE >= SYSDATE - 30`), so every rule depended on the moment it ran;
+  the shadow test always looked at "today" (0 alerts on historical data) and the alert engine patched the text.
+- New `web/services/sql_dates.py`: rewrites every clock form in scenario SQL to business-date binds —
+  `SYSDATE - N` / `TRUNC(SYSDATE) - N` / `SYSDATE - INTERVAL 'N' DAY` → `:bd_minus_N`;
+  `ADD_MONTHS(SYSDATE, -N)` → `ADD_MONTHS(:as_of_date, -N)`; `TRUNC(SYSDATE, 'MM')` → `TRUNC(:as_of_date, 'MM')`;
+  any remaining `SYSDATE` / `CURRENT_DATE` / `SYSTIMESTAMP` → `:as_of_date`. Each window lower bound also gets
+  `col < :as_of_date + 1`, so a past business date never counts later data. String literals are never edited;
+  the rewrite is idempotent. Weeks count 5 business days; months/years stay calendar.
+- New `web/services/business_dates.py`: windows count backward over business days (weekend from
+  `BUSINESS_WEEKEND_DAYS`, default `FRI,SAT`). A window of N business days covers the business date plus the N−1
+  business days before it; from a weekend date, counting starts at the previous business day.
+- `tools.py` (shadow test): the PioTech SQL is anchored before it is tested, shown or saved; the COUNT runs with the
+  binds. Business date: the scenario's `anchor_date` → `SHADOW_ANCHOR_DATE` → latest `TRA_DATE` in
+  `PIO_TRANSACTIONS` for `AML_COUNTRY_CODE`/`AML_INST_CODE` (one read-only lookup per process) → today. The result
+  reports `evaluation_date`, `evaluation_date_source` and `window_dates`.
+- `alert_engine.py`: `execute_scenario_query` anchors the saved `RAW_SQL` the same way (so rules saved with
+  `SYSDATE` are handled) and binds the evaluation date, replacing the old text replacement.
+- `plan_renderer.py` / `schemas.py`: wording updated — Evaluation Mode now says "Business date …".
+- `settings.py`: `BUSINESS_WEEKEND_DAYS` (default `FRI,SAT`), `SHADOW_ANCHOR_DATE` (default unset).
+
+### Not changed
+- No database tables or data. Saved rules are rewritten when executed, not in storage.
+- No frontend change.
+- Out of scope: event-to-event gaps inside sequence rules (`in_date + 1`, written by PioTech without `SYSDATE`) stay
+  calendar days; `SYSDATE` used by the alert engine as the INSERT timestamp of an alert row.
+- PioTech still generates `SYSDATE` (its checks require it); the AML Builder rewrites it. Making PioTech emit the
+  binds directly is optional.
+
+### Verify
+- `test_business_dates.py`: 14 tests (business-day counting incl. weekend anchors, every SQL form, literals untouched,
+  weeks, exact binds, shadow test runs anchored SQL with the right binds, setting fallback, alert engine anchors a
+  legacy `SYSDATE` rule). Two auto-correction tests updated to expect the anchored SQL. Full suite: 54 pass.
+- Live on OPENBI2 (2026-10-17, read-only, nothing saved):
+  - Shadow test through PioTech for business date 2019-06-30: SQL returned with no `SYSDATE`
+    (`:bd_minus_7` = 2019-06-20, `:as_of_date` = 2019-06-30); 121 customers, equal to a hand-written query.
+  - All 14 saved rules (each still containing `SYSDATE`) ran through `execute_scenario_query` for 2019-06-30 without
+    error.
+  - Daily data, December 2011: for Thursday 2011-12-08 the 7-business-day window starts Wednesday 2011-11-30 and finds
+    45 customers; the old 7-calendar-day window (from 2011-12-01) found 0 — the weekend days are skipped as intended.
+
 ## [2026-10-15] change: "Scenario Type" row removed from the plan's Scenario Overview
 
 ### What
