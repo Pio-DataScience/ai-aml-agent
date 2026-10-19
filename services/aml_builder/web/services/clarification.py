@@ -97,7 +97,15 @@ _VAGUE_AMOUNT: Final = re.compile(
     re.IGNORECASE,
 )
 _ANY_WORD: Final = re.compile(r"\b(?:any|all|every)\b", re.IGNORECASE)
-_NUMBER: Final = re.compile(r"(\d[\d,]*(?:\.\d+)?)\s*(k|thousand|m|mn|million|b|bn|billion|%)?\b", re.IGNORECASE)
+_NUMBER: Final = re.compile(
+    r"(\d[\d,]*(?:\.\d+)?)\s*(%|(?:k|thousand|m|mn|million|b|bn|billion)\b)?", re.IGNORECASE
+)
+# Arabic-Indic and Persian digits -> Western digits.
+_DIGITS: Final = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
+# Every way of writing a percent after a number: "50 %", "50 percent", "50٪", "50 بالمئة" -> "50%".
+_PERCENT_WORDS: Final = re.compile(
+    r"(\d)\s*(?:%|per\s?cent\b|pct\b|بالمئة|بالمائة|في\s+المئة|في\s+المائة)", re.IGNORECASE
+)
 _MULTIPLIERS: Final[Dict[str, float]] = {
     "k": 1e3, "thousand": 1e3, "m": 1e6, "mn": 1e6, "million": 1e6, "b": 1e9, "bn": 1e9, "billion": 1e9,
 }
@@ -117,6 +125,34 @@ _PER_TRANSACTION_AMOUNT: Final = re.compile(
 # ─────────────────────────────── gap analysis ────────────────────────────────
 
 
+def normalize_text(text: str) -> str:
+    """Normalize numbers before parsing: Western digits, and every percent form written as 'N%'.
+
+    "50 %", "50 percent", "٥٠٪", "50٪" and "50 بالمئة" all become "50%". Arabic decimal and thousands
+    separators become '.' and ','.
+
+    Args:
+        text (str): Free text (English or Arabic).
+
+    Returns:
+        str: The normalized text.
+    """
+    normalized = (text or "").translate(_DIGITS).replace("٫", ".").replace("٬", ",").replace("٪", "%")
+    return _PERCENT_WORDS.sub(r"\1%", normalized)
+
+
+def percentages_in(text: str) -> List[float]:
+    """The percentages written in a text, as ratios (50% -> 0.5).
+
+    Args:
+        text (str): Free text.
+
+    Returns:
+        List[float]: One ratio per percentage, in order.
+    """
+    return [float(v) / 100 for v in re.findall(r"(\d+(?:\.\d+)?)%", normalize_text(text))]
+
+
 def numbers_in(text: str) -> Set[float]:
     """Every number written in a text, with k / million / % expanded.
 
@@ -126,6 +162,7 @@ def numbers_in(text: str) -> Set[float]:
     Returns:
         Set[float]: The values; a percentage is also returned as its ratio (90% -> 90.0 and 0.9).
     """
+    text = normalize_text(text)
     found: Set[float] = set()
     for digits, suffix in _NUMBER.findall(text or ""):
         try:
@@ -163,6 +200,8 @@ def _threshold_stated(intent: Dict[str, Any], text: str) -> bool:
     for threshold in intent.get("thresholds") or []:
         if not isinstance(threshold, dict):
             continue
+        if threshold.get("kind") == "ratio" and threshold.get("value_from") not in (None, ""):
+            return True  # "50% of the balance": the percentage is the threshold
         numeric = []
         for value in (threshold.get("value_from"), threshold.get("value_to")):
             try:
@@ -362,7 +401,8 @@ def build_questions(gaps: List[str], intent: Dict[str, Any]) -> List[Dict[str, A
         })
     if "threshold_amount" in gaps:
         questions.append({
-            "id": "threshold_amount", "field_name": "threshold_amount", "input_type": "number",
+            "id": "threshold_amount", "field_name": "threshold_amount", "slot_id": amount_slot(intent),
+            "input_type": "number",
             "question_text": "Above which amount should activity be flagged?", "options": None,
             "default_value": settings.CLARIFICATION_DEFAULT_AMOUNT, "required": True, "unit": "JOD",
             "help_text": "Applies to each transaction, or to the total when activity is added up.",
@@ -465,6 +505,7 @@ def clarification_payload(intent: Dict[str, Any], gaps: List[str], original_requ
         Dict[str, Any]: ClarificationResponse fields, plus 'partial_intent' (kept for the answer
             turn, never shown) and 'agent_instruction'.
     """
+    intent = assign_slots(intent)
     return {
         "status": "NEEDS_CLARIFICATION",
         "understood_summary": understood_summary(intent, gaps),
@@ -602,13 +643,18 @@ def answered_fields(answers: Optional[Dict[str, Any]]) -> Set[str]:
     return filled
 
 
-def apply_answers(intent: Dict[str, Any], answers: Dict[str, Any], record: bool = True) -> Dict[str, Any]:
+def apply_answers(intent: Dict[str, Any], answers: Dict[str, Any], record: bool = True,
+                  questions: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     """Merge the form answers into an intent; they override whatever the LLM guessed.
+
+    Each answer updates only the condition its question is bound to: the amount answer fills the slot
+    named by the question's ``slot_id`` (or adds one amount threshold), never a balance or ratio condition.
 
     Args:
         intent (Dict[str, Any]): The intent (not modified).
         answers (Dict[str, Any]): {question id: value}.
         record (bool): Whether to mark the fields as clarified (False for a business default).
+        questions (Optional[List[Dict[str, Any]]]): The questions that were asked (for their slot ids).
 
     Returns:
         Dict[str, Any]: The updated copy, with 'clarified_fields' listing what the answers set.
@@ -627,16 +673,18 @@ def apply_answers(intent: Dict[str, Any], answers: Dict[str, Any], record: bool 
         amount = float(answers["threshold_amount"])
         aggregated = isinstance(updated.get("aggregation"), dict) and str(
             (updated.get("aggregation") or {}).get("function") or "").upper() == "SUM"
+        updated = assign_slots(updated)
         thresholds = [t for t in updated.get("thresholds") or [] if isinstance(t, dict)]
-        money = [t for t in thresholds if re.search(r"amount|volume|value|sum|total", str(t.get("field") or ""), re.I)]
-        if money:
-            for threshold in money:
-                threshold["value_from"] = amount
-                threshold["provenance"] = "stated"
+        asked = next((q for q in questions or [] if q.get("id") == "threshold_amount"), None)
+        slot = (asked or {}).get("slot_id") or amount_slot(updated)
+        target = next((t for t in thresholds if t.get("slot_id") == slot and _is_amount_slot(t)), None)
+        if target is not None:
+            target["value_from"] = amount
+            target["provenance"] = "stated"
         else:
             thresholds.append({
                 "field": "cumulative_transaction_volume" if aggregated else "transaction_amount",
-                "operator": ">=", "value_from": amount,
+                "operator": ">=", "value_from": amount, "slot_id": f"t{len(thresholds)}",
                 "target_scope": "AGGREGATE" if aggregated else "DETAIL", "provenance": "stated",
             })
         updated["thresholds"] = thresholds
@@ -712,3 +760,377 @@ def pending_clarification(messages: List[Any]) -> Optional[Dict[str, Any]]:
         if "enriched_intent" in payload:
             return None
     return None
+
+
+# ─────────────────────────────── condition slots ────────────────────────────────
+
+_NOT_AN_AMOUNT: Final = re.compile(r"balance|ratio|percent|pct|count|number|age", re.IGNORECASE)
+_MONEY_FIELD: Final = re.compile(r"amount|amt|volume|value|sum|total", re.IGNORECASE)
+
+
+def assign_slots(intent: Dict[str, Any]) -> Dict[str, Any]:
+    """Give every threshold a stable slot id ('t0', 't1', ...) that answers are bound to.
+
+    Args:
+        intent (Dict[str, Any]): The intent (not modified).
+
+    Returns:
+        Dict[str, Any]: A copy whose thresholds all have a slot_id (existing ids are kept).
+    """
+    updated = copy.deepcopy(intent)
+    thresholds = updated.get("thresholds") or []
+    used = {t.get("slot_id") for t in thresholds if isinstance(t, dict)}
+    for i, threshold in enumerate(thresholds):
+        if isinstance(threshold, dict) and not threshold.get("slot_id"):
+            slot, n = f"t{i}", i
+            while slot in used:
+                n += 1
+                slot = f"t{n}"
+            threshold["slot_id"] = slot
+            used.add(slot)
+    return updated
+
+
+def _is_amount_slot(threshold: Dict[str, Any]) -> bool:
+    """Whether a threshold is a plain money amount an amount answer may fill.
+
+    Args:
+        threshold (Dict[str, Any]): One threshold.
+
+    Returns:
+        bool: False for ratios, balances, counts, ages and percentages.
+    """
+    field_name = str(threshold.get("field") or "")
+    return (threshold.get("kind") or "value") == "value" and bool(_MONEY_FIELD.search(field_name)) \
+        and not _NOT_AN_AMOUNT.search(field_name)
+
+
+def amount_slot(intent: Dict[str, Any]) -> str:
+    """The one condition the amount question fills.
+
+    Args:
+        intent (Dict[str, Any]): The intent.
+
+    Returns:
+        str: The slot id of the plain amount threshold (one without a value first), or 'new'.
+    """
+    candidates = [t for t in assign_slots(intent).get("thresholds") or [] if isinstance(t, dict) and _is_amount_slot(t)]
+    empty = [t for t in candidates if t.get("value_from") in (None, "", 0, 0.0)]
+    chosen = (empty or candidates or [None])[0]
+    return chosen["slot_id"] if chosen else "new"
+
+
+# ─────────────────────────────── ratio conditions ("X% of Y") ────────────────────────────────
+
+_RATIO_OPERATORS: Final[Dict[str, str]] = {
+    "greater than": ">", "more than": ">", "higher than": ">", "larger than": ">", "above": ">", "over": ">",
+    "exceeding": ">", "exceeds": ">", "exceed": ">", "at least": ">=", "less than": "<", "lower than": "<",
+    "below": "<", "under": "<", "at most": "<=",
+    "أكبر من": ">", "أكثر من": ">", "أعلى من": ">", "يتجاوز": ">", "تتجاوز": ">", "يزيد عن": ">", "تزيد عن": ">",
+    "يزيد على": ">", "لا يقل عن": ">=", "أقل من": "<", "لا يزيد عن": "<=",
+}
+_RATIO_RE: Final = re.compile(
+    r"(?P<op>" + "|".join(sorted((re.escape(k) for k in _RATIO_OPERATORS), key=len, reverse=True)) + r")\s*"
+    r"(?P<pct>\d+(?:\.\d+)?)%\s*(?P<of>of\b|من|عن|على)?\s*(?P<right>[^.,;\n]{1,80})",
+    re.IGNORECASE,
+)
+# (pattern, field): first match wins, so the more specific phrases come first.
+_LEFT_FIELDS: Final = (
+    (r"cash deposits?|deposits?|إيداعات?(?:\s+نقدية)?|الإيداعات?|إيداع", "deposit_amount"),
+    (r"cash withdrawals?|withdrawals?|سحوبات|السحب|سحب", "withdrawal_amount"),
+    (r"transfers?|تحويلات|التحويل|تحويل", "transfer_amount"),
+    (r"transactions?|payments?|الحركات?|حركة|معاملات?", "transaction_amount"),
+)
+_RIGHT_FIELDS: Final = (
+    (r"average\s+(?:daily\s+|monthly\s+)?deposits?|avg\.?\s+deposits?|متوسط\s+(?:ال)?إيداعات", "average_deposit_amount"),
+    (r"average\s+(?:daily\s+|monthly\s+)?withdrawals?|متوسط\s+(?:ال)?سحوبات", "average_withdrawal_amount"),
+    (r"(?:account\s+)?balance|الرصيد|رصيد(?:\s+الحساب)?", "account_balance"),
+    (r"(?:total\s+)?deposits|الإيداعات", "total_deposits"),
+    (r"(?:total\s+)?withdrawals|السحوبات", "total_withdrawals"),
+    (r"(?:declared\s+|monthly\s+)?income|salary|الدخل|الراتب", "declared_income"),
+)
+
+
+def _field_in(text: str, table: Tuple[Tuple[str, str], ...], last: bool = False) -> Optional[str]:
+    """The field named in a phrase.
+
+    Args:
+        text (str): The phrase.
+        table (Tuple[Tuple[str, str], ...]): (pattern, field) pairs.
+        last (bool): Take the mention closest to the end of the text (the subject right before an operator).
+
+    Returns:
+        Optional[str]: The field, or None.
+    """
+    hits = []
+    for pattern, field_name in table:
+        for match in re.finditer(pattern, text, re.IGNORECASE):
+            hits.append((match.start(), field_name))
+    if not hits:
+        return None
+    return (max(hits) if last else min(hits))[1]
+
+
+def parse_ratio_conditions(text: str) -> List[Dict[str, Any]]:
+    """Find "<field> greater / less than X% of <other field>" conditions (English and Arabic).
+
+    Args:
+        text (str): The user's request.
+
+    Returns:
+        List[Dict[str, Any]]: One {type: 'ratio', left, right, operator, factor, phrase} per condition,
+            e.g. {left: 'deposit_amount', right: 'account_balance', operator: '>', factor: 0.5}.
+    """
+    normalized = normalize_text(text)
+    found: List[Dict[str, Any]] = []
+    for match in _RATIO_RE.finditer(normalized):
+        right_text = match.group("right")
+        right = _field_in(right_text[:40], _RIGHT_FIELDS)
+        if not right and not match.group("of"):
+            continue  # "greater than 50% within 7 days": no "of" and no known field -> not a ratio
+        if not right:
+            words = re.findall(r"[A-Za-z]+", right_text)
+            words = [w.lower() for w in words if w.lower() not in ("the", "his", "her", "their", "its", "a", "an", "customer", "customers")]
+            right = "_".join(words[:3]) or None
+        if not right:
+            continue
+        left = _field_in(normalized[max(0, match.start() - 80):match.start()], _LEFT_FIELDS, last=True) or "transaction_amount"
+        found.append({
+            "type": "ratio", "left": left, "right": right,
+            "operator": _RATIO_OPERATORS[match.group("op").lower()] if match.group("op").lower() in _RATIO_OPERATORS
+            else _RATIO_OPERATORS[match.group("op")],
+            "factor": round(float(match.group("pct")) / 100, 6), "phrase": match.group(0).strip(),
+        })
+    return found
+
+
+def apply_ratio_conditions(intent: Dict[str, Any], ratios: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Replace the LLM's split of "X% of Y" with one ratio threshold per condition.
+
+    The LLM turned "deposit greater than 50% of the account balance" into ``amount > 0.5`` and
+    ``account_balance < None``. Both pieces are removed and one ratio condition is added:
+    ``deposit_amount > 0.5 x account_balance``.
+
+    Args:
+        intent (Dict[str, Any]): The intent (not modified).
+        ratios (List[Dict[str, Any]]): parse_ratio_conditions output.
+
+    Returns:
+        Dict[str, Any]: The updated copy (unchanged without ratios).
+    """
+    if not ratios:
+        return intent
+    updated = copy.deepcopy(intent)
+    thresholds = [t for t in updated.get("thresholds") or [] if isinstance(t, dict)]
+    default_type = (updated.get("transaction_types") or [None])[0] if len(updated.get("transaction_types") or []) == 1 else None
+    for ratio in ratios:
+        already = any(
+            t.get("kind") == "ratio" and t.get("field") == ratio["left"] and t.get("relative_to") == ratio["right"]
+            and t.get("operator") == ratio["operator"] and abs(float(t.get("value_from") or 0) - ratio["factor"]) < 1e-9
+            for t in thresholds
+        )
+        if already:  # idempotent: the answer turn re-applies the ratios of the stored intent
+            continue
+        right_words = set(ratio["right"].split("_")) - {"amount", "total", "account"}
+
+        def is_split_piece(threshold: Dict[str, Any]) -> bool:
+            names = f"{threshold.get('field') or ''} {threshold.get('value_from') or ''}".lower()
+            value = threshold.get("value_from")
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError):
+                numeric = None
+            return (bool(right_words) and any(w in names for w in right_words)) or value in (None, "") or (
+                numeric is not None and (abs(numeric - ratio["factor"]) < 1e-9 or abs(numeric - ratio["factor"] * 100) < 1e-9))
+
+        kept = [t for t in thresholds if t.get("kind") == "ratio" or not is_split_piece(t)]
+        transaction_type = next((t.get("transaction_type") for t in thresholds if t not in kept and t.get("transaction_type")),
+                                default_type)
+        kept.append({
+            "field": ratio["left"], "kind": "ratio", "operator": ratio["operator"], "value_from": ratio["factor"],
+            "relative_to": ratio["right"], "target_scope": "DETAIL", "provenance": "stated",
+            "transaction_type": transaction_type,
+        })
+        thresholds = kept
+    updated["thresholds"] = thresholds
+    return assign_slots(updated)
+
+
+def condition_sql(threshold: Dict[str, Any]) -> str:
+    """One condition as a SQL predicate over business field names.
+
+    Args:
+        threshold (Dict[str, Any]): A threshold.
+
+    Returns:
+        str: e.g. 'deposit_amount > 0.5 * account_balance' or 'transaction_amount >= 10000'.
+    """
+    field_name, operator, value = threshold.get("field"), threshold.get("operator"), threshold.get("value_from")
+    if threshold.get("kind") == "ratio":
+        return f"{field_name} {operator} {value:g} * {threshold.get('relative_to')}"
+    if operator == "BETWEEN":
+        return f"{field_name} BETWEEN {value} AND {threshold.get('value_to')}"
+    return f"{field_name} {operator} {value}"
+
+
+def for_sql_service(intent: Dict[str, Any]) -> Dict[str, Any]:
+    """The intent as the SQL service reads it: a ratio becomes its '<left>_to_<right>_ratio' threshold.
+
+    Args:
+        intent (Dict[str, Any]): The intent (not modified).
+
+    Returns:
+        Dict[str, Any]: A copy; ratio thresholds keep relative_to and gain the service's field name.
+    """
+    updated = copy.deepcopy(intent)
+    for threshold in updated.get("thresholds") or []:
+        if isinstance(threshold, dict) and threshold.get("kind") == "ratio":
+            threshold["field"] = f"{threshold['field']}_to_{threshold.get('relative_to')}_ratio"
+            threshold.pop("kind", None)
+    return updated
+
+
+# ─────────────────────────────── validation before SQL generation ────────────────────────────────
+
+_OPERATORS: Final = frozenset({">", "<", ">=", "<=", "=", "BETWEEN", "IN"})
+
+
+def _label(field_name: Any) -> str:
+    """A field name in plain words.
+
+    Args:
+        field_name (Any): e.g. 'account_balance'.
+
+    Returns:
+        str: e.g. 'account balance'.
+    """
+    return re.sub(r"\s+", " ", str(field_name or "").replace("_", " ")).strip() or "a condition"
+
+
+def validate_conditions(intent: Dict[str, Any]) -> List[str]:
+    """Plain-language problems that stop SQL generation (missing value, missing field, unknown operator).
+
+    Args:
+        intent (Dict[str, Any]): The intent about to be sent for SQL generation.
+
+    Returns:
+        List[str]: One sentence per problem; empty when every condition is complete.
+    """
+    problems: List[str] = []
+    for threshold in intent.get("thresholds") or []:
+        if not isinstance(threshold, dict):
+            continue
+        label = _label(threshold.get("field"))
+        value = threshold.get("value_from")
+        if not str(threshold.get("field") or "").strip():
+            problems.append("one condition does not say what to compare")
+            continue
+        if str(threshold.get("operator") or "").upper() not in _OPERATORS:
+            problems.append(f"the comparison for the {label} is not clear (greater than, less than, between ...)")
+        if threshold.get("kind") == "ratio":
+            if not threshold.get("relative_to"):
+                problems.append(f"what the {label} should be compared with is missing")
+            if value in (None, "") or str(value).strip().lower() in ("none", "null"):
+                problems.append(f"the percentage for the {label} is missing")
+            continue
+        if value in (None, "") or str(value).strip().lower() in ("none", "null"):
+            problems.append(f"the value for the {label} is missing")
+        if str(threshold.get("operator") or "").upper() == "BETWEEN" and threshold.get("value_to") in (None, ""):
+            problems.append(f"the upper limit for the {label} is missing")
+    return list(dict.fromkeys(problems))
+
+
+def invalid_rule_message(problems: List[str], text: str = "") -> str:
+    """The message shown when a rule is incomplete (never a raw expression).
+
+    Args:
+        problems (List[str]): validate_conditions output.
+        text (str): The user's request (for the language).
+
+    Returns:
+        str: e.g. "I can't build this rule yet: the value for the transaction amount is missing. Please add it and try again."
+    """
+    if re.search(r"[؀-ۿ]", text or ""):
+        return "لا أستطيع بناء هذه القاعدة بعد: بعض الشروط غير مكتملة (" + "؛ ".join(problems) + "). يرجى إكمالها والمحاولة مرة أخرى."
+    return "I can't build this rule yet: " + "; ".join(problems) + ". Please add it and try again."
+
+
+_RAW_EXPRESSION: Final = re.compile(r"\b[\w.]+\s*(?:<=|>=|<|>|=)\s*(?:None|null|nan)\b", re.IGNORECASE)
+
+
+def plain_text(message: str) -> str:
+    """Remove raw expressions such as 'account_balance < None' from a message shown to the user.
+
+    Args:
+        message (str): Text from the SQL service.
+
+    Returns:
+        str: The text with such expressions replaced by "an incomplete condition".
+    """
+    return _RAW_EXPRESSION.sub("an incomplete condition", message or "")
+
+
+# ─────────────────────────────── data capabilities (balance history) ────────────────────────────────
+
+BALANCE_REFUSAL_EN: Final = ("Balances on this database aren't kept day by day, so I can't compare deposits with the balance. "
+                             "I can compare them with the customer's average deposits instead.")
+BALANCE_REFUSAL_AR: Final = ("الأرصدة في هذه القاعدة غير محفوظة يومياً، لذلك لا أستطيع مقارنة الإيداع بالرصيد. "
+                             "يمكنني مقارنته بمتوسط إيداعات العميل بدلاً من ذلك.")
+ALTERNATIVE_LOOKBACK_DAYS: Final = 90
+
+
+def needs_balance(intent: Dict[str, Any]) -> bool:
+    """Whether a rule compares against the account balance.
+
+    Args:
+        intent (Dict[str, Any]): The intent.
+
+    Returns:
+        bool: True when a threshold's field or ratio denominator is a balance.
+    """
+    return any(
+        isinstance(t, dict) and ("balance" in str(t.get("field") or "").lower() or "balance" in str(t.get("relative_to") or "").lower())
+        for t in intent.get("thresholds") or []
+    )
+
+
+def balance_capability_refusal(intent: Dict[str, Any], text: str) -> Optional[Dict[str, Any]]:
+    """The refusal of a balance rule on a database without balance history, with the alternative rule.
+
+    Extension point: when a bank's warehouse provides a daily account snapshot (previous-day balance in
+    JOD), set DATA_CAPABILITIES[<database>].balance_history = true and balance rules pass this check.
+
+    Args:
+        intent (Dict[str, Any]): The parsed intent.
+        text (str): The user's request (for the language and the alternative).
+
+    Returns:
+        Optional[Dict[str, Any]]: The NOT_SUPPORTED tool result, or None when the rule may be built.
+    """
+    if not needs_balance(intent) or settings.has_capability("balance_history"):
+        return None
+    ratio = next((t for t in intent.get("thresholds") or [] if isinstance(t, dict) and t.get("kind") == "ratio"), None)
+    percent = f"{float(ratio['value_from']) * 100:g}" if ratio and ratio.get("value_from") is not None else "50"
+    word = "greater than" if not ratio or str(ratio.get("operator")).startswith(">") else "less than"
+    arabic = bool(re.search(r"[؀-ۿ]", text or ""))
+    if arabic:
+        request = (f"إيداعات نقدية {'أكبر' if word == 'greater than' else 'أقل'} من {percent}% من متوسط إيداعات العميل "
+                   f"خلال آخر {ALTERNATIVE_LOOKBACK_DAYS} يوماً")
+    else:
+        request = (f"Flag cash deposits {word} {percent}% of the customer's average deposits over the previous "
+                   f"{ALTERNATIVE_LOOKBACK_DAYS} days")
+    return {
+        "status": "NOT_SUPPORTED",
+        "capability": "balance_history",
+        "database": settings.database_name(),
+        "user_message": BALANCE_REFUSAL_AR if arabic else BALANCE_REFUSAL_EN,
+        "alternative": {"request": request, "condition": {
+            "type": "ratio", "left": (ratio or {}).get("field") or "deposit_amount", "right": "average_deposit_amount",
+            "operator": (ratio or {}).get("operator") or ">", "factor": float(percent) / 100,
+            "lookback_days": ALTERNATIVE_LOOKBACK_DAYS}},
+        "agent_instruction": (
+            "Reply with user_message verbatim, then in one sentence offer the alternative rule (alternative.request). "
+            "Build it ONLY if the user accepts: then call analyze_intent_and_discover_explanation_codes with "
+            "alternative.request as user_prompt. Do not call any other tool now."
+        ),
+    }

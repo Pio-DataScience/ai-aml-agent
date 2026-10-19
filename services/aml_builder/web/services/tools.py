@@ -18,6 +18,7 @@ Notes:
 """
 
 import re
+import copy
 import json
 import logging
 import uuid
@@ -59,6 +60,13 @@ from services.aml_builder.web.services.clarification import (
     describe_answers,
     find_gaps,
     pending_clarification,
+    apply_ratio_conditions,
+    balance_capability_refusal,
+    for_sql_service,
+    invalid_rule_message,
+    parse_ratio_conditions,
+    plain_text,
+    validate_conditions,
 )
 from services.aml_builder.web.services.attribute_filters import (
     apply_attribute_filters,
@@ -255,6 +263,9 @@ def analyze_intent_and_discover_explanation_codes(
             known_intent = json.loads(existing_intent_json)
         except json.JSONDecodeError:
             known_intent = None
+    # Answer turn: the request was already parsed; the answers fill its slots (no new LLM guess).
+    base_intent = (copy.deepcopy(pending["partial_intent"])
+                   if pending and isinstance(pending.get("partial_intent"), dict) else None)
     llm = build_llm()
 
     system_instruction = load_prompt("intent_extraction.md")
@@ -267,29 +278,32 @@ def analyze_intent_and_discover_explanation_codes(
     ]
 
     try:
-        res = llm.invoke(messages)
-        raw_text = str(res.content).strip() if res.content else ""
-        if not raw_text and hasattr(res, "additional_kwargs") and res.additional_kwargs:
-            raw_text = str(
-                res.additional_kwargs.get("reasoning_content", "")
-                or res.additional_kwargs.get("content", "")
-            ).strip()
+        if base_intent is not None:
+            intent_dict = base_intent
+        else:
+            res = llm.invoke(messages)
+            raw_text = str(res.content).strip() if res.content else ""
+            if not raw_text and hasattr(res, "additional_kwargs") and res.additional_kwargs:
+                raw_text = str(
+                    res.additional_kwargs.get("reasoning_content", "")
+                    or res.additional_kwargs.get("content", "")
+                ).strip()
 
-        if not raw_text:
-            logger.error("[TOOL: INTENT] Sub-LLM returned empty output content.")
-            return json.dumps(
-                {"error": "Sub-LLM returned empty response during intent extraction."}
-            )
+            if not raw_text:
+                logger.error("[TOOL: INTENT] Sub-LLM returned empty output content.")
+                return json.dumps(
+                    {"error": "Sub-LLM returned empty response during intent extraction."}
+                )
 
-        intent_dict = safe_parse_json(raw_text)
-        if "AMLIntent" in intent_dict and isinstance(intent_dict["AMLIntent"], dict):
-            intent_dict = intent_dict["AMLIntent"]
-        elif "aml_intent" in intent_dict and isinstance(
-            intent_dict["aml_intent"], dict
-        ):
-            intent_dict = intent_dict["aml_intent"]
-        elif "intent" in intent_dict and isinstance(intent_dict["intent"], dict):
-            intent_dict = intent_dict["intent"]
+            intent_dict = safe_parse_json(raw_text)
+            if "AMLIntent" in intent_dict and isinstance(intent_dict["AMLIntent"], dict):
+                intent_dict = intent_dict["AMLIntent"]
+            elif "aml_intent" in intent_dict and isinstance(
+                intent_dict["aml_intent"], dict
+            ):
+                intent_dict = intent_dict["aml_intent"]
+            elif "intent" in intent_dict and isinstance(intent_dict["intent"], dict):
+                intent_dict = intent_dict["intent"]
 
         # Sanitize optional dict/model fields that might be serialized as "" or invalid empty types
         for dict_field in ("baseline_window", "aggregation", "time_window"):
@@ -400,9 +414,17 @@ def analyze_intent_and_discover_explanation_codes(
             tx_types = intent_dict.get("transaction_types")
             tx_type = intent_dict.get("transaction_type")
 
+        # "X% of Y" is ONE ratio condition, not an amount plus an empty comparison.
+        intent_dict = apply_ratio_conditions(intent_dict, parse_ratio_conditions(original_request))
+        # Data capability: a rule on the account balance needs balance history on this database.
+        refusal = balance_capability_refusal(intent_dict, original_request)
+        if refusal:
+            logger.info("[TOOL: INTENT] Refused: needs balance_history, not available on %s", refusal["database"])
+            return json.dumps(refusal, ensure_ascii=False, indent=2)
+
         # Clarification flow: never guess a mandatory parameter the user did not state.
         if answers:
-            intent_dict = apply_answers(intent_dict, answers)
+            intent_dict = apply_answers(intent_dict, answers, questions=(pending or {}).get("questions"))
             tx_types = intent_dict.get("transaction_types")
             tx_type = intent_dict.get("transaction_type")
         if settings.AML_CLARIFICATION_FLOW:
@@ -905,9 +927,12 @@ def _rejection_result(
         str: JSON with 'error' (one-line summary), 'rejection' (structured) and
             'scenario_report' (raw, may be null).
     """
+    reason = next((plain_text(r.get("reason", "")) for r in rejection.get("reasons") or [] if r.get("reason")), "")
+    user_message = "SQL could not be generated for this rule." + (f" {reason.split('.')[0].strip()}." if reason else "")
     return json.dumps(
         {
-            "error": f"PioTech AI did not generate SQL: {summarize_rejection(rejection)}",
+            "error": plain_text(f"PioTech AI did not generate SQL: {summarize_rejection(rejection)}"),
+            "user_message": user_message,
             "rejection": rejection,
             "scenario_report": scenario_report,
             "auto_corrections_tried": corrections or [],
@@ -980,6 +1005,13 @@ def execute_oracle_dwh_shadow_test(intent_json: str) -> str:
         "UNRESOLVED": resolve_intent,
         "REQUEST_REJECTED": resolve_intent,
     }
+    # Never send an incomplete rule for SQL generation, and never show its raw expression to the user.
+    problems = validate_conditions(intent_dict)
+    if problems:
+        message = invalid_rule_message(problems, str(intent_dict.get("detection_logic") or ""))
+        logger.warning("[TOOL: SQL_BRIDGE] Rule not sent for SQL generation: %s", problems)
+        return json.dumps({"error": message, "user_message": message, "validation_errors": problems,
+                           "validation_success": False}, ensure_ascii=False, indent=2)
     sent_intent, fixed_period = apply_fixed_period(intent_dict, *_period_texts(intent_dict))
     # Attribute filters are applied by the AML Builder (below), never by PioTech.
     attribute_filters = validate_filters(intent_dict.get("attribute_filters"))
@@ -990,7 +1022,7 @@ def execute_oracle_dwh_shadow_test(intent_json: str) -> str:
         # for amounts; the period itself travels in anchor_date and time_window. Attribute
         # phrases are removed too, so PioTech neither refuses nor re-applies them.
         to_piotech = clean_for_sql_service(sent_intent) if fixed_period else sent_intent
-        outcome = _request_piotech_sql(strip_attribute_phrases(to_piotech, attribute_filters))
+        outcome = _request_piotech_sql(for_sql_service(strip_attribute_phrases(to_piotech, attribute_filters)))
         if outcome["sql"]:
             break
         rejection = outcome["rejection"]

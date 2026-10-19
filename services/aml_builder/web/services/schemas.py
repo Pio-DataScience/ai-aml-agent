@@ -30,9 +30,22 @@ class Threshold(BaseModel):
         operator (str): Comparison operator: '>', '<', '>=', '<=', '=', 'BETWEEN', 'IN'.
         value_from (Optional[Union[float, str]]): Numeric threshold value or relational field name.
         value_to (Optional[Union[float, str]]): Upper bound value, used only for BETWEEN.
+        kind (str): 'value' (field <op> value_from) or 'ratio' (field <op> value_from x relative_to).
+        relative_to (Optional[str]): For a ratio, the field compared against (e.g. 'account_balance').
+        slot_id (Optional[str]): Stable id of the condition; a clarification answer updates only its slot.
     """
 
     field: str = Field(..., description="Business field name from the user's intent.")
+    kind: Literal["value", "ratio"] = Field(
+        default="value",
+        description="'ratio': field <operator> value_from x relative_to (e.g. deposit_amount > 0.5 x account_balance).",
+    )
+    relative_to: Optional[str] = Field(
+        default=None, description="For a ratio: the field compared against (e.g. 'account_balance')."
+    )
+    slot_id: Optional[str] = Field(
+        default=None, description="Stable condition id; clarification answers update only the slot they are bound to."
+    )
     operator: Literal[">", "<", ">=", "<=", "=", "BETWEEN", "IN"] = Field(
         ..., description="Comparison operator."
     )
@@ -308,6 +321,10 @@ class ClarificationQuestion(BaseModel):
     show_if: Optional[Dict[str, Any]] = Field(
         default=None,
         description="Shown only when another answer matches: {question_id, equals | in | includes}.",
+    )
+    slot_id: Optional[str] = Field(
+        default=None,
+        description="The one condition this answer updates (a threshold's slot_id, or 'new' to add one).",
     )
 
 

@@ -5,6 +5,31 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-10-19] fix: "X% of the balance" rules - one ratio, percentages, slot-bound answers, plain errors, balance capability
+
+### What
+- **Bug 1 (ratio split)**: `Threshold` could not express "factor x other field", so the LLM produced
+  `transaction_amount > 0.5` + `account_balance < None`. Now `Threshold.kind = "ratio"` + `relative_to`;
+  `clarification.parse_ratio_conditions` (English and Arabic) and `apply_ratio_conditions` replace the split with one
+  condition (`deposit_amount > 0.5 * account_balance`, see `condition_sql`); sent to PioTech as
+  `<left>_to_<right>_ratio` (`for_sql_service`). Intent prompt rule 7a.
+- **Bug 2 (percentages)**: `_NUMBER` required a word boundary after `%`, so no format (not even "50%") was read as 0.5.
+  `normalize_text` (Arabic-Indic digits, ٪, "percent", "بالمئة") + `percentages_in`; `numbers_in` uses them.
+- **Bug 3 (answer leak)**: `apply_answers` wrote the amount into every field matching `...|balance`. Thresholds now have
+  `slot_id`; the amount question carries the one slot it fills (`amount_slot`: plain amounts only, never balance, ratio,
+  count); the answer turn builds from the stored partial intent (no new LLM parse), so slots stay stable.
+- **Bug 4 (raw errors)**: `validate_conditions` runs before SQL generation; an incomplete rule is not sent and the user
+  gets `user_message` ("I can't build this rule yet: the value for the account balance is missing ..."). Refusal texts
+  pass `plain_text` (no `x < None`); the agent shows `user_message` verbatim.
+- **Balance capability**: `settings.DATA_CAPABILITIES` (`{"OPENBI2": {"balance_history": false}}`) + `has_capability`.
+  A balance rule without balance history returns `NOT_SUPPORTED` with the plain refusal (EN/AR) and the alternative
+  (deposit vs the customer's average deposits over 90 days), built only if the user accepts. Enabling a bank later =
+  set `balance_history: true` for it (extension point: `balance_capability_refusal`).
+- Tests: 30 added to `test_clarification.py` (2 existing expectations updated: slot ids; no second LLM parse);
+  full suite 240 passed. Live: the original sentence → refusal + alternative; "yes" → plan with one ratio condition.
+
+---
+
 ## [2026-10-19] fix: "3 high cash deposits in one week in 2019" - amount asked, every week of 2019 checked
 
 ### What

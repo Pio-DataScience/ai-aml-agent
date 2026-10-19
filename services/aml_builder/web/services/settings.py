@@ -6,7 +6,7 @@ Never hardcode secrets or connection strings — per SOLID Dependency Inversion.
 """
 
 from functools import lru_cache
-from typing import Optional
+from typing import Dict, Optional
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -205,6 +205,19 @@ class Settings(BaseSettings):
             "request that does not name accounts, customers or single transactions is monitored per customer."
         ),
     )
+    DATA_CAPABILITIES: Dict[str, Dict[str, bool]] = Field(
+        default_factory=lambda: {"OPENBI2": {"balance_history": False}},
+        description=(
+            "What each database can support, keyed by database name (the service name at the end of "
+            "ORACLE_DSN, e.g. OPENBI2). balance_history: true only when the warehouse provides a daily "
+            "account snapshot (previous-day balance in JOD); balance-comparison rules are refused otherwise. "
+            "Enable a bank by setting it here (JSON in .env), no code change."
+        ),
+    )
+    ACTIVE_DATABASE: Optional[str] = Field(
+        default=None,
+        description="Database name used to look up DATA_CAPABILITIES; defaults to the service name of ORACLE_DSN.",
+    )
     AML_SCOPE_GUARD: bool = Field(
         default=True,
         description=(
@@ -248,6 +261,28 @@ class Settings(BaseSettings):
         default="ai-aml-agent",
         description="LangSmith project name for trace grouping.",
     )
+
+    def database_name(self) -> str:
+        """The name of the database the rules run on.
+
+        Returns:
+            str: ACTIVE_DATABASE, else the service name at the end of ORACLE_DSN (e.g. 'OPENBI2'), upper case.
+        """
+        name = self.ACTIVE_DATABASE or (self.ORACLE_DSN or "").rsplit("/", 1)[-1]
+        return name.strip().upper()
+
+    def has_capability(self, capability: str) -> bool:
+        """Whether the active database supports a data capability (e.g. 'balance_history').
+
+        Extension point: a bank whose warehouse provides the data gets the capability by configuration.
+
+        Args:
+            capability (str): Capability name.
+
+        Returns:
+            bool: The configured value; False when the database or the capability is not configured.
+        """
+        return bool((self.DATA_CAPABILITIES.get(self.database_name()) or {}).get(capability, False))
 
     @field_validator("LLM_PROVIDER")
     @classmethod

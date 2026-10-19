@@ -44,6 +44,25 @@ def _clean_explanation_checkpoint(checkpoint: Optional[str]) -> Optional[str]:
     return result if result.strip() else None
 
 
+def _threshold_value(threshold: dict) -> str:
+    """A threshold's value for the plan; a ratio reads as "50% of `account_balance`".
+
+    Args:
+        threshold (dict): One threshold.
+
+    Returns:
+        str: The markdown cell text.
+    """
+    value = threshold.get("value_from")
+    if threshold.get("kind") == "ratio":
+        try:
+            percent = f"{float(value) * 100:g}%"
+        except (TypeError, ValueError):
+            percent = str(value)
+        return f"`{percent}` of `{threshold.get('relative_to')}`"
+    return f"`{value}`"
+
+
 def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]) -> str:
     """Deterministic markdown renderer that mirrors every AMLIntent field into a plan.
 
@@ -207,7 +226,7 @@ def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]
                 lines.append("| # | Field | Operator | Value | Channel / Codes | Provenance |")
                 lines.append("|---|---|---|---|---|---|")
                 for i, t in enumerate(detail_thresholds, 1):
-                    val = f"`{t.get('value_from')}`"
+                    val = _threshold_value(t)
                     if t.get("operator") == "BETWEEN" and t.get("value_to") is not None:
                         val = f"`{t.get('value_from')}` — `{t.get('value_to')}`"
                     prov = t.get("provenance", "stated")
@@ -219,7 +238,7 @@ def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]
                 lines.append("| # | Field | Operator | Value | Provenance |")
                 lines.append("|---|---|---|---|---|")
                 for i, t in enumerate(detail_thresholds, 1):
-                    val = f"`{t.get('value_from')}`"
+                    val = _threshold_value(t)
                     if t.get("operator") == "BETWEEN" and t.get("value_to") is not None:
                         val = f"`{t.get('value_from')}` — `{t.get('value_to')}`"
                     prov = t.get("provenance", "stated")
@@ -235,7 +254,7 @@ def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]
                 lines.append("| # | Field | Operator | Value | Channel / Codes | Provenance |")
                 lines.append("|---|---|---|---|---|---|")
                 for i, t in enumerate(aggregate_thresholds, 1):
-                    val = f"`{t.get('value_from')}`"
+                    val = _threshold_value(t)
                     if t.get("operator") == "BETWEEN" and t.get("value_to") is not None:
                         val = f"`{t.get('value_from')}` — `{t.get('value_to')}`"
                     prov = t.get("provenance", "stated")
@@ -247,7 +266,7 @@ def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]
                 lines.append("| # | Field | Operator | Value | Provenance |")
                 lines.append("|---|---|---|---|---|")
                 for i, t in enumerate(aggregate_thresholds, 1):
-                    val = f"`{t.get('value_from')}`"
+                    val = _threshold_value(t)
                     if t.get("operator") == "BETWEEN" and t.get("value_to") is not None:
                         val = f"`{t.get('value_from')}` — `{t.get('value_to')}`"
                     prov = t.get("provenance", "stated")

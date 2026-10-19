@@ -52,6 +52,11 @@ Output ONLY a valid JSON object matching AMLIntent schema with mandatory root ke
 6. 'BETWEEN' OPERATOR LOWER & UPPER BOUNDS:
    - When operator is 'BETWEEN', you MUST populate BOTH 'value_from' (lower bound float) AND 'value_to' (upper bound float).
 
+7a. "X% OF <OTHER FIELD>" IS ONE RATIO THRESHOLD:
+   - "deposit greater than 50% of the account balance" / "أكبر من 50% من الرصيد" is ONE threshold:
+     {"field": "deposit_amount", "kind": "ratio", "operator": ">", "value_from": 0.5, "relative_to": "account_balance",
+      "target_scope": "DETAIL"}. Never split it into an amount (0.5) plus a second condition on the other field.
+
 7. ALL PERCENTAGE & RATIO RULES MUST BE THRESHOLDS:
    - If the detection logic mentions a percentage or ratio (e.g. '<PERCENTAGE>% of <METRIC>'), you MUST emit a corresponding entry in the 'thresholds' array with target_scope set to 'AGGREGATE' and convert percentage strings into normalized floats in 'value_from' (e.g. '300%' -> 3.0; '90%' -> 0.90).
 

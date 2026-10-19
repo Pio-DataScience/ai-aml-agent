@@ -258,7 +258,7 @@ def test_all_channels_and_a_new_threshold() -> None:
     intent = {**VAGUE_INTENT, "thresholds": [], "aggregation": None}
     updated = cl.apply_answers(intent, {"channels": ["ALL", "CASH DEPOSIT"], "threshold_amount": "15000"})
     assert updated["transaction_type"] == "ALL" and updated["transaction_types"] is None
-    assert updated["thresholds"] == [{"field": "transaction_amount", "operator": ">=", "value_from": 15000.0,
+    assert updated["thresholds"] == [{"field": "transaction_amount", "operator": ">=", "value_from": 15000.0, "slot_id": "t0",
                                       "target_scope": "DETAIL", "provenance": "stated", "explanation_codes": None}]
 
 
@@ -324,7 +324,7 @@ def test_the_answers_complete_the_original_request(monkeypatch: pytest.MonkeyPat
                                   config={"configurable": {"clarification_answers": ANSWERS}}))
 
     assert result["status"] == "COMPLETE"
-    assert prompts[0].startswith(VAGUE + "\n\nClarification answers:")
+    assert prompts == []  # the stored parse is completed by the answers; no new LLM parse (stable slots)
     intent = result["enriched_intent"]
     assert intent["scenario_type"] == "ACCOUNT" and intent["time_window"]["value"] == 7
     assert intent["thresholds"][0]["value_from"] == 25000.0
@@ -565,3 +565,181 @@ def test_a_count_is_not_an_amount(text: str, asks_amount: bool) -> None:
         {"field": "transaction_count", "operator": ">=", "value_from": count, "target_scope": "AGGREGATE"},
         {"field": "transaction_amount", "operator": ">=", "value_from": amount, "target_scope": "DETAIL"}]}
     assert ("threshold_amount" in cl.find_gaps(intent, text)) is asks_amount
+
+
+# ─────────────────────────── "X% of Y" ratio rules, slots, validation, balance capability ───────────────────────────
+
+# What the intent LLM produced live for "cash deposits greater than 50 % his account balance".
+LLM_SPLIT = [
+    {"field": "transaction_amount", "operator": ">", "value_from": 0.5, "target_scope": "DETAIL", "transaction_type": "CASH DEPOSIT"},
+    {"field": "account_balance", "operator": "<", "value_from": None, "target_scope": "DETAIL", "transaction_type": "CASH DEPOSIT"},
+]
+
+
+@pytest.mark.parametrize("text", [
+    "flag a cash deposit greater than 50% of the account balance",
+    "flag a cash deposit greater than 50 % of the account balance",
+    "customer maede cash deposits greater than 50 % his account balance",
+    "إيداع نقدي أكبر من 50% من الرصيد",
+    "إيداع نقدي أكبر من ٥٠٪ من الرصيد",
+])
+def test_1_x_percent_of_y_is_one_ratio_condition(text: str) -> None:
+    """Bug 1: one ratio condition, never 'amount > 0.5 AND account_balance < None'."""
+    ratios = cl.parse_ratio_conditions(text)
+    assert [{k: r[k] for k in ("type", "left", "right", "operator", "factor")} for r in ratios] == [
+        {"type": "ratio", "left": "deposit_amount", "right": "account_balance", "operator": ">", "factor": 0.5}]
+
+    intent = cl.apply_ratio_conditions({**VAGUE_INTENT, "thresholds": LLM_SPLIT}, ratios)
+    assert len(intent["thresholds"]) == 1
+    ratio = intent["thresholds"][0]
+    assert (ratio["kind"], ratio["field"], ratio["operator"], ratio["value_from"], ratio["relative_to"]) == (
+        "ratio", "deposit_amount", ">", 0.5, "account_balance")
+    assert cl.condition_sql(ratio) == "deposit_amount > 0.5 * account_balance"
+    assert cl.apply_ratio_conditions(intent, ratios)["thresholds"] == intent["thresholds"]  # idempotent
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("withdrawals at least 90% of total deposits", ("withdrawal_amount", ">=", 0.9, "total_deposits")),
+    ("transfers less than 20 percent of his income", ("transfer_amount", "<", 0.2, "declared_income")),
+])
+def test_1_the_general_pattern(text: str, expected: tuple) -> None:
+    """'<field> greater / less than X% of <other field>' for other fields too."""
+    (ratio,) = cl.parse_ratio_conditions(text)
+    assert (ratio["left"], ratio["operator"], ratio["factor"], ratio["right"]) == expected
+
+
+@pytest.mark.parametrize("text", ["deposits growing more than 50% within 7 days", "cash deposits above 10,000 JOD"])
+def test_1_no_ratio_without_a_second_field(text: str) -> None:
+    """A percentage with no 'of <field>' is not a ratio."""
+    assert cl.parse_ratio_conditions(text) == []
+
+
+@pytest.mark.parametrize("text", ["50%", "50 %", "50 percent", "٥٠٪", "50٪", "50 بالمئة"])
+def test_2_every_percentage_format_is_one_half(text: str) -> None:
+    """Bug 2: all formats normalize to 50%, read as 0.5; Arabic-Indic digits become Western digits."""
+    assert cl.normalize_text(text).startswith("50%")
+    assert cl.percentages_in(text) == [0.5]
+    assert 0.5 in cl.numbers_in(text)
+
+
+def test_2_a_spaced_percentage_never_asks_for_an_amount() -> None:
+    """Live case: '50 %' made the form ask for an amount the user never meant."""
+    text = "flag customers whose cash deposit is greater than 50 % of the account balance within 7 days"
+    intent = cl.apply_ratio_conditions({**VAGUE_INTENT, "thresholds": LLM_SPLIT}, cl.parse_ratio_conditions(text))
+    assert "threshold_amount" not in cl.find_gaps(intent, text)
+
+
+def test_3_the_amount_answer_updates_only_its_slot() -> None:
+    """Bug 3: the 10,000 JOD answer never reaches a balance or ratio condition."""
+    intent = {**VAGUE_INTENT, "thresholds": [
+        {"field": "deposit_amount", "kind": "ratio", "operator": ">", "value_from": 0.5, "relative_to": "account_balance",
+         "target_scope": "DETAIL"},
+        {"field": "account_balance", "operator": "<", "value_from": 2000, "target_scope": "DETAIL"},
+        {"field": "transaction_amount", "operator": ">=", "value_from": None, "target_scope": "DETAIL"},
+    ]}
+    payload = cl.clarification_payload(intent, ["threshold_amount"], "x")
+    question = next(q for q in payload["questions"] if q["id"] == "threshold_amount")
+    assert question["slot_id"] == "t2"
+
+    updated = cl.apply_answers(payload["partial_intent"], {"threshold_amount": 10000}, questions=payload["questions"])
+    ratio, balance, amount = updated["thresholds"]
+    assert ratio["value_from"] == 0.5 and ratio["relative_to"] == "account_balance"
+    assert balance["value_from"] == 2000
+    assert amount["value_from"] == 10000.0
+
+
+def test_3_the_live_leak_case() -> None:
+    """The live intent had transaction_amount and account_balance thresholds: only the amount takes the answer."""
+    intent = {**VAGUE_INTENT, "thresholds": [dict(t, value_from=None) for t in LLM_SPLIT]}
+    updated = cl.apply_answers(intent, {"threshold_amount": 10000})
+    assert [t["value_from"] for t in updated["thresholds"]] == [10000.0, None]
+
+
+def test_3_no_amount_slot_adds_a_new_condition() -> None:
+    """With only a ratio, the amount answer adds its own condition instead of editing the ratio."""
+    intent = {**VAGUE_INTENT, "aggregation": None, "thresholds": [
+        {"field": "deposit_amount", "kind": "ratio", "operator": ">", "value_from": 0.5, "relative_to": "average_deposit_amount",
+         "target_scope": "DETAIL"}]}
+    updated = cl.apply_answers(intent, {"threshold_amount": 5000})
+    assert updated["thresholds"][0]["value_from"] == 0.5
+    assert updated["thresholds"][1]["field"] == "transaction_amount" and updated["thresholds"][1]["value_from"] == 5000.0
+
+
+def test_4_a_missing_value_is_a_plain_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bug 4: the rule is not sent for SQL generation and no raw expression is shown."""
+    sent: List[Any] = []
+    monkeypatch.setattr(aml_tools, "_request_piotech_sql", lambda intent: sent.append(intent) or {})
+    intent = {"scenario_name": "x", "scenario_type": "CUSTOMER", "detection_logic": "x", "thresholds": LLM_SPLIT}
+
+    result = json.loads(aml_tools.execute_oracle_dwh_shadow_test.invoke({"intent_json": json.dumps(intent)}))
+
+    assert sent == [] and result["validation_success"] is False
+    assert result["user_message"] == ("I can't build this rule yet: the value for the account balance is missing. "
+                                      "Please add it and try again.")
+    assert "None" not in result["user_message"] and "<" not in result["user_message"]
+
+
+@pytest.mark.parametrize("threshold, problem", [
+    ({"field": "", "operator": ">", "value_from": 1}, "one condition does not say what to compare"),
+    ({"field": "transaction_amount", "operator": "~", "value_from": 1}, "the comparison for the transaction amount is not clear"),
+    ({"field": "transaction_amount", "operator": "BETWEEN", "value_from": 1}, "the upper limit for the transaction amount is missing"),
+    ({"field": "deposit_amount", "kind": "ratio", "operator": ">", "value_from": None, "relative_to": "account_balance"},
+     "the percentage for the deposit amount is missing"),
+])
+def test_4_each_kind_of_incomplete_condition(threshold: Dict[str, Any], problem: str) -> None:
+    """Missing field, unknown operator, missing bound, missing percentage: one plain sentence each."""
+    assert any(p.startswith(problem) for p in cl.validate_conditions({"thresholds": [threshold]}))
+
+
+def test_4_raw_expressions_from_the_sql_service_are_removed() -> None:
+    """A refusal text quoting 'account_balance < None' reaches the user without it."""
+    assert cl.plain_text('blocked by "account_balance < None"') == 'blocked by "an incomplete condition"'
+
+
+@pytest.mark.parametrize("text, message", [
+    ("flag a cash deposit greater than 50 % of the account balance", cl.BALANCE_REFUSAL_EN),
+    ("إيداع نقدي أكبر من ٥٠٪ من الرصيد", cl.BALANCE_REFUSAL_AR),
+])
+def test_5_on_openbi2_a_balance_rule_is_refused_with_the_alternative(monkeypatch: pytest.MonkeyPatch, text: str,
+                                                                      message: str) -> None:
+    """No balance history on OPENBI2: plain refusal in the user's language + the average-deposits alternative."""
+    monkeypatch.setattr(aml_tools.settings, "ACTIVE_DATABASE", "OPENBI2")
+    monkeypatch.setattr(aml_tools.settings, "DATA_CAPABILITIES", {"OPENBI2": {"balance_history": False}})
+    _fake_intent_llm(monkeypatch, {**VAGUE_INTENT, "detection_logic": "Cash deposits relative to the balance.",
+                                   "thresholds": LLM_SPLIT}, [])
+    monkeypatch.setattr(aml_tools, "select_relevant_explanation_codes",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("no code search for a refused rule")))
+
+    result = json.loads(aml_tools.analyze_intent_and_discover_explanation_codes.invoke({"user_prompt": text}))
+
+    assert result["status"] == "NOT_SUPPORTED" and result["capability"] == "balance_history"
+    assert result["user_message"] == message and "plan_artifact" not in result
+    alternative = result["alternative"]
+    assert alternative["condition"] == {"type": "ratio", "left": "deposit_amount", "right": "average_deposit_amount",
+                                        "operator": ">", "factor": 0.5, "lookback_days": 90}
+    assert ("50%" in alternative["request"]) and ("90" in alternative["request"])
+
+
+def test_5_the_capability_is_a_configuration_switch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Extension point: with balance_history = true for the bank, the same rule is not refused (no parser change)."""
+    monkeypatch.setattr(aml_tools.settings, "ACTIVE_DATABASE", "BANKX")
+    monkeypatch.setattr(aml_tools.settings, "DATA_CAPABILITIES", {"BANKX": {"balance_history": True}})
+    intent = cl.apply_ratio_conditions({**VAGUE_INTENT, "thresholds": LLM_SPLIT},
+                                       cl.parse_ratio_conditions("deposit greater than 50% of the account balance"))
+    assert cl.balance_capability_refusal(intent, "x") is None
+    monkeypatch.setattr(aml_tools.settings, "DATA_CAPABILITIES", {})
+    assert cl.balance_capability_refusal(intent, "x")["status"] == "NOT_SUPPORTED"  # unknown database: not assumed
+
+
+@pytest.mark.parametrize("text", [
+    "Flag customers whose cash deposits total more than 10,000 JOD within 7 days",
+    "Identify accounts with more than 10 cash deposits and 10 cash withdrawals within 30 days without maintaining a balance",
+])
+def test_6_rules_without_a_balance_comparison_are_unchanged(text: str) -> None:
+    """No ratio, no refusal: these rules go on exactly as before."""
+    intent = {**VAGUE_INTENT, "thresholds": [{"field": "cumulative_transaction_volume", "operator": ">", "value_from": 10000,
+                                              "target_scope": "AGGREGATE"}]}
+    assert cl.parse_ratio_conditions(text) == []
+    assert cl.apply_ratio_conditions(intent, cl.parse_ratio_conditions(text)) is intent
+    assert cl.balance_capability_refusal(intent, text) is None
+    assert cl.validate_conditions(intent) == []
