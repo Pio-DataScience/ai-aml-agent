@@ -60,6 +60,23 @@ Ordered update packages for the IDE agent. Repos: **A** = `ai-aml-agent` (Servic
 | D11 | Time window is mandatory; all-time is rejected; max window 365 days. | demo | `params.yaml` |
 | D12 | Viewers read only their own chats plus any deployed scenario. No cross-user chat reading. | demo | `policy.yaml` `cross_user_chat_read: false` |
 | D13 | Filter dimensions are applied whenever mentioned. A dimension may additionally be `required` (always asked). | demo | `filters.yaml` |
+| PC1 | Card content: missing values first, then assumed defaults below (each editable). One click confirms everything. Confirm enables once all required params are resolved. | confirmed by user | `params.yaml` `card`, P6 |
+| PC2 | Card and plan stay separate: confirm card, plan is generated, user presses **Proceed** (= plan approval). Never merged. | confirmed by user | P5, P6 |
+| PC3 | A pending card stays pending indefinitely (no expiry) and reappears when the chat is reopened or reloaded. | confirmed by user | `pending_card_json`, P5, P6 |
+| PC4 | Revision model: after the first card is confirmed and its first plan generated, any card change triggers a NEW plan. Each revision is a "trio" (card + plan), (SQL shadow test), (governance metadata) under one `revision_id`. The previous undeployed trio moves into a capped history; a deployed trio is never evicted or altered. First demo scope: revision data model + history storage/eviction + auto re-plan. History picker UI later, but model and API are designed for it. | confirmed by user | sections 3.2, 4.1, P3, P6b |
+| PC5 | Non-UI callers (script/direct API) with missing required values are refused with a structured list of missing/unresolved params. Guessed values are never filled in. | confirmed by user | `confirm_params`, P6 |
+| PC6 | Permanent application-level record per card: request/revision id, params asked, recommended values, user choice (`accepted_default` vs `user_input`), user, timestamps. In addition to LangSmith tracing. | confirmed by user | `param_card_audit`, P3, P6 |
+| PC7 | Ambiguity detection is hybrid: the LLM flags unclear values; code validates required params against the catalog and blocks handoff if any are unresolved. | confirmed by user | P6 |
+| PC8 | History cap default 5 (configurable); one pending card per chat, stale `request_id` rejected; typed input controls with one-click accept-recommended. | demo assumption | `policy.yaml` `revisions`, P6 |
+| RV1 | Terminology: **revision** = a draft trio inside one chat (before deploy); **version** = a deployed scenario in the registry (P9). The P9 action is now called "Create new version". | demo assumption | glossary, P9 |
+| RV2 | Plan (re)generation after a card confirmation is a deterministic server step (existing renderer), not an LLM turn. The chat gets a short action message so the assistant can acknowledge it. | demo assumption | P6, P6b |
+| RV3 | Approvals (Proceed, result approval) never carry across revisions; each revision is approved by its own explicit actions. | demo assumption | P3, P6b |
+| RV4 | Eviction keeps a tombstone row (ids, hashes, timestamps) and nulls the heavy payloads. Card audit rows are never evicted. | demo assumption | `scenario_revision.evicted_at` |
+| RV5 | While a card is pending, Proceed, shadow test, result approval and deploy on the current revision are refused (`CARD_PENDING`) until the card is confirmed or discarded (`discard_card`). | demo assumption | guards |
+| RV6 | "Pair a historical trio with the chat" (later phase) = copy-forward into a new current revision (`restored_from_revision_id`); the displaced current revision goes to history; approvals are cleared and the conflict check re-runs. The LangGraph checkpoint is never rewound. | demo assumption | `docs/revisions_api.md` |
+| RV7 | Governance metadata edits stay in place on the current revision (no new revision). On a new revision, metadata is re-seeded and the fields the user edited are carried over and re-validated. | demo assumption | P6b |
+
+Status legend: **decided / confirmed by user** = settled; **demo / demo assumption** = default chosen to get started, tracked in section 8 until the owners confirm.
 
 ---
 
@@ -81,7 +98,11 @@ services/aml_builder/
   api/          routes, SSE mapper, tool-result codec, action endpoints, auth deps
 ```
 
-### 3.2 Workflow stages
+### 3.2 Workflow stages and revisions
+
+**Glossary.** A *revision* is a draft trio inside one chat: (card + plan), (SQL shadow test), (governance metadata), all tied to one `revision_id` and a running `rev_no`. A *version* is a deployed scenario in the registry (P9). One revision per chat is `current`.
+
+Stages are tracked **per revision**:
 
 ```
 EMPTY -> INTAKE -> PARAMS_PENDING -> PARAMS_CONFIRMED -> CONFLICT_CHECKED
@@ -89,20 +110,29 @@ EMPTY -> INTAKE -> PARAMS_PENDING -> PARAMS_CONFIRMED -> CONFLICT_CHECKED
       -> METADATA_READY -> DEPLOYED (locked)
 ```
 
-- Any edit to params or filters regresses the stage to `PARAMS_PENDING` and clears: conflict result, plan hash/approval, SQL, shadow result, result approval.
-- Editing governance metadata only clears `METADATA_READY` and anything after it.
-- `DEPLOYED` is terminal for the chat. Changes happen via "Revise as new version" in a **new chat** (P9).
-- A failed shadow test returns to `PLAN_APPROVED`. A failed deploy stays in `METADATA_READY`.
+`PARAMS_CONFIRMED -> CONFLICT_CHECKED -> PLAN_PENDING` is one server step: confirming the card runs the conflict check and renders the plan automatically (RV2). It pauses only if a conflict blocks or needs acknowledgement. "Proceed" is the `approve_plan` action.
+
+**Revision rules**
+- The first confirmed card creates revision 1 (current).
+- **Before the first plan exists**, a card change just replaces the card of revision 1.
+- **After the first plan exists**, any confirmed card change creates revision N+1: a copy of the current revision with the new card, a new plan generated automatically, and empty shadow result and approvals. Revision N moves to `history`. Nothing in it is cleared (its shadow result and metadata stay with it).
+- Governance-metadata-only edits happen in place on the current revision, clear `METADATA_READY` and later, and create no new revision (RV7).
+- **History cap** (`policy.yaml: revisions.history_cap`, default 5): history counts undeployed, non-current revisions. When a new revision pushes history over the cap, the oldest is evicted: its payloads are nulled and a tombstone row stays (`evicted_at`). A deployed revision is never evicted or altered. Card audit rows are never evicted.
+- **Pending card:** at most one per chat, stored in `pending_card_json` with a `request_id`. While it exists, `approve_plan`, shadow test, `approve_result` and `deploy` are refused with `CARD_PENDING` until the card is confirmed or discarded.
+- A failed shadow test returns the revision to `PLAN_APPROVED`. A failed deploy stays in `METADATA_READY`.
+- `DEPLOYED` is terminal for the chat: the chat is locked, `deployed_revision_id` is recorded, history stays readable and cannot be restored or edited. Changes happen through "Create new version" in a **new chat** (P9).
+- **Restore from history (later phase, reserved):** copy-forward into a new current revision (RV6). No LangGraph checkpoint rewind: the workflow store is the source of truth, and the checkpoint holds only the conversation narrative.
 
 ### 3.3 Tool and action gating
 
 | Tool / action | Allowed stages | Notes |
 |---|---|---|
-| `analyze_intent_and_discover_explanation_codes` | EMPTY .. PARAMS_PENDING | Regresses stage if called after confirmation. Denied if locked. |
-| `confirm_params` (action) | PARAMS_PENDING | Needs all required params. Runs conflict check. Blocking relation stops it. |
+| `analyze_intent_and_discover_explanation_codes` | any stage before DEPLOYED | Produces a pending card (replaces an older pending card). Never changes the current revision by itself. Denied if locked. |
+| `confirm_params` (action) | a pending card exists | Body: `request_id` + values/choices. Refuses with `CARD_STALE` (old `request_id`) or `PARAMS_INCOMPLETE` (missing/unresolved list). Creates/updates the revision, writes the card audit row, runs the conflict check, renders the plan. |
+| `discard_card` (action) | a pending card exists | Drops the pending card, audit outcome `discarded`. |
 | `acknowledge_conflicts` (action) | PARAMS_CONFIRMED | Needed only for warn-level relations. |
-| `generate_scenario_execution_plan` | CONFLICT_CHECKED, PLAN_PENDING | Sole owner of plan rendering. Writes `plan_hash`. |
-| `approve_plan` (action) | PLAN_PENDING | Must send the expected `plan_hash`. |
+| `generate_scenario_execution_plan` | CONFLICT_CHECKED, PLAN_PENDING | Returns the current revision's plan (renders it if missing). Sole owner of plan rendering. Writes `plan_hash`. |
+| `approve_plan` (action, label **Proceed**) | PLAN_PENDING | Must send `revision_id` and the expected `plan_hash`. |
 | `execute_oracle_dwh_shadow_test` | PLAN_APPROVED | Stores typed `ShadowResult` with `sql_hash`. |
 | `approve_result` (action) | SHADOW_PASSED | Must send expected `sql_hash`. Only if the shadow test passed. |
 | `prepare_scenario_metadata_for_persistence` | RESULT_APPROVED, METADATA_READY | |
@@ -110,16 +140,17 @@ EMPTY -> INTAKE -> PARAMS_PENDING -> PARAMS_CONFIRMED -> CONFLICT_CHECKED
 | `persist_and_validate_scenario_in_dwh` (tool) | same as deploy | Removed from the agent's toolset while `chat_may_deploy: false`. |
 | `query_scenario_registry_analytics` (name as in current code) | any stage, including DEPLOYED | Read-only. |
 
-Guard failures return a typed error (`STAGE_NOT_ALLOWED`, `CHAT_LOCKED_DEPLOYED`, `PARAMS_UNCONFIRMED`, `PLAN_NOT_APPROVED`, `SHADOW_NOT_PASSED`, `HASH_MISMATCH`, `PERMISSION_DENIED`) that the LLM relays in plain language.
+Every action carries the `revision_id` (and `request_id` for cards) it was shown for. Guard failures return a typed error (`STAGE_NOT_ALLOWED`, `CHAT_LOCKED_DEPLOYED`, `PARAMS_UNCONFIRMED`, `PARAMS_INCOMPLETE`, `CARD_STALE`, `CARD_PENDING`, `REVISION_STALE`, `PLAN_NOT_APPROVED`, `SHADOW_NOT_PASSED`, `HASH_MISMATCH`, `PERMISSION_DENIED`) that the LLM relays in plain language.
 
 ### 3.4 Hashes and receipt
 
+- All hashes below are **per revision**.
 - `params_hash`: stable JSON hash of confirmed params + resolved filters.
 - `plan_hash`: hash of the rendered plan text.
 - `sql_hash`: hash of normalized SQL (strip comments, collapse whitespace, case-fold outside string literals).
 - `metadata_hash`: hash of validated governance metadata.
 - `signature_hash`: hash of the canonical scenario signature (section 5, P8). **Excludes** name, IDs, governance metadata.
-- Deployment receipt (JSON stored on the scenario row and in the audit table): thread, scenario ID/key/version, parent, all hashes, who/when for params confirmation, plan approval, result approval and deploy, shadow summary, conflict acknowledgements and overrides.
+- Deployment receipt (JSON stored on the scenario row and in the audit table): thread, **`revision_id`/`rev_no`**, scenario ID/key/version, parent, **card audit request IDs**, all hashes, who/when for params confirmation, plan approval, result approval and deploy, shadow summary, conflict acknowledgements and overrides.
 
 ### 3.5 Tool-result envelope
 
@@ -134,17 +165,37 @@ Guard failures return a typed error (`STAGE_NOT_ALLOWED`, `CHAT_LOCKED_DEPLOYED`
 ```
 scenario_workflow(
   thread_id TEXT PK, project_id, chat_id, user_id,
-  stage TEXT, locked INTEGER, version INTEGER,     -- optimistic lock
+  stage TEXT,                                      -- mirrors the current revision, or DEPLOYED
+  locked INTEGER, version INTEGER,                 -- optimistic lock
   scenario_id TEXT, scenario_key TEXT,             -- allocated at creation
-  parent_scenario_id TEXT, parent_version INTEGER, -- set for revise chats
-  state_json TEXT,                                 -- ScenarioState
+  parent_scenario_id TEXT, parent_version INTEGER, -- set for new-version chats (P9)
+  current_revision_id TEXT, deployed_revision_id TEXT,
+  pending_card_json TEXT,                          -- {request_id, rows, base_revision_id, created_at} or NULL
   created_at, updated_at)
+scenario_revision(                                 -- one row per draft trio; UNIQUE (thread_id, rev_no)
+  revision_id TEXT PK, thread_id, rev_no INTEGER,
+  status TEXT,                                     -- current | history | deployed | evicted
+  stage TEXT,
+  parent_revision_id, restored_from_revision_id,   -- restore reserved (RV6)
+  card_json, params_hash, signature_json, signature_hash, conflict_json,
+  plan_md, plan_hash, plan_approved_at, plan_approved_by,
+  shadow_json, sql_hash, result_approved_at, result_approved_by,
+  metadata_json, metadata_hash,
+  created_at, created_by, superseded_at, superseded_by_revision_id, evicted_at)
+param_card_audit(                                  -- permanent, append-only, never evicted
+  request_id TEXT PK, thread_id, revision_id, user_id, user_role,
+  source TEXT,                                     -- ui | api | system
+  shown_at, resolved_at,
+  outcome TEXT,                                    -- confirmed | auto_confirmed | discarded | superseded | refused
+  rows_json)                                       -- per param: key, ask_status (missing|defaulted|ambiguous|provided),
+                                                   -- recommended_value, choice (accepted_default|user_input|provided|system_default),
+                                                   -- final_value, provenance
 workflow_events(id PK, thread_id, ts, actor, action, from_stage, to_stage, detail_json)
 chat_sessions(project_id, chat_id, user_id, title, pinned, deleted, created_at, updated_at,
               PRIMARY KEY (project_id, chat_id, user_id))
 ```
 
-Checkpointer uses its own new file (`STATE_DIR/checkpoints.sqlite`). Put all behind a `WorkflowRepo` interface so it can move to Oracle later.
+Checkpointer uses its own new file (`STATE_DIR/checkpoints.sqlite`). Put all behind `WorkflowRepo` and `CardAuditRepo` interfaces so they can move to Oracle later (the card audit is meant to be permanent, so decide its production home under C14). The checkpoint holds only the conversation; revision content lives in `scenario_revision`.
 
 ### 4.2 Oracle registry v2 (app-created, so redesign freely)
 
@@ -159,6 +210,7 @@ Checkpointer uses its own new file (`STATE_DIR/checkpoints.sqlite`). Put all beh
 | `STATUS` | VARCHAR2(20) | `ACTIVE`, `SUPERSEDED`, `RETIRED`. |
 | `IS_ACTIVE` | NUMBER(1) | 1 only when `STATUS='ACTIVE'`. |
 | `THREAD_ID` | VARCHAR2(200) | Chat that created this version. |
+| `REVISION_ID`, `REV_NO` | VARCHAR2(64), NUMBER | The draft revision (trio) that was deployed. |
 | `SIGNATURE_HASH`, `PARAMS_HASH`, `PLAN_HASH`, `SQL_HASH`, `METADATA_HASH` | VARCHAR2(64) | |
 | `SIGNATURE_JSON`, `PARAMS_JSON`, `FILTERS_JSON`, `METADATA_JSON`, `RECEIPT_JSON` | CLOB | Structured, comparable content. |
 | `CHANGE_REASON` | VARCHAR2(500) | Required for versions > 1. |
@@ -268,27 +320,30 @@ listed.
 
 ---
 
-### P3. Workflow store, state machine, guards
+### P3. Workflow store, revisions, state machine, guards
 
-**Goal:** server-enforced stages.
+**Goal:** server-enforced stages, with the revision (trio) model and history from the start.
 **Depends on:** P1, P2.
 **Work**
-1. New `app_state.sqlite` and `WorkflowRepo` (section 4.1). Migrate `session_store.py` to the composite key; `chat_sessions` lives here.
-2. `workflow/models.py` (`ScenarioState`: stage, locked, confirmed params, resolved filters, signature, conflict result, hashes, shadow result, approvals, receipt draft), `workflow/machine.py` (transitions + invalidation per 3.2), `workflow/guards.py` (table 3.3).
+1. New `app_state.sqlite` and `WorkflowRepo` + `CardAuditRepo` (section 4.1): `scenario_workflow`, `scenario_revision`, `param_card_audit`, `workflow_events`, `chat_sessions`. Migrate `session_store.py` to the composite key.
+2. `workflow/models.py` (`WorkflowRow`, `Revision`, `PendingCard`), `workflow/machine.py` (per-revision transitions per 3.2), `workflow/revisions.py` (`create_revision`, `supersede_to_history`, `evict_over_cap`, `current()`, `list_history()`), `workflow/guards.py` (table 3.3, including `CARD_PENDING`, `CARD_STALE`, `REVISION_STALE`).
 3. Tools read `thread_id` from `config["configurable"]` and call `guard(...)` first. Allocate `scenario_id/key` at workflow-row creation.
-4. Prompt: `pre_model_hook` (if S1 confirms) injects a short "current stage / allowed next actions" message each turn. Otherwise render it into the system prompt at call time.
-5. `GET /workflow/{project}/{chat}/{user}/state`. Chat route emits `stage_changed` SSE events after each tool round.
-6. Optimistic locking on `version`; concurrent writes return a typed conflict.
+4. Codec: add an optional `revision_id` to the `ToolResult` envelope (backward compatible) so every tool output is tied to its revision.
+5. Prompt: `pre_model_hook` (if S1 confirms) injects a short "current stage / allowed actions / current revision summary" message each turn **and** replaces ToolMessage contents that belong to superseded revisions with a short stub (`[superseded by revision N]`) in the messages sent to the model only; stored checkpoint state is untouched. If S1 says this is not possible, render the current revision into the system prompt and instruct the model that older tool outputs are outdated.
+6. Endpoints: `GET /workflow/{project}/{chat}/{user}/state` (stage, current revision summary, pending card, history summaries without payloads), `GET .../revisions`, `GET .../revisions/{revision_id}`. Chat route emits `stage_changed` (with `revision_id`) after each tool round. Document the reserved `POST .../revisions/{revision_id}/restore` contract in `docs/revisions_api.md` (copy-forward semantics, RV6); do not implement it.
+7. Optimistic locking on `version`; concurrent writes return a typed conflict. Every action endpoint rejects a stale `revision_id`.
 
-**Acceptance:** transition table tests (every allowed/denied pair); invalidation tests; guard tests per tool; concurrent write test; `stage_changed` emitted in an SSE mapper test.
+**Acceptance:** transition table tests per revision; revision creation/copy rules; eviction tests (cap 5: the 6th undeployed history revision evicts the oldest, a tombstone remains, payload nulled, a deployed revision is never evicted even beyond the cap, audit rows untouched; cap configurable); superseded-stub tests; stale `revision_id`/`request_id` tests; guard tests per tool; concurrent write test; `stage_changed` in an SSE mapper test.
 
 **IDE prompt**
 ```
 [global rules]
-Implement P3. State lives in its own sqlite behind WorkflowRepo. Guards return typed
-errors from section 3.3 inside the ToolResult envelope. Use docs/spikes.md S1 to
-choose pre_model_hook vs prompt rendering. Write the transition and guard tests
-first.
+Implement P3. State lives in its own sqlite behind WorkflowRepo/CardAuditRepo,
+including the revision (trio) tables and history/eviction in section 3.2 and 4.1.
+Guards return typed errors from section 3.3 inside the ToolResult envelope. Use
+docs/spikes.md S1 to choose pre_model_hook vs prompt rendering for the current-revision
+context and superseded stubs. Do NOT implement the restore endpoint; only document its
+contract. Write the transition, revision and eviction tests first.
 ```
 
 ---
@@ -300,9 +355,9 @@ first.
 **Work**
 1. `ensure_schema()` creates the tables in 4.2 (create-if-missing, versioned by `PIO_AML_SCHEMA_VERSION`). No destructive DDL inside the app.
 2. `adapters/oracle_repo.py`: `insert_version`, `supersede`, `get_active_by_key`, `list_active_signatures`, `set_status`, `append_audit`. Single transaction for create/revise: insert new row (+ metadata row), mark parent `SUPERSEDED` (`IS_ACTIVE=0`), append audit.
-3. `domain/deploy_service.py`: `deploy(state, actor)` checks stage `METADATA_READY`, shadow passed for the same `sql_hash`, plan approved for the same `plan_hash`, metadata valid, permission `scenario.create` (or `scenario.revise` for revise chats), parent still the latest (`REVISE_STALE` otherwise), conflict acknowledgements recorded (P8). It uses the pre-allocated `scenario_id`; a repeat call returns the existing deployment (idempotent).
+3. `domain/deploy_service.py`: `deploy(workflow, revision_id, actor)` requires that `revision_id` is the current revision (`REVISION_STALE` otherwise), no pending card (`CARD_PENDING`), and approvals belonging to that revision; it checks stage `METADATA_READY`, shadow passed for the same `sql_hash`, plan approved for the same `plan_hash`, metadata valid, permission `scenario.create` (or `scenario.revise` for revise chats), parent still the latest (`REVISE_STALE` otherwise), conflict acknowledgements recorded (P8). It uses the pre-allocated `scenario_id`; a repeat call returns the existing deployment (idempotent).
 4. Both the `/scenario/deploy` route and the persist tool call `DeployService`. `deploy.py` no longer scans checkpoints.
-5. Return value includes the receipt. Set workflow `locked=1`, stage `DEPLOYED`.
+5. Return value includes the receipt (with `revision_id`, `rev_no` and the card audit request IDs). Set workflow `locked=1`, stage `DEPLOYED`, `deployed_revision_id`, and mark that revision `deployed`. Write `REVISION_ID`/`REV_NO` on the registry row.
 6. `CREATED_BY` receives the authenticated user ID as text. The metadata table's numeric `CREATED_BY` receives the numeric user ID if parseable, else a configured default (document this).
 
 **Acceptance (fake repo):** rejects failed shadow, `sql_hash` mismatch, unapproved plan, wrong stage, locked chat, missing permission; retry returns same ID; superseding is atomic; audit rows written; unique-index violation maps to a typed `DUPLICATE_ACTIVE_SIGNATURE` error. Owner runs one DDL smoke test against dev Oracle.
@@ -325,13 +380,15 @@ alert engine reads unchanged in name and type.
 **Work**
 1. A: endpoints `approve_plan` and `approve_result` (body carries expected hash; reject on mismatch), `deploy` (existing route, now via `DeployService`).
 2. UI hook handles `stage_changed`; a `WorkflowContext` fetches state on mount and after each event. Deploy success, approvals and lock come from this context, not component state, so tab changes and panel close no longer reset them.
-3. Buttons: **Approve plan** (Plan tab), **Approve result** (Shadow tab, disabled unless shadow passed), **Deploy** (enabled only when state says `can_deploy`).
+3. Buttons: **Proceed** (Plan tab; this is plan approval, label from `ui_copy.yaml`), **Approve result** (Shadow tab, disabled unless shadow passed), **Deploy** (enabled only when state says `can_deploy`).
 4. Chat deployment (if enabled) must not clear the shadow view; keep artifacts keyed by stage.
 5. When an action succeeds the UI sends a short deterministic "action message" through the chat endpoint (e.g. `[ACTION] plan_approved`) so the LLM continues. The route passes it as a normal user message flagged in metadata.
-6. Lock UX (copy from `ui_copy.yaml`): tip popup when `DEPLOYED`, composer placeholder changes, **New chat** button. Show a disabled "Revise as new version" until P9.
+6. Lock UX (copy from `ui_copy.yaml`): tip popup when `DEPLOYED`, composer placeholder changes, **New chat** button. Show a disabled "Create new version" until P9.
 7. `chat_may_deploy: false` removes the persist tool from the graph.
+8. **Artifacts come from the current revision** (`GET state`), not from checkpoint messages: Plan, Shadow and Governance tabs show the current revision; the history endpoint stops rebuilding artifacts from old ToolMessages (it keeps the chat text). Show a "Revision N" badge.
+9. A pending card is restored from state on mount/reload (no expiry). Actions send `revision_id`/`request_id`; a stale response (409) refreshes state and shows the stale notice from `ui_copy.yaml`.
 
-**Acceptance:** UI lint/build; component tests if a test runner exists (none today, so list manual test steps in the PR); A endpoint tests for hash mismatch and permission denial.
+**Acceptance:** UI lint/build; component tests if a test runner exists (none today, so list manual test steps in the PR, including: reload with a pending card, edit after plan, stale tab); A endpoint tests for hash mismatch, stale revision and permission denial.
 
 **IDE prompt**
 ```
@@ -345,25 +402,56 @@ Add manual test steps to the PR description (no UI test runner exists today).
 
 ### P6. Param catalog, gap detection, confirmation card
 
-**Goal:** compliance officer confirms or edits required parameters before any planning.
+**Goal:** a compliance officer confirms or edits the parameters in one click before any planning; the card survives reloads and is audited.
 **Depends on:** P3, P5.
 **Work**
-1. `params.yaml` loader (draft in section 6). Each param: key, label, required, input type, options, default, validation, `required_if`, prompt text, `status`.
+1. `params.yaml` loader (draft in section 6). Each param: key, label, required, input type, options, default, validation, `required_if`, prompt text, `status`. Plus the `card` and `ambiguity` settings.
 2. `domain/param_gaps.py`: from the normalized `AMLIntent` produce rows with status `provided | defaulted | inferred | missing | ambiguous`, recommended value, input type and prompt. Time window rule: missing or all-time is `missing` and cannot be defaulted.
-3. `analyze_intent` sets `ready_for_handoff` from the gaps (not from the LLM) and emits `parameter_card` SSE (rows, `can_confirm`).
-4. `confirm_params` endpoint: validates all required rows are filled, stores confirmed params and `params_hash`, advances stage. Config `skip_card_when_complete` (default true): when nothing is missing or ambiguous the server auto-confirms with `actor=system` and shows an info notice.
-5. UI card component: provided/defaulted/missing rows, accept-default or type-own-value (ghost-text example), Confirm enabled when all required are filled. Editing after confirmation regresses stage (3.2).
-6. Keep pre-plan confirmation separate from plan approval: the card never shows plan text; plan approval never edits params.
+3. **Hybrid ambiguity (PC7).** The LLM may flag unclear values (reuse the existing `Clarification` model) and can only **add** rows or mark them ambiguous. Code validates required params against the catalog and computes `ready_for_handoff`; the LLM can never clear a code-detected gap. A required param that is missing or ambiguous blocks; an ambiguous optional param is shown but does not block (`ambiguity.block_on_optional: false`).
+4. **Pending card.** `analyze_intent` stores `pending_card_json` (`request_id`, rows, base revision) and emits the `parameter_card` SSE event. One pending card per chat: a new analysis replaces the old one, whose `request_id` becomes stale (audit outcome `superseded`). The card stays pending with no expiry (PC3).
+5. **`confirm_params` action** (body: `request_id`, per-row `value` + `choice`, or `accept_defaults`): 409 `CARD_STALE` on an old `request_id`; 422 `PARAMS_INCOMPLETE` with `missing[]`, `unresolved[]` and the `request_id` when required values are absent (PC5). Script/API callers must send explicit values or explicitly list the defaults they accept; nothing is ever guessed. On success it writes the audit row, stores params, creates/updates the revision (P6b rules), runs the conflict check (when P8 exists) and renders the plan automatically.
+6. `skip_card_when_complete` (default true): when nothing is missing or ambiguous the server auto-confirms with `source=system`, writes an audit row with outcome `auto_confirmed`, and shows an info notice.
+7. **`discard_card` action:** drops the pending card (audit outcome `discarded`).
+8. **UI card (PC1):** section "Needs your input" first (missing/ambiguous), then "Assumed defaults", each row editable with the typed control and ghost-text recommended value; one **Confirm** button, enabled once all required rows are resolved, that confirms everything at once. Defaults the officer leaves untouched are recorded as `accepted_default`, typed values as `user_input`. The pending card is restored from state on reload.
+9. **Audit (PC6):** every card writes one `param_card_audit` row (request, revision, params asked, recommended values, choices, user, role, source, timestamps, outcome) through `CardAuditRepo`. LangSmith tracing is unchanged and additional.
+10. Keep card and plan separate (PC2): the card never shows plan text; **Proceed** (plan approval) never edits params.
 
-**Acceptance:** table tests for gap detection (short request "customers with high-value transactions" yields customer OK, "high-value" ambiguous, window missing); catalog validation tests; `confirm_params` rejects incomplete input; auto-confirm behavior test.
+**Acceptance:** table tests for gap detection (short request "customers with high-value transactions" yields customer OK, "high-value" ambiguous, window missing); LLM says "all clear" while the window is missing, still blocked; LLM-flagged ambiguity on an optional param is shown but not blocking; catalog validation tests; `confirm_params` refusal tests for API callers (422 with lists, nothing guessed, audit outcome `refused`); stale `request_id` rejected; one pending card per chat; audit row content per choice type; auto-confirm audit; pending card returned by `GET state` after a simulated reload.
 
 **IDE prompt**
 ```
 [global rules]
-Implement P6 using the params.yaml draft in section 6. Required/optional/default
-logic must come only from the catalog, never from the LLM. Include the table tests
-for param_gaps before the UI work. Reuse the existing Clarification and
-applied_defaults fields instead of adding parallel structures.
+Implement P6 using the params.yaml draft in section 6 and decisions PC1-PC8 in
+section 2. Required/optional/default logic comes only from the catalog; the LLM may
+flag ambiguity but can never clear a code-detected gap. Write the param_gaps,
+refusal and audit tests before the UI work. Reuse the existing Clarification and
+applied_defaults fields instead of adding parallel structures. Never fill in a value
+for a script/API caller.
+```
+
+---
+
+### P6b. Revision flow and history (first demo scope)
+
+**Goal:** card changes after the first plan create a new revision with an automatically regenerated plan; older undeployed trios are kept in a capped history. The history picker UI is NOT built now.
+**Depends on:** P3, P4, P6.
+**Work**
+1. **Creation rules** exactly as section 3.2: first confirm creates revision 1; a card change before the first plan replaces the card; after the first plan a confirmed card change creates revision N+1 (copy of the current one with the new card), and revision N goes to history with its shadow result and metadata intact.
+2. **Auto re-plan (RV2):** the plan is rendered by the deterministic renderer inside `confirm_params`, stored on the new revision with a new `plan_hash`, and returned in the response with `stage_changed` (`revision_id`). The chat receives a short action message (`[ACTION] card_confirmed revision N`) so the assistant can acknowledge it; the LLM does not produce the plan.
+3. **Supersession:** the new revision starts with no shadow result and no approvals (RV3). Governance metadata is re-seeded; fields the user edited are carried over and re-validated (RV7). Metadata edits alone never create a revision.
+4. **History:** cap from `policy.yaml revisions.history_cap` (default 5), eviction with tombstones (RV4) at revision creation; a deployed revision is never evicted or altered.
+5. **Interactions:** one scenario per chat still holds, because only one revision can be deployed and deploying locks the chat; a pending card blocks approvals and deploy (RV5); the conflict check (P8) re-runs for every new revision and again at deploy; the registry row stores the deployed `REVISION_ID`.
+6. **API for later:** list and read endpoints exist (P3); the restore contract is documented in `docs/revisions_api.md` and not implemented. The only UI added now is the "Revision N" badge from P5.
+
+**Acceptance:** a card change after the first plan creates revision 2 with a new plan and no carried approvals; revision 1 keeps its shadow result and metadata in history; a card change before any plan leaves a single revision; six revisions with cap 5 evict the oldest with a tombstone while a deployed revision survives beyond the cap; stale `revision_id` rejected on approve/deploy; metadata carry-over test; pending card blocks Proceed; no LLM call is made during re-plan (assert with a fake LLM that fails if invoked).
+
+**IDE prompt**
+```
+[global rules]
+Implement P6b per sections 3.2 and 4.1 and decisions PC4, RV1-RV7. Re-plan is
+deterministic server code, not an LLM turn (the fake LLM in tests must fail if called).
+Do not build the history picker UI or the restore endpoint. Eviction keeps tombstones
+and never touches deployed revisions or card audit rows.
 ```
 
 ---
@@ -417,9 +505,10 @@ for B dropping a filter: write its tests first.
 3. Fallback `SIMILAR` from the existing semantic search (embedding score above `similar_min_score`, demo 0.85) for rows without a usable signature. Rows from the new schema always have a signature.
 4. Similarity "%": weighted share of matching dimensions (core dimensions weighted higher; weights in `policy.yaml`), displayed with the diff, never raw cosine.
 5. `conflict_check` service: fetch active signatures, filter by scenario type and grain, compare, return top N (demo 5) sorted by relation severity then score. Run: (a) early non-blocking hint inside the intent tool output when the comparable core is resolved; (b) authoritative at `confirm_params`; (c) again at deploy (registry may have changed).
-6. Policy actions per relation (section 6): `IDENTICAL` and same-chat redeploy **block**; `COVERED`, `COVERS`, `OVERLAP` require acknowledgement; `RELATED`, `SIMILAR` inform only.
-7. SSE `conflict_report` and a UI panel: each match with relation, diff table, and actions **View scenario**, **Change params**, **Proceed anyway** (warn-level only), **Cancel**. Acknowledgements stored in state and the receipt, and written to audit as `OVERRIDE_CONFLICT`.
-8. LLM role: none in deciding relations. It may phrase an explanation from the computed diff.
+6. The conflict result is stored on the revision (`conflict_json`) and re-run for every new revision and at deploy.
+7. Policy actions per relation (section 6): `IDENTICAL` and same-chat redeploy **block**; `COVERED`, `COVERS`, `OVERLAP` require acknowledgement; `RELATED`, `SIMILAR` inform only.
+8. SSE `conflict_report` and a UI panel: each match with relation, diff table, and actions **View scenario**, **Change params**, **Proceed anyway** (warn-level only), **Cancel**. Acknowledgements stored in state and the receipt, and written to audit as `OVERRIDE_CONFLICT`.
+9. LLM role: none in deciding relations. It may phrase an explanation from the computed diff.
 
 **Acceptance:** table tests for the comparator, including: (a) >5K monthly vs >10K monthly gives `COVERED`/`COVERS` both directions; (b) identical signature with different names gives `IDENTICAL`; (c) same core, different filter sets partly overlapping gives `OVERLAP`; (d) rolling vs calendar window gives `RELATED`; (e) relative baseline thresholds gives `RELATED`. Unique-index test via the fake repo. Re-check at deploy rejects when a new identical active scenario appeared meanwhile.
 
@@ -433,13 +522,13 @@ Weights, thresholds and relation->action mapping come from policy.yaml.
 
 ---
 
-### P9. Versioning flows: revise, rollback, retire
+### P9. Versioning flows: new version, rollback, retire
 
 **Goal:** professional change management with permissions and audit.
 **Depends on:** P4, P5, P8, P2.
 **Work**
-1. **Revise as new version** (`scenario.revise`): action on a deployed scenario creates a new chat seeded with the stored intent/params/filters/metadata, with `parent_scenario_id` and `parent_version` set. The chat starts at `PARAMS_PENDING`. A change reason is required at deploy. Deploy supersedes the parent atomically; a stale parent returns `REVISE_STALE`.
-2. Identical-to-parent revisions are blocked by the signature rule (no-op).
+1. **Create new version** (`scenario.revise`; draft "revisions" inside a chat are a different thing, see 3.2): action on a deployed scenario creates a new chat seeded with the stored intent/params/filters/metadata, with `parent_scenario_id` and `parent_version` set. The chat starts at `PARAMS_PENDING`. A change reason is required at deploy. Deploy supersedes the parent atomically; a stale parent returns `REVISE_STALE`.
+2. Identical-to-parent new versions are blocked by the signature rule (no-op).
 3. **Rollback** (`scenario.rollback`): reactivate a `SUPERSEDED` version and supersede the current active one, in one transaction with audit. Requires a reason.
 4. **Retire/delete** (`scenario.delete`): soft delete to `RETIRED` (`IS_ACTIVE=0`), reason required, audit row. No hard deletes.
 5. UI: scenario actions menu (permission-aware), reason dialog, version history list with status and who/when from audit.
@@ -462,7 +551,7 @@ deletes anywhere.
 **Goal:** measured improvements after correctness is in place.
 **Depends on:** P1..P9.
 **Work**
-1. Context: keep only the latest artifact per type in agent context; summarize or drop older ToolMessage payloads (via the pre-model hook).
+1. Context: keep only the latest artifact per type in agent context; summarize or drop older ToolMessage payloads (via the pre-model hook), extending the superseded-revision stubs from P3.
 2. Async adapters: `httpx.AsyncClient` for B; Oracle through `oracledb` async pools or a bounded thread pool; sidebar/workflow writes off the event loop. Make the alert engine routes run in a worker.
 3. Per-type code retrieval/rerank concurrently with a semaphore; vector cache with an invalidation key (catalog row count + max update time).
 4. Stage metrics: latency per tool, token counts if available, error codes; a correlation ID (`thread_id` + request ID) passed to B in `metadata.chat_id` and logged. Verify LangSmith settings or remove them.
@@ -521,6 +610,14 @@ dimension_weights:           # for the displayed "% match"
   transaction_scope: 2
   filters: 1
 reason_required_for: [revise, rollback, retire]
+revisions:
+  history_cap: 5               # undeployed history trios kept per chat (demo)
+  evict: oldest_undeployed     # tombstone kept, payloads nulled
+  carry_over_user_edited_metadata: true
+  restore_from_history: reserved   # API contract documented, not implemented
+card_audit:
+  store: sqlite                # sqlite | oracle (see C14)
+  retention: permanent
 ```
 
 ### `params.yaml`
@@ -529,6 +626,15 @@ reason_required_for: [revise, rollback, retire]
 version: 1
 status: demo
 skip_card_when_complete: true
+card:
+  order: [needs_input, assumed_defaults]
+  one_click_confirm: true
+  pending_expiry: null         # never expires
+  one_pending_per_chat: true
+ambiguity:
+  llm_may_flag: true
+  block_on_required: true
+  block_on_optional: false
 params:
   scenario_type:   {required: true,  input: enum,   options: [TRANSACTION, ACCOUNT, CUSTOMER], default: null}
   grain:           {required: true,  input: enum,   options: [customer, account, transaction],  default: null}
@@ -590,6 +696,11 @@ locked_chat_tip: "This chat is now the record for scenario {scenario_id} (v{vers
 locked_composer_placeholder: "This scenario is deployed. Ask a question or start a new chat."
 conflict_block: "An active scenario with the same detection logic already exists ({scenario_id})."
 conflict_warn: "{n} similar scenario(s) found. Review before continuing."
+card_pending_notice: "Confirm or discard the parameters card before continuing."
+card_stale_notice: "This card was replaced by a newer one. Showing the latest."
+revision_badge: "Revision {rev_no}"
+proceed_button: "Proceed"
+params_incomplete: "These values are still needed: {missing}."
 ```
 
 ---
@@ -622,15 +733,20 @@ Until then, Service A's filter instructions plus its own recheck (P7.7) are the 
 | C8 | `CREATED_BY` mapping (text vs numeric user IDs) for the metadata table | Owner | Text on production table; numeric if parseable on metadata table |
 | C9 | Retention for `SUPERSEDED` versions and audit rows | Compliance | Keep indefinitely |
 | C10 | Production topology: number of Service A workers and where state sqlite lives | Ops | Single worker, local files |
+| C11 | History cap size per chat | Product/compliance | 5 |
+| C12 | When a card changes, should user-edited governance metadata carry over to the new revision? | Product | Yes, re-validated |
+| C13 | Restoring an older trio (later phase): are approvals reset and shadow re-run? | Compliance | Approvals reset, conflict check re-run, shadow shown as "previous run" and re-run required |
+| C14 | Where should the permanent card audit live in production (sqlite vs Oracle) and for how long? | Compliance/DBA | sqlite for the demo, permanent retention |
+| C15 | While a card is pending, should Proceed/deploy of the current revision be blocked? | Product | Blocked until confirmed or discarded |
 
 ---
 
 ## 9. Dependency order
 
 ```
-P0 -> P1 -> P2 -> P3 -> P4 -> P5 -> P6 -> P7 -> P8 -> P9 -> P10
+P0 -> P1 -> P2 -> P3 -> P4 -> P5 -> P6 -> P6b -> P7 -> P8 -> P9 -> P10
         \------------^
-(P2 depends on P0 only; P3 on P1+P2; P8 on P6+P7; P9 on P4+P5+P8+P2)
+(P2 depends on P0 only; P3 on P1+P2; P6b on P3+P4+P6; P8 on P6+P7; P9 on P4+P5+P8+P2)
 ```
 
-Smallest useful release after P5: locked chats, idempotent versioned deploy with receipt, server-driven approvals, roles. P6-P8 deliver the advisor features; P9 completes change management.
+Smallest useful release after P5: locked chats, idempotent versioned deploy with receipt, server-driven approvals, roles. P6 and P6b deliver the card and revision flow; P7-P8 deliver the advisor features; P9 completes change management.
