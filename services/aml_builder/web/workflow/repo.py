@@ -191,7 +191,7 @@ class WorkflowRepo:
             if row is None:
                 now = _now()
                 scenario_key = f"PRD_{uuid.uuid4().hex[:8].upper()}"
-                scenario_id = scenario_key
+                scenario_id = f"{scenario_key}_V1"
                 connection.execute(
                     """INSERT INTO scenario_workflow
                     (thread_id, project_id, chat_id, user_id, stage, locked, version,

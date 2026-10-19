@@ -15,8 +15,10 @@ Ordered update packages for the IDE agent. Repos: **A** = `ai-aml-agent` (Servic
 ```
 - Work only in the repos named in the package. NEVER modify PioTech-AI (Service B).
 - Do not call live LLM, Oracle, or Service B in tests. Use fakes/fixtures.
-- NEVER drop, delete, truncate or update any database rows or tables, and never
-  write code that does so automatically. Inspect read-only (SELECT only). Where
+- NEVER drop, delete or truncate any database rows or tables. P4 may update only
+  the exact parent version's status/IS_ACTIVE and its matching PIO_AML_AGENT_SCENARIOS
+  ACTIVE_FLAG in the same transaction as the child insert and audit row. Never
+  write other automatic row updates. Inspect read-only (SELECT only). Where
   data must be checked, archived or removed, WRITE the SQL as text files for the
   owner to review and run in TOAD. Local file moves (sqlite state) are also
   owner-run, and nothing is ever deleted from disk.
@@ -199,7 +201,7 @@ Checkpointer uses its own new file (`STATE_DIR/checkpoints.sqlite`). Put all beh
 
 ### 4.2 Oracle registry v2 (app-created, so redesign freely)
 
-`PIO_AML_PRODUCTION_SCENARIOS` (recreated by `ensure_schema()`; **keep** the columns the alert engine reads: `SCENARIO_ID, SCENARIO_NAME, SCENARIO_TYPE, RAW_SQL, TIME_WINDOW_DAYS`, and keep `IS_ACTIVE` in sync with `STATUS`):
+`PIO_AML_AGENT_PRODUCTION_SCENARIOS` (created if missing by `ensure_schema()`; existing objects are never altered; **keep** the columns the alert engine reads: `SCENARIO_ID, SCENARIO_NAME, SCENARIO_TYPE, RAW_SQL, TIME_WINDOW_DAYS`, and keep `IS_ACTIVE` in sync with `STATUS`):
 
 | Column | Type | Purpose |
 |---|---|---|
@@ -223,11 +225,11 @@ Constraints and indexes:
 - Function-based unique index on `CASE WHEN STATUS='ACTIVE' THEN SIGNATURE_HASH END`: identical active scenarios cannot coexist even if the app check is bypassed.
 - Index on `(SCENARIO_KEY, STATUS)`.
 
-`PIO_AML_SCENARIO_AUDIT(AUDIT_ID PK, SCENARIO_ID, SCENARIO_KEY, ACTION, ACTOR, ACTOR_ROLE, TS, FROM_STATUS, TO_STATUS, REASON, DIFF_JSON)`: append-only. Actions: `CREATE`, `REVISE`, `SUPERSEDE`, `ROLLBACK`, `RETIRE`, `OVERRIDE_CONFLICT`.
+`PIO_AML_AGENT_SCENARIO_AUDIT(AUDIT_ID PK, SCENARIO_ID, SCENARIO_KEY, ACTION, ACTOR, ACTOR_ROLE, TS, FROM_STATUS, TO_STATUS, REASON, DIFF_JSON)`: append-only. Actions: `CREATE`, `REVISE`, `SUPERSEDE`, `ROLLBACK`, `RETIRE`, `OVERRIDE_CONFLICT`.
 
-`PIO_AML_SCHEMA_VERSION(COMPONENT, VERSION, APPLIED_AT)`: lets `ensure_schema()` upgrade safely later.
+`PIO_AML_AGENT_SCHEMA_VERSION(COMPONENT, VERSION, APPLIED_AT)`: lets `ensure_schema()` upgrade safely later.
 
-`PIO_AML_SCENARIO` (governance/metadata table): keep its columns; `SCENARIO_CODE` = `SCENARIO_ID`. Metadata rows for superseded versions stay, with `ACTIVE_FLAG` updated in the same transaction as the production row. This is a **large shared table with many rows unrelated to this app**. The app never drops, truncates or bulk-deletes it, and P0's runbook touches only rows whose `SCENARIO_CODE` matches a legacy `PRD_` ID, run by the owner in TOAD.
+`PIO_AML_AGENT_SCENARIOS` (agent-owned governance/metadata table): mirror the minimum compatible metadata columns; `SCENARIO_CODE` = `SCENARIO_ID`. Metadata rows for superseded versions stay, with `ACTIVE_FLAG` updated in the same transaction as the production row. The existing shared `PIO_AML_SCENARIO` and `PIO_AML_PRODUCTION_SCENARIOS` remain untouched; the app never changes them.
 
 ---
 
@@ -353,7 +355,7 @@ contract. Write the transition, revision and eviction tests first.
 **Goal:** idempotent, versioned, auditable deployment.
 **Depends on:** P3.
 **Work**
-1. `ensure_schema()` creates the tables in 4.2 (create-if-missing, versioned by `PIO_AML_SCHEMA_VERSION`). No destructive DDL inside the app.
+1. `ensure_schema()` creates the agent-owned tables in 4.2 (create-if-missing, versioned by `PIO_AML_AGENT_SCHEMA_VERSION`). Existing shared registry tables stay untouched. No destructive DDL inside the app.
 2. `adapters/oracle_repo.py`: `insert_version`, `supersede`, `get_active_by_key`, `list_active_signatures`, `set_status`, `append_audit`. Single transaction for create/revise: insert new row (+ metadata row), mark parent `SUPERSEDED` (`IS_ACTIVE=0`), append audit.
 3. `domain/deploy_service.py`: `deploy(workflow, revision_id, actor)` requires that `revision_id` is the current revision (`REVISION_STALE` otherwise), no pending card (`CARD_PENDING`), and approvals belonging to that revision; it checks stage `METADATA_READY`, shadow passed for the same `sql_hash`, plan approved for the same `plan_hash`, metadata valid, permission `scenario.create` (or `scenario.revise` for revise chats), parent still the latest (`REVISE_STALE` otherwise), conflict acknowledgements recorded (P8). It uses the pre-allocated `scenario_id`; a repeat call returns the existing deployment (idempotent).
 4. Both the `/scenario/deploy` route and the persist tool call `DeployService`. `deploy.py` no longer scans checkpoints.

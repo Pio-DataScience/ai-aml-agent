@@ -2,7 +2,7 @@
 Standalone Daily Alert Execution Engine & Alert Populator.
 
 Phase 3 of the Production Scenario Registry:
-1. Discovers active scenarios in PIO_AML_PRODUCTION_SCENARIOS joined with PIO_AML_SCENARIO.
+1. Discovers active scenarios in PIO_AML_AGENT_PRODUCTION_SCENARIOS joined with PIO_AML_AGENT_SCENARIOS.
 2. Executes their production RAW_SQL queries against BI_DWH.
 3. Automatically classifies output (Transactional Activity vs Profile/Account).
 4. Atomically populates PIO_AML_CUSTOMERS (Header Alerts) and PIO_AML_CUSTOMERS_DET (Evidence Details).
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 def get_active_scenarios(scenario_id: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Retrieve active scenarios from PIO_AML_PRODUCTION_SCENARIOS joined with PIO_AML_SCENARIO.
+    """Retrieve active scenarios from PIO_AML_AGENT_PRODUCTION_SCENARIOS joined with PIO_AML_AGENT_SCENARIOS.
 
     Args:
         scenario_id (Optional[str]): If provided, only fetch this specific scenario.
@@ -47,8 +47,8 @@ def get_active_scenarios(scenario_id: Optional[str] = None) -> List[Dict[str, An
         s.CATEGORY_CODE,
         s.VIOLATION_LEVEL,
         s.ACTIVE_FLAG
-    FROM PIO_AML_PRODUCTION_SCENARIOS p
-    LEFT JOIN PIO_AML_SCENARIO s 
+    FROM PIO_AML_AGENT_PRODUCTION_SCENARIOS p
+    LEFT JOIN PIO_AML_AGENT_SCENARIOS s
         ON p.SCENARIO_ID = s.SCENARIO_CODE
     WHERE p.IS_ACTIVE = 1
     """

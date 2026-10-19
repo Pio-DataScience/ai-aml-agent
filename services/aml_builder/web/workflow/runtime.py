@@ -3,6 +3,7 @@
 from services.aml_builder.web.services.config_loader import load_catalogs
 from services.aml_builder.web.services.settings import settings
 from services.aml_builder.web.workflow.repo import WorkflowRepo
+from services.aml_builder.web.domain.hashing import normalize_sql, stable_hash
 
 
 def get_workflow_repo() -> WorkflowRepo:
@@ -36,18 +37,27 @@ def record_tool_success(
         return revision.revision_id
     stage_by_tool = {
         "generate_scenario_execution_plan": "PLAN_PENDING",
-        "execute_oracle_dwh_shadow_test": (
-            "SHADOW_PASSED" if payload.get("validation_success") else "PLAN_APPROVED"
-        ),
         "prepare_scenario_metadata_for_persistence": "METADATA_READY",
     }
-    if tool_name == "persist_and_validate_scenario_in_dwh" and payload.get(
-        "write_success"
-    ):
+    if tool_name == "execute_oracle_dwh_shadow_test":
         current = repo.current(thread_id)
-        if current:
-            repo.mark_deployed(thread_id, current.revision_id)
+        workflow = repo.get_workflow(thread_id)
+        if current and workflow:
+            shadow = dict(payload)
+            sql = str(shadow.get("raw_sql") or "")
+            sql_hash = stable_hash(normalize_sql(sql)) if sql else None
+            shadow["sql_hash"] = sql_hash
+            repo.update_revision(
+                current.revision_id,
+                expected_version=workflow.version,
+                shadow_json=shadow,
+                sql_hash=sql_hash,
+                stage=("SHADOW_PASSED" if payload.get("validation_success") else "PLAN_APPROVED"),
+            )
             return current.revision_id
+    if tool_name == "persist_and_validate_scenario_in_dwh" and payload.get("write_success"):
+        current = repo.current(thread_id)
+        return current.revision_id if current else None
     stage = stage_by_tool.get(tool_name)
     if stage:
         revision = repo.set_stage(

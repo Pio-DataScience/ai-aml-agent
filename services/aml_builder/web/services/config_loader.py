@@ -77,6 +77,7 @@ class WorkflowPolicy(BaseModel):
     """Workflow enforcement mode used during staged rollout."""
 
     enforcement: Literal["observe", "enforce"] = "observe"
+    conflict_check_required: bool = False
 
 
 class PolicyCatalog(CatalogModel):

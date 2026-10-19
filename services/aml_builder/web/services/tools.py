@@ -10,8 +10,8 @@ passing, and user interaction autonomously; there is no hardcoded routing here.
 Notes:
 - SQL generation is delegated to the external PioTech AI text-to-SQL SSE
   service (see execute_oracle_dwh_shadow_test).
-- Persistence writes atomically to PIO_AML_PRODUCTION_SCENARIOS and
-  PIO_AML_SCENARIO via the production_registry module.
+- Persistence writes atomically to PIO_AML_AGENT_PRODUCTION_SCENARIOS and
+  PIO_AML_AGENT_SCENARIOS via DeployService and OracleRegistryRepo.
 - query_production_scenario_registry answers questions about ALREADY-persisted
   scenarios (inventory, search, detail, alert telemetry) — it is read-only and
   independent of the sequential scenario-creation workflow above.
@@ -21,7 +21,6 @@ import json
 import logging
 import uuid
 import httpx
-from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 from langchain_core.runnables import RunnableConfig
 
@@ -35,9 +34,8 @@ from services.aml_builder.web.services.explanation_code_search import (
     format_explanation_code_checkpoint,
 )
 from services.aml_builder.web.services.oracle import run_shadow_readonly
-from services.aml_builder.web.services.production_registry import (
-    save_production_scenario,
-)
+from services.aml_builder.web.adapters.oracle_repo import OracleRegistryRepo
+from services.aml_builder.web.domain.deploy_service import DeployError, DeployService
 from services.aml_builder.web.services.llm_client import build_llm, safe_parse_json
 from services.aml_builder.web.services.sql_extraction import extract_sql
 from services.aml_builder.web.domain.code_binding import (
@@ -45,10 +43,11 @@ from services.aml_builder.web.domain.code_binding import (
     specific_transaction_types,
 )
 from services.aml_builder.web.domain.intent_normalize import normalize_intent
-from services.aml_builder.web.domain.window import time_window_days
 from services.aml_builder.web.services.plan_renderer import build_plan_markdown
 from services.aml_builder.web.services.prompts.loader import load_prompt
-from services.aml_builder.web.domain.policy import authorize
+from services.aml_builder.web.domain.policy import authorize, get_role
+from services.aml_builder.web.services.config_loader import load_catalogs
+from services.aml_builder.web.workflow.runtime import get_workflow_repo
 from services.aml_builder.web.services.scenario_metadata import (
     seed_scenario_metadata,
     build_metadata_catalog,
@@ -92,7 +91,7 @@ def analyze_intent_and_discover_explanation_codes(
     """Extract scenario intent, conditionally discover codes, and seed governance metadata.
 
     For specific transaction types, code discovery uses vector similarity search against the domain
-    explanation-code catalog (top 70% relative cutoff). It also seeds PIO_AML_SCENARIO metadata
+    explanation-code catalog (top 70% relative cutoff). It also seeds PIO_AML_AGENT_SCENARIOS metadata
     (period, country/institution codes, description, etc.) for later persistence.
 
     ALL/ANY transaction scope does not need explanation-code discovery. Do not search the catalog
@@ -112,7 +111,7 @@ def analyze_intent_and_discover_explanation_codes(
 
     Returns:
         str: JSON object containing 'enriched_intent' dict, 'explanation_code_checkpoint' markdown
-             table, and 'scenario_metadata' dict (PIO_AML_SCENARIO field values seeded so far).
+             table, and 'scenario_metadata' dict (PIO_AML_AGENT_SCENARIOS field values seeded so far).
     """
     denied = _permission_error(config, "scenario.create")
     if denied:
@@ -525,7 +524,7 @@ def execute_oracle_dwh_shadow_test(intent_json: str, config: RunnableConfig = {}
 
 @tool
 def prepare_scenario_metadata_for_persistence(metadata_json: str, config: RunnableConfig = {}) -> str:
-    """Build the live PIO_AML_SCENARIO governance field catalog for the side panel / chat fallback.
+    """Build the live PIO_AML_AGENT_SCENARIOS governance field catalog for the side panel / chat fallback.
 
     Call this ONLY after the user has approved the shadow test results and before calling
     persist_and_validate_scenario_in_dwh. It attaches the currently valid options for every
@@ -555,7 +554,7 @@ def prepare_scenario_metadata_for_persistence(metadata_json: str, config: Runnab
     denied = _permission_error(config, "scenario.create")
     if denied:
         return denied
-    logger.info("[TOOL: METADATA] Building PIO_AML_SCENARIO field catalog...")
+    logger.info("[TOOL: METADATA] Building PIO_AML_AGENT_SCENARIOS field catalog...")
 
     try:
         metadata = json.loads(metadata_json) if metadata_json else {}
@@ -581,39 +580,36 @@ def persist_and_validate_scenario_in_dwh(
     intent_json: str, raw_sql: str, metadata_json: str, config: RunnableConfig = {}
 ) -> str:
     """Persist the confirmed, shadow-tested AML scenario atomically into both
-    PIO_AML_PRODUCTION_SCENARIOS (for the automated daily ETL runner) and
-    PIO_AML_SCENARIO (business metadata for downstream compliance UI/workflow modules).
+    PIO_AML_AGENT_PRODUCTION_SCENARIOS (for the automated daily ETL runner) and
+    PIO_AML_AGENT_SCENARIOS (business metadata for downstream compliance UI/workflow modules).
 
     CRITICAL: ONLY call this tool when the user in a SUBSEQUENT turn explicitly instructs
     you to persist/save the scenario after reviewing the governance metadata in the side panel.
     NEVER call this tool autonomously immediately after prepare_scenario_metadata_for_persistence!
 
-    Performs an idempotent INSERT-or-UPDATE on both tables in a single Oracle transaction:
-    if the scenario_id already exists it updates the record and reactivates it (IS_ACTIVE=1),
-    incrementing PIO_AML_SCENARIO.VERSION_NUM. Only call after shadow test results have been
+    Performs an idempotent versioned insert on both tables in one Oracle transaction.
+    A prior deployment for the same thread is returned unchanged. Only call after shadow test results have been
     reviewed AND prepare_scenario_metadata_for_persistence reports ready_for_persistence=True
     (or the user explicitly confirms proceeding despite missing fields).
 
-    Every mandatory PIO_AML_SCENARIO field is re-validated here against its live lookup table
+    Every mandatory PIO_AML_AGENT_SCENARIOS field is re-validated here against its live lookup table
     or allowed-value set before anything is written — if validation fails, NOTHING is written
     to either table and the problems are returned for you to relay to the user.
 
     Args:
         intent_json (str): Serialized AMLIntent payload dictionary JSON string.
         raw_sql (str): Production-grade Oracle SQL statement from the shadow test.
-        metadata_json (str): Serialized PIO_AML_SCENARIO metadata JSON — the merged output of
+        metadata_json (str): Serialized PIO_AML_AGENT_SCENARIOS metadata JSON — the merged output of
             prepare_scenario_metadata_for_persistence plus any officer picks.
 
     Returns:
-        str: JSON containing 'scenario_id', 'scenario_name', 'write_success',
-             'write_verification', and 'created_at' on success, or 'validation_errors'
-             (list of str) and 'write_success': false if the metadata failed validation.
+        str: JSON containing scenario ID, write status, verification fields, and receipt.
     """
     denied = _permission_error(config, "scenario.create")
     if denied:
         return denied
     logger.info(
-        "[TOOL: PERSISTER] Writing confirmed scenario to PIO_AML_PRODUCTION_SCENARIOS + PIO_AML_SCENARIO..."
+        "[TOOL: PERSISTER] Writing confirmed scenario to PIO_AML_AGENT_PRODUCTION_SCENARIOS + PIO_AML_AGENT_SCENARIOS..."
     )
 
     try:
@@ -632,71 +628,58 @@ def persist_and_validate_scenario_in_dwh(
         logger.error("[TOOL: PERSISTER] Invalid metadata JSON: %s", exc)
         return json.dumps({"error": f"Invalid metadata JSON: {exc}"})
 
-    is_valid, problems = validate_scenario_metadata(metadata_dict)
-    if not is_valid:
-        logger.warning("[TOOL: PERSISTER] Metadata validation failed: %s", problems)
-        return json.dumps(
-            {
-                "write_success": False,
-                "validation_errors": problems,
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-
-    scenario_name: str = intent_dict.get("scenario_name", "AML Detection Scenario")
-    scenario_type: str = intent_dict.get("scenario_type", "CUSTOMER")
-    detection_logic: str = intent_dict.get("detection_logic", scenario_name)
-
-    # Compute time_window_days from the intent time_window block
-    time_window_days_value = time_window_days(intent_dict.get("time_window"))
-
-    # Generate a human-readable unique scenario ID — shared as SCENARIO_CODE on PIO_AML_SCENARIO
-    scenario_id = f"PRD_{uuid.uuid4().hex[:8].upper()}"
-    created_at = datetime.utcnow().isoformat()
-
-    success = save_production_scenario(
-        scenario_id=scenario_id,
-        scenario_name=scenario_name,
-        scenario_type=scenario_type,
-        detection_logic=detection_logic,
-        raw_sql=raw_sql,
-        scenario_metadata=metadata_dict,
-        time_window_days=time_window_days_value,
-        created_by=settings.AML_CREATED_BY,
+    configurable = config.get("configurable", {})
+    thread_id = str(configurable.get("thread_id") or "")
+    actor_id = str(configurable.get("user_id") or "")
+    if not thread_id or not actor_id:
+        return json.dumps({"write_success": False, "error_code": "PERMISSION_DENIED", "error": "Authenticated workflow identity is required."})
+    workflow_repo = get_workflow_repo()
+    workflow = workflow_repo.get_workflow(thread_id)
+    revision = workflow_repo.current(thread_id) if workflow else None
+    if revision is None:
+        return json.dumps({"write_success": False, "error_code": "STAGE_NOT_ALLOWED", "error": "No current workflow revision is available."})
+    policy = load_catalogs(settings.CATALOG_DIR).policy
+    actor_email = str(configurable.get("user_email") or "") or None
+    service = DeployService(
+        oracle_repo=OracleRegistryRepo(),
+        workflow_repo=workflow_repo,
+        metadata_validator=validate_scenario_metadata,
+        authorizer=lambda user_id, action: authorize(user_id, action, user_email=actor_email),
+        enforcement=policy.workflow.enforcement,
+        conflict_check_required=policy.workflow.conflict_check_required,
+        numeric_created_by_default=settings.AML_CREATED_BY,
     )
-
-    if success:
-        logger.info(
-            "[TOOL: PERSISTER] Scenario persisted successfully. SCENARIO_ID=%s, NAME='%s'",
-            scenario_id,
-            scenario_name,
+    try:
+        result = service.deploy(
+            thread_id=thread_id,
+            revision_id=revision.revision_id,
+            actor_id=actor_id,
+            actor_role=get_role(actor_id, actor_email),
+            metadata=metadata_dict,
+            raw_sql=raw_sql,
         )
-    else:
-        logger.error(
-            "[TOOL: PERSISTER] Failed to persist scenario. SCENARIO_ID=%s",
-            scenario_id,
-        )
+    except (DeployError, RuntimeError) as exc:
+        logger.warning("[TOOL: PERSISTER] Deployment refused: %s", exc)
+        return json.dumps({
+            "write_success": False,
+            "error_code": getattr(exc, "code", "DEPLOY_FAILED"),
+            "error": str(exc),
+            "validation_errors": getattr(exc, "details", None),
+        }, ensure_ascii=False)
 
-    return json.dumps(
-        {
-            "scenario_id": scenario_id,
-            "scenario_name": scenario_name,
-            "scenario_type": scenario_type,
-            "time_window_days": time_window_days_value,
-            "raw_sql_preview": raw_sql[:200] if raw_sql else "",
-            "write_success": success,
-            "write_verification": {
-                "production_scenarios_table": "PIO_AML_PRODUCTION_SCENARIOS",
-                "scenario_metadata_table": "PIO_AML_SCENARIO",
-                "rows_written": 2 if success else 0,
-                "is_active": 1,
-            },
-            "created_at": created_at,
+    logger.info("[TOOL: PERSISTER] Scenario persisted. SCENARIO_ID=%s", result.scenario_id)
+    return json.dumps({
+        "scenario_id": result.scenario_id,
+        "scenario_name": result.scenario_name,
+        "write_success": True,
+        "write_verification": {
+            "production_scenarios_table": "PIO_AML_AGENT_PRODUCTION_SCENARIOS",
+            "scenario_metadata_table": "PIO_AML_AGENT_SCENARIOS",
+            "is_active": 1,
         },
-        ensure_ascii=False,
-        indent=2,
-    )
+        "receipt": result.receipt,
+        "idempotent_retry": result.repeated,
+    }, ensure_ascii=False, indent=2)
 
 
 @tool

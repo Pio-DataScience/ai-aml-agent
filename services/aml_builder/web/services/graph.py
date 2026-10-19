@@ -25,6 +25,7 @@ from services.aml_builder.web.services.prompts.loader import load_prompt
 from services.aml_builder.web.domain.policy import authorize
 from services.aml_builder.web.workflow.context import build_model_messages
 from services.aml_builder.web.workflow.runtime import get_workflow_repo
+from services.aml_builder.web.services.config_loader import load_catalogs
 
 logger = logging.getLogger(__name__)
 
@@ -70,10 +71,12 @@ def workflow_pre_model_hook(
     }
     user_id = str(configurable.get("user_id", ""))
     user_email = str(configurable.get("user_email", "")) or None
+    chat_may_deploy = load_catalogs(settings.CATALOG_DIR).policy.chat_may_deploy
     if repo.enforcement == "observe" and not workflow.locked:
         allowed_actions = [
             name
             for name, permission in action_permissions.items()
+            if (name != "persist_and_validate_scenario_in_dwh" or chat_may_deploy)
             if authorize(
                 user_id,
                 permission,
@@ -85,6 +88,7 @@ def workflow_pre_model_hook(
         allowed_actions = [
             name
             for name in actions_by_stage.get(workflow.stage, [])
+            if (name != "persist_and_validate_scenario_in_dwh" or chat_may_deploy)
             if authorize(
                 user_id,
                 action_permissions[name],
@@ -121,9 +125,10 @@ async def get_tool_driven_graph() -> Any:
             generate_scenario_execution_plan,
             execute_oracle_dwh_shadow_test,
             prepare_scenario_metadata_for_persistence,
-            persist_and_validate_scenario_in_dwh,
             query_production_scenario_registry,
         ]
+        if load_catalogs(settings.CATALOG_DIR).policy.chat_may_deploy:
+            tools.append(persist_and_validate_scenario_in_dwh)
 
         llm = build_llm()
 

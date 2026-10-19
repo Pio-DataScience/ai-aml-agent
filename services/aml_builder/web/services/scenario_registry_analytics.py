@@ -4,8 +4,8 @@ Read-only analytics and search over the agent's own scenario registry.
 Answers compliance officer questions about scenarios this agent has
 persisted — inventory counts, governance breakdowns, natural-language
 search, deep-dive detail, and alert telemetry — without ever mutating
-data. Every query is scoped to PIO_AML_PRODUCTION_SCENARIOS (this agent's
-own registry), left-joined to PIO_AML_SCENARIO for governance metadata so
+data. Every query is scoped to PIO_AML_AGENT_PRODUCTION_SCENARIOS (this agent's
+own registry), left-joined to PIO_AML_AGENT_SCENARIOS for governance metadata so
 scenarios created by other systems are never accidentally surfaced.
 
 Semantic search computes embeddings live, per call, against scenario text
@@ -136,8 +136,8 @@ def search_scenarios_semantic(query: str, limit: int = 5) -> Dict[str, Any]:
 
     sql = """
     SELECT P.SCENARIO_ID, P.SCENARIO_NAME, P.DETECTION_LOGIC, P.IS_ACTIVE, S.DEGREE_RISK_FLAG
-    FROM PIO_AML_PRODUCTION_SCENARIOS P
-    LEFT JOIN PIO_AML_SCENARIO S ON P.SCENARIO_ID = S.SCENARIO_CODE
+    FROM PIO_AML_AGENT_PRODUCTION_SCENARIOS P
+    LEFT JOIN PIO_AML_AGENT_SCENARIOS S ON P.SCENARIO_ID = S.SCENARIO_CODE
     """
     try:
         _, rows = run_readonly(sql)
@@ -242,7 +242,7 @@ def get_registry_statistics() -> Dict[str, Any]:
 
     try:
         _, rows = run_readonly(
-            "SELECT IS_ACTIVE, COUNT(*) FROM PIO_AML_PRODUCTION_SCENARIOS GROUP BY IS_ACTIVE"
+            "SELECT IS_ACTIVE, COUNT(*) FROM PIO_AML_AGENT_PRODUCTION_SCENARIOS GROUP BY IS_ACTIVE"
         )
         for is_active, count in rows:
             count = int(count)
@@ -258,8 +258,8 @@ def get_registry_statistics() -> Dict[str, Any]:
         _, rows = run_readonly(
             """
             SELECT S.DEGREE_RISK_FLAG, COUNT(*)
-            FROM PIO_AML_PRODUCTION_SCENARIOS P
-            LEFT JOIN PIO_AML_SCENARIO S ON P.SCENARIO_ID = S.SCENARIO_CODE
+            FROM PIO_AML_AGENT_PRODUCTION_SCENARIOS P
+            LEFT JOIN PIO_AML_AGENT_SCENARIOS S ON P.SCENARIO_ID = S.SCENARIO_CODE
             GROUP BY S.DEGREE_RISK_FLAG
             """
         )
@@ -273,8 +273,8 @@ def get_registry_statistics() -> Dict[str, Any]:
         _, rows = run_readonly(
             """
             SELECT S.CATEGORY_CODE, C.CATEGORY_ENG_NAME, COUNT(*)
-            FROM PIO_AML_PRODUCTION_SCENARIOS P
-            LEFT JOIN PIO_AML_SCENARIO S ON P.SCENARIO_ID = S.SCENARIO_CODE
+            FROM PIO_AML_AGENT_PRODUCTION_SCENARIOS P
+            LEFT JOIN PIO_AML_AGENT_SCENARIOS S ON P.SCENARIO_ID = S.SCENARIO_CODE
             LEFT JOIN PIO_AML_SCENARIO_CATEGORY C ON S.CATEGORY_CODE = C.CATEGORY_CODE
             GROUP BY S.CATEGORY_CODE, C.CATEGORY_ENG_NAME
             """
@@ -294,7 +294,7 @@ def get_registry_statistics() -> Dict[str, Any]:
         _, rows = run_readonly(
             """
             SELECT COUNT(*) FROM PIO_AML_CUSTOMERS
-            WHERE AML_SCENARIO_CODE IN (SELECT SCENARIO_ID FROM PIO_AML_PRODUCTION_SCENARIOS)
+            WHERE AML_SCENARIO_CODE IN (SELECT SCENARIO_ID FROM PIO_AML_AGENT_PRODUCTION_SCENARIOS)
             """
         )
         stats["lifetime_total_alerts"] = int(rows[0][0]) if rows else 0
@@ -396,7 +396,7 @@ def get_alert_telemetry(
             f"""
             SELECT P.SCENARIO_ID, P.SCENARIO_NAME, COUNT(C.SEQ) AS HEADER_COUNT
             FROM PIO_AML_CUSTOMERS C
-            JOIN PIO_AML_PRODUCTION_SCENARIOS P ON C.AML_SCENARIO_CODE = P.SCENARIO_ID
+            JOIN PIO_AML_AGENT_PRODUCTION_SCENARIOS P ON C.AML_SCENARIO_CODE = P.SCENARIO_ID
             {where_clause}
             GROUP BY P.SCENARIO_ID, P.SCENARIO_NAME
             ORDER BY HEADER_COUNT DESC
@@ -452,7 +452,7 @@ def get_alert_telemetry(
                 SELECT C.DAY_DATE, C.AML_SCENARIO_CODE, P.SCENARIO_NAME, C.CUS_NAME,
                        C.RISK_DEGREE, C.CURRENT_STATUS
                 FROM PIO_AML_CUSTOMERS C
-                LEFT JOIN PIO_AML_PRODUCTION_SCENARIOS P ON C.AML_SCENARIO_CODE = P.SCENARIO_ID
+                LEFT JOIN PIO_AML_AGENT_PRODUCTION_SCENARIOS P ON C.AML_SCENARIO_CODE = P.SCENARIO_ID
                 {where_clause}
                 ORDER BY C.DAY_DATE DESC
                 FETCH FIRST :row_limit ROWS ONLY
@@ -499,8 +499,8 @@ def get_scenario_full_details(scenario_id: str) -> Optional[Dict[str, Any]]:
         P.SCENARIO_ID, P.SCENARIO_NAME, P.SCENARIO_TYPE, P.DETECTION_LOGIC, P.RAW_SQL,
         P.TIME_WINDOW_DAYS, P.CREATED_BY, P.CREATED_AT, P.IS_ACTIVE,
         S.DEGREE_RISK_FLAG, S.CATEGORY_CODE, C.CATEGORY_ENG_NAME, S.VIOLATION_LEVEL
-    FROM PIO_AML_PRODUCTION_SCENARIOS P
-    LEFT JOIN PIO_AML_SCENARIO S ON P.SCENARIO_ID = S.SCENARIO_CODE
+    FROM PIO_AML_AGENT_PRODUCTION_SCENARIOS P
+    LEFT JOIN PIO_AML_AGENT_SCENARIOS S ON P.SCENARIO_ID = S.SCENARIO_CODE
     LEFT JOIN PIO_AML_SCENARIO_CATEGORY C ON S.CATEGORY_CODE = C.CATEGORY_CODE
     WHERE P.SCENARIO_ID = :scenario_id
     """

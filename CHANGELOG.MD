@@ -5,6 +5,23 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-10-19] feat: P4 registry v2 and DeployService
+
+### What
+- Added create-if-missing Oracle registry-v2 schema initialization, reviewed DDL, typed incompatible agent-schema failure, and a nullable active-signature unique index.
+- Added DeployService guards, receipts, idempotent retry recovery, atomic registry/metadata/audit inserts, and exact-key parent supersession.
+- Routed direct deployment and the optional persistence tool through DeployService; disabled legacy in-place writes and pre-allocated `_V1` IDs.
+- Added fake-backed deployment, retry, schema, SQL safety, and shadow-hash tests.
+
+### Development registry isolation
+- Routed P4 deployment, alert discovery, and registry analytics to the new
+  `PIO_AML_AGENT_PRODUCTION_SCENARIOS` and `PIO_AML_AGENT_SCENARIOS` tables.
+- Added create-if-missing metadata DDL and updated the reviewed script. Existing
+  `PIO_AML_PRODUCTION_SCENARIOS` and `PIO_AML_SCENARIO` remain untouched; the
+  historical rename-script path is no longer required.
+- Updated P4 docs, status, and the canonical overview to document the isolated
+  development registry and owner review steps.
+
 ## [2026-10-19] refactor: P3 workflow state, revisions, and guards
 
 ### What

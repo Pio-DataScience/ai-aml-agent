@@ -42,6 +42,7 @@ revisions:
   restore_from_history: reserved
 workflow:
   enforcement: observe
+  conflict_check_required: false
 card_audit:
   store: sqlite
   retention: permanent

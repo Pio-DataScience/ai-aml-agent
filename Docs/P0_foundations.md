@@ -89,6 +89,14 @@ missing production keys and governance composite keys, and has no `COMMIT`.
 Review the final counts before committing; issue `ROLLBACK` in that session if
 the results are unexpected. The CTAS backup tables persist after a rollback.
 
+## Registry-v2 legacy table rename (P4)
+
+If Service A reports `REGISTRY_LEGACY_SCHEMA`, stop deployment and have the
+owner review the existing table and backup. The owner-only TOAD rename statement
+is in [`scripts/sql/05_rename_legacy_registry.sql`](../scripts/sql/05_rename_legacy_registry.sql).
+After review, the owner renames the old production table so the app can create
+the v2 table. The application never runs that rename or alters the legacy table.
+
 Run local verification from the repository root:
 
 ```powershell

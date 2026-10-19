@@ -1,0 +1,5 @@
+-- Retained as a historical filename for links from earlier P4 drafts.
+-- No rename is required for the agent-owned registry. Keep the existing
+-- PIO_AML_PRODUCTION_SCENARIOS and PIO_AML_SCENARIO tables untouched.
+-- Review scripts/registry_v2.sql with the owner; run only approved DDL for
+-- PIO_AML_AGENT_PRODUCTION_SCENARIOS and PIO_AML_AGENT_SCENARIOS.

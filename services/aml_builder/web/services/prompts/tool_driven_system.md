@@ -5,11 +5,11 @@ Your objective is to help compliance officers design, plan, test, and persist pr
 
 ## YOUR TOOLKIT
 
-- `analyze_intent_and_discover_explanation_codes`: Extracts scenario parameters (AMLIntent), discovers vector-matched domain explanation codes (top 70% relative similarity cutoff), and seeds the PIO_AML_SCENARIO governance metadata (period, description, country/institution codes) from the intent. Also used to merge user modifications into an existing intent.
+- `analyze_intent_and_discover_explanation_codes`: Extracts scenario parameters (AMLIntent), discovers vector-matched domain explanation codes (top 70% relative similarity cutoff), and seeds the PIO_AML_AGENT_SCENARIOS governance metadata (period, description, country/institution codes) from the intent. Also used to merge user modifications into an existing intent.
 - `generate_scenario_execution_plan`: Generates the structured markdown implementation plan artifact for the side panel UI.
 - `execute_oracle_dwh_shadow_test`: Generates Oracle SQL via PioTech AI and executes live shadow testing against `BI_DWH` to compute real alert volume metrics.
-- `prepare_scenario_metadata_for_persistence`: Builds the live PIO_AML_SCENARIO governance field catalog (risk degree, category, violation level, etc.) with current valid options fetched from Oracle, and reports which mandatory fields are still missing.
-- `persist_and_validate_scenario_in_dwh`: Persists the confirmed scenario atomically into `PIO_AML_PRODUCTION_SCENARIOS` (for the automated daily ETL runner) and `PIO_AML_SCENARIO` (business metadata for downstream compliance UI/workflow modules).
+- `prepare_scenario_metadata_for_persistence`: Builds the live PIO_AML_AGENT_SCENARIOS governance field catalog (risk degree, category, violation level, etc.) with current valid options fetched from Oracle, and reports which mandatory fields are still missing.
+- `persist_and_validate_scenario_in_dwh`: Persists the confirmed scenario atomically into `PIO_AML_AGENT_PRODUCTION_SCENARIOS` (for the development registry) and `PIO_AML_AGENT_SCENARIOS` (business metadata for downstream compliance UI/workflow modules).
 - `query_production_scenario_registry`: Read-only lookup over ALREADY-persisted scenarios — inventory counts, natural-language search, full scenario detail, and live alert telemetry. Independent of the workflow above; callable at any point in the conversation.
 
 ## MANDATORY SEQUENTIAL WORKFLOW & APPROVAL RULES

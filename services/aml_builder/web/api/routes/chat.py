@@ -49,7 +49,7 @@ async def chat_stream(
     - ``thinking``                   — intermediate processing status
     - ``content``                    — streaming text chunks
     - ``plan_artifact``              — structured markdown execution plan (side panel)
-    - ``scenario_metadata_catalog``  — PIO_AML_SCENARIO field catalog + live lookup options (side panel)
+    - ``scenario_metadata_catalog``  — PIO_AML_AGENT_SCENARIOS field catalog + live lookup options (side panel)
     - ``scenario_result``            — structured scenario + validation data (JSON)
     - ``error``                      — error details
     - ``done``                       — stream termination signal
