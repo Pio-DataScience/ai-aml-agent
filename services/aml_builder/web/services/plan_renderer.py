@@ -99,7 +99,16 @@ def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]
 
     anchor = intent.get("anchor_date")
     period = period_of(intent)
-    if period:
+    sliding = intent.get("evaluation_period") if not period else None
+    window = intent.get("time_window") or {}
+    if sliding and isinstance(sliding, dict) and sliding.get("start"):
+        unit = str(window.get("unit", "")).lower()
+        unit = unit[:-1] if str(window.get("value")) == "1" and unit.endswith("s") else unit
+        lines.append(
+            f"| **Evaluation Mode** | 📅 Any `{window.get('value')} {unit}` window "
+            f"within `{sliding.get('start')}` to `{sliding.get('end')}` |"
+        )
+    elif period:
         lines.append(
             f"| **Evaluation Mode** | 📅 Fixed period `{period[0].isoformat()}` to `{period[1].isoformat()}`"
             f" (evaluation date `{period[1].isoformat()}`) |"

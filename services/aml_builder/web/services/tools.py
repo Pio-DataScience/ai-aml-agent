@@ -49,11 +49,13 @@ from services.aml_builder.web.services.business_dates import (
     period_of,
     to_date,
 )
-from services.aml_builder.web.services.sql_dates import anchor_sql, bind_values, pin_period
+from services.aml_builder.web.services.sql_dates import anchor_sql, bind_values, pin_period, slide_window_over_period
 from services.aml_builder.web.services.clarification import (
     answered_fields,
     apply_answers,
+    all_types_if_any,
     clarification_payload,
+    default_entity,
     describe_answers,
     find_gaps,
     pending_clarification,
@@ -404,6 +406,9 @@ def analyze_intent_and_discover_explanation_codes(
             tx_types = intent_dict.get("transaction_types")
             tx_type = intent_dict.get("transaction_type")
         if settings.AML_CLARIFICATION_FLOW:
+            # Business decision: what is monitored is per customer unless the request says otherwise.
+            intent_dict = default_entity(intent_dict, user_prompt)
+            intent_dict = all_types_if_any(intent_dict, user_prompt)
             gaps = find_gaps(intent_dict, user_prompt, known=known_intent, answered=answered_fields(answers))
             if gaps:
                 logger.info("[TOOL: INTENT] Clarification needed for: %s", gaps)
@@ -483,6 +488,9 @@ def analyze_intent_and_discover_explanation_codes(
         intent_dict, fixed_period = apply_fixed_period(intent_dict, user_prompt, *_period_texts(intent_dict))
         if fixed_period:
             logger.info("[TOOL: INTENT] Fixed period %s to %s", fixed_period[0], fixed_period[1])
+            # A shorter window inside the period slides over it; the plan says so.
+            if period_of(intent_dict) != fixed_period:
+                intent_dict["evaluation_period"] = {"start": fixed_period[0].isoformat(), "end": fixed_period[1].isoformat()}
 
         intent = AMLIntent(**intent_dict)
 
@@ -1052,11 +1060,24 @@ def execute_oracle_dwh_shadow_test(intent_json: str) -> str:
     # Pin only when the window is the period itself; a shorter stated window ("within 7 days")
     # stays a window ending on the period's last day.
     pinned = False
+    window_slides = False
     if fixed_period and period_of(sent_intent) == fixed_period:
         sql, pinned = pin_period(sql, fixed_period[0], fixed_period[1])
         if not pinned:
             logger.warning(
                 "[TOOL: SQL_BRIDGE] Fixed period %s to %s not pinned: the SQL has no single window start",
+                fixed_period[0],
+                fixed_period[1],
+            )
+    elif fixed_period:
+        # A short window inside the period ("3 deposits in one week, in 2019"): any window of the period counts.
+        sql, window_slides = slide_window_over_period(
+            sql, fixed_period[0], fixed_period[1], sent_intent.get("time_window") or {}
+        )
+        pinned = window_slides
+        if not window_slides:
+            logger.warning(
+                "[TOOL: SQL_BRIDGE] Window not slid over %s to %s (rule form not supported): last window only",
                 fixed_period[0],
                 fixed_period[1],
             )
@@ -1075,6 +1096,7 @@ def execute_oracle_dwh_shadow_test(intent_json: str) -> str:
             "start": fixed_period[0].isoformat(),
             "end": fixed_period[1].isoformat(),
             "pinned_in_sql": pinned,
+            "window_slides_over_period": window_slides,
         }
     if filters_applied:
         # Returned with the dates so both the success and the failure result carry them.

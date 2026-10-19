@@ -5,6 +5,22 @@
 
 ---
 
+> **Update 2026-10-19 (business decisions):**
+> - **Target entity is not asked.** A request that does not name accounts, customers or single transactions is
+>   monitored **per customer** (`CLARIFICATION_ASK_ENTITY=false`; `true` brings the question back).
+> - **Quarters** in the timeframe: *First / Second / Third / Last quarter* + a year → that exact quarter
+>   (e.g. Q1 2019 = 2019-01-01 to 2019-03-31, a fixed 3-month period). "90 days (one quarter)" stays a rolling window.
+> - **Other transaction type**: *Other (type it)* shows a text box; typed types (comma-separated, e.g. `LOAN
+>   REPAYMENT`) are added to the channels and searched in the explanation-code catalog like any other type.
+> - **What you wrote is never asked again**: a number or a period in the request counts as stated whatever the LLM
+>   labels it; "any / all" with no type named means all transaction types. The form opens **pre-filled** with the
+>   defaults, so the user only changes what differs.
+> - **The form is always real and can be reopened**: if the agent promises a form without calling the intent tool,
+>   the server runs it and sends the form. "give me the side panel" / "show the form" re-sends it, and the message
+>   that asked has a **Complete scenario details** button.
+> - **Scope**: any banking question (transactions, customers, accounts, products, codes) is answered; only topics
+>   outside banking are refused. Questions about the bank's own records run as a scenario (plan → read-only test).
+
 ## 1. What and why
 
 When a request does not state a parameter that decides which alerts fire, the Scenario Builder now **asks instead of

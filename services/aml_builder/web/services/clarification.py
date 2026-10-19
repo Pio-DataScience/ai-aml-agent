@@ -9,11 +9,14 @@ chat request (``ChatRequest.clarification_answers``) and are merged into the int
 ==================  ===================================================================  ============
 Parameter           Stated when                                                          Question
 ==================  ===================================================================  ============
-target_entity       a single-transaction rule, or the text names customers / accounts    single_select
+target_entity       not asked by default (business decision: per customer, see          single_select
+                    default_entity); asked only with CLARIFICATION_ASK_ENTITY=True
 threshold_amount    a threshold whose number appears in the text                         number
 timeframe           a lookback ("within 7 days", "last month"), a period ("in 2019"),    single_select
-                    or a frequency ("daily")                                             (+ date_range)
+                    or a frequency ("daily")                                             (+ quarter year,
+                                                                                         date_range)
 channels            the text names the intent's transaction types, says "any / all",    multi_select
+                    (or a type typed under "Other")                                      (+ text)
                     or a debit / credit filter covers them
 ==================  ===================================================================  ============
 
@@ -45,11 +48,18 @@ LOOKBACK_OPTIONS: Final[List[Dict[str, Any]]] = [
     {"value": 1, "label": "1 day"},
     {"value": 7, "label": "7 days"},
     {"value": 30, "label": "30 days"},
-    {"value": 90, "label": "90 days"},
+    {"value": 90, "label": "90 days (one quarter)"},
     {"value": 180, "label": "180 days"},
     {"value": 365, "label": "1 year"},
+    {"value": "Q1", "label": "First quarter (Jan-Mar)"},
+    {"value": "Q2", "label": "Second quarter (Apr-Jun)"},
+    {"value": "Q3", "label": "Third quarter (Jul-Sep)"},
+    {"value": "Q4", "label": "Last quarter (Oct-Dec)"},
     {"value": "custom", "label": "A fixed date range"},
 ]
+QUARTERS: Final[Dict[str, Tuple[int, int]]] = {"Q1": (1, 3), "Q2": (4, 6), "Q3": (7, 9), "Q4": (10, 12)}
+QUARTER_NAMES: Final[Dict[str, str]] = {"Q1": "First quarter", "Q2": "Second quarter", "Q3": "Third quarter",
+                                        "Q4": "Last quarter"}
 CHANNEL_OPTIONS: Final[List[Dict[str, str]]] = [
     {"value": "ALL", "label": "All transaction types"},
     {"value": "CASH DEPOSIT", "label": "Cash deposit"},
@@ -58,9 +68,9 @@ CHANNEL_OPTIONS: Final[List[Dict[str, str]]] = [
     {"value": "INWARD TRANSFER", "label": "Inward transfer"},
     {"value": "CHEQUE DEPOSIT", "label": "Cheque deposit"},
     {"value": "ATM WITHDRAWAL", "label": "ATM withdrawal"},
+    {"value": "OTHER", "label": "Other (type it)"},
 ]
 
-_UNSTATED: Final = {"assumed_default", "needs_user"}
 _ENTITY_WORDS: Final = re.compile(
     r"\b(customers?|clients?|persons?|people|individuals?|corporates?|compan(?:y|ies)|entit(?:y|ies)|"
     r"accounts?|account holders?|per (?:customer|account|client))\b",
@@ -78,6 +88,15 @@ _TIME_PHRASE: Final = re.compile(
 )
 _ALL_TYPES: Final = re.compile(r"\b(?:any|all)\s+(?:kinds?\s+of\s+|types?\s+of\s+)?transactions?\b|\ball transaction types\b",
                                re.IGNORECASE)
+# Threshold fields that hold money (the others are counts, ratios, ages ...).
+_AMOUNT_FIELD: Final = re.compile(r"amount|amt|volume|value|sum|total|balance", re.IGNORECASE)
+# Amount words that need a number ("3 high cash deposits").
+_VAGUE_AMOUNT: Final = re.compile(
+    r"\b(?:high|higher|large|larger|big|huge|significant|substantial|heavy|sizeable|sizable|major)\b(?![- ]?risk)"
+    r"|\b(?:high|large)[- ]value\b|مرتفع|كبير|كبيرة|ضخم",
+    re.IGNORECASE,
+)
+_ANY_WORD: Final = re.compile(r"\b(?:any|all|every)\b", re.IGNORECASE)
 _NUMBER: Final = re.compile(r"(\d[\d,]*(?:\.\d+)?)\s*(k|thousand|m|mn|million|b|bn|billion|%)?\b", re.IGNORECASE)
 _MULTIPLIERS: Final[Dict[str, float]] = {
     "k": 1e3, "thousand": 1e3, "m": 1e6, "mn": 1e6, "million": 1e6, "b": 1e9, "bn": 1e9, "billion": 1e9,
@@ -125,29 +144,39 @@ def numbers_in(text: str) -> Set[float]:
 
 
 def _threshold_stated(intent: Dict[str, Any], text: str) -> bool:
-    """Whether a threshold's number was written by the user.
+    """Whether the user gave the amount (or a count rule that needs no amount).
+
+    The user's words decide, not the LLM's provenance label (it is not consistent: a written 50,000 can
+    come back as 'assumed_default'). A count ("3 deposits") is not an amount: it states the threshold
+    only when the request does not also ask for "high" / "large" amounts.
 
     Args:
         intent (Dict[str, Any]): The intent.
         text (str): The user's request.
 
     Returns:
-        bool: True when a threshold is not marked as assumed and its value appears in the text.
+        bool: True when an amount threshold with a value above 0 appears in the text, or when a count
+            threshold appears in the text and no amount word ("high", "large", ...) is left without a number.
     """
     written = numbers_in(text)
+    count_written = False
     for threshold in intent.get("thresholds") or []:
-        if not isinstance(threshold, dict) or str(threshold.get("provenance") or "stated") in _UNSTATED:
+        if not isinstance(threshold, dict):
             continue
-        values = [threshold.get("value_from"), threshold.get("value_to")]
         numeric = []
-        for value in values:
+        for value in (threshold.get("value_from"), threshold.get("value_to")):
             try:
                 numeric.append(float(value))
             except (TypeError, ValueError):
                 continue
-        if any(any(abs(v - w) < 1e-6 for w in written) for v in numeric):
-            return True
-    return False
+        if not any(any(abs(v - w) < 1e-6 for w in written) for v in numeric):
+            continue
+        if _AMOUNT_FIELD.search(str(threshold.get("field") or "")):
+            if any(v > 0 for v in numeric):
+                return True
+        else:
+            count_written = True
+    return count_written and not _VAGUE_AMOUNT.search(text or "")
 
 
 def _timeframe_stated(intent: Dict[str, Any], text: str) -> bool:
@@ -158,11 +187,8 @@ def _timeframe_stated(intent: Dict[str, Any], text: str) -> bool:
         text (str): The user's request.
 
     Returns:
-        bool: True when the text states a timeframe (and the intent does not mark its window as assumed).
+        bool: True when the text states a timeframe; the LLM's provenance label is not used.
     """
-    window = intent.get("time_window") or {}
-    if isinstance(window, dict) and str(window.get("provenance") or "stated") in _UNSTATED and not find_fixed_period(text):
-        return False
     return bool(find_fixed_period(text) or _TIME_PHRASE.search(text or ""))
 
 
@@ -185,8 +211,8 @@ def _channels_stated(intent: Dict[str, Any], text: str) -> bool:
         types = [p.strip() for p in str(intent["transaction_type"]).split(",") if p.strip()]
     types = [t for t in types if str(t).strip().upper() not in ("ALL", "ANY", "ALL TRANSACTIONS")]
     if not types:
-        return str(intent.get("transaction_type") or "").strip().upper() in ("ALL", "ANY", "ALL TRANSACTIONS") and bool(
-            re.search(r"\b(?:any|all|every)\b", text or "", re.IGNORECASE))
+        # "Flag any above 50,000 JOD": "any" / "all" with no type named means every transaction type.
+        return bool(_ANY_WORD.search(text or ""))
     lowered = (text or "").lower()
     for transaction_type in types:
         # The qualifier ("cash", "outward", "cheque") is what names the channel; it must be the user's word.
@@ -232,6 +258,8 @@ def find_gaps(intent: Dict[str, Any], text: str, known: Optional[Dict[str, Any]]
         List[str]: Field names in form order: target_entity, threshold_amount, timeframe, channels.
     """
     answered = answered or set()
+    if not settings.CLARIFICATION_ASK_ENTITY:
+        answered = answered | {"target_entity"}  # business decision: per customer (default_entity)
     checks = (
         ("target_entity", _entity_stated, lambda k: bool(k.get("scenario_type"))),
         ("threshold_amount", _threshold_stated, lambda k: bool(k.get("thresholds"))),
@@ -246,6 +274,40 @@ def find_gaps(intent: Dict[str, Any], text: str, known: Optional[Dict[str, Any]]
         if not stated(intent, text):
             gaps.append(name)
     return gaps
+
+
+def all_types_if_any(intent: Dict[str, Any], text: str) -> Dict[str, Any]:
+    """Set the scope to all transaction types when the user said "any" / "all" and named no type.
+
+    Args:
+        intent (Dict[str, Any]): The intent (not modified).
+        text (str): The user's request.
+
+    Returns:
+        Dict[str, Any]: The intent, with transaction_type 'ALL' in that case.
+    """
+    types = [t for t in intent.get("transaction_types") or [] if t]
+    if types or intent.get("transaction_type") or intent.get("attribute_filters") or not _ANY_WORD.search(text or ""):
+        return intent
+    return {**intent, "transaction_type": "ALL", "transaction_types": None}
+
+
+def default_entity(intent: Dict[str, Any], text: str) -> Dict[str, Any]:
+    """Apply the business decision "monitor per customer" when the request does not say what is monitored.
+
+    A request that names accounts, customers or single transactions keeps what the user wrote.
+
+    Args:
+        intent (Dict[str, Any]): The intent (not modified).
+        text (str): The user's request.
+
+    Returns:
+        Dict[str, Any]: The intent, with scenario_type CLARIFICATION_DEFAULT_ENTITY (and its aggregation grain)
+            when the entity was not stated.
+    """
+    if settings.CLARIFICATION_ASK_ENTITY or _entity_stated(intent, text):
+        return intent
+    return apply_answers(intent, {"target_entity": settings.CLARIFICATION_DEFAULT_ENTITY.upper()}, record=False)
 
 
 # ─────────────────────────────── the form ────────────────────────────────
@@ -313,6 +375,12 @@ def build_questions(gaps: List[str], intent: Dict[str, Any]) -> List[Dict[str, A
             "help_text": "Days count working days (Sunday to Thursday).",
         })
         questions.append({
+            "id": "quarter_year", "field_name": "timeframe", "input_type": "number",
+            "question_text": "Which year?", "options": None, "default_value": None, "required": False,
+            "help_text": "The quarter of this year, e.g. 2019.",
+            "show_if": {"question_id": "timeframe", "in": list(QUARTERS)},
+        })
+        questions.append({
             "id": "date_range", "field_name": "timeframe", "input_type": "date_range",
             "question_text": "Which dates?", "options": None, "default_value": None, "required": False,
             "help_text": "Only for a fixed date range.", "show_if": {"question_id": "timeframe", "equals": "custom"},
@@ -322,6 +390,12 @@ def build_questions(gaps: List[str], intent: Dict[str, Any]) -> List[Dict[str, A
             "id": "channels", "field_name": "channels", "input_type": "multi_select",
             "question_text": "Which transaction types should be included?", "options": CHANNEL_OPTIONS,
             "default_value": _current_channels(intent) or default_channels(), "required": True,
+        })
+        questions.append({
+            "id": "other_channels", "field_name": "channels", "input_type": "text",
+            "question_text": "Which other transaction type?", "options": None, "default_value": None, "required": False,
+            "help_text": "Type its name as the bank calls it; several separated by commas (e.g. LOAN REPAYMENT, SWIFT TRANSFER).",
+            "show_if": {"question_id": "channels", "includes": "OTHER"},
         })
     return questions
 
@@ -432,6 +506,45 @@ def _date_range(value: Any) -> Optional[Tuple[date, date]]:
     return (first, last) if first <= last else (last, first)
 
 
+def _quarter(answers: Dict[str, Any]) -> Optional[Tuple[date, date]]:
+    """The period of a quarter answer (timeframe Q1-Q4 + quarter_year).
+
+    Args:
+        answers (Dict[str, Any]): {question id: value}.
+
+    Returns:
+        Optional[Tuple[date, date]]: First and last day of that quarter, or None.
+    """
+    months = QUARTERS.get(str(answers.get("timeframe") or "").upper())
+    try:
+        year = int(float(answers.get("quarter_year")))
+    except (TypeError, ValueError):
+        return None
+    if not months or not 1950 <= year <= 2099:
+        return None
+    first = date(year, months[0], 1)
+    last = date(year + (months[1] == 12), months[1] % 12 + 1, 1)
+    return first, date.fromordinal(last.toordinal() - 1)
+
+
+def _channel_values(answers: Dict[str, Any]) -> List[str]:
+    """The channels answered: the chosen options plus any typed under "Other".
+
+    Args:
+        answers (Dict[str, Any]): {question id: value}.
+
+    Returns:
+        List[str]: Upper-case transaction types, without the 'OTHER' marker.
+    """
+    chosen = answers.get("channels")
+    values = chosen if isinstance(chosen, list) else ([chosen] if chosen else [])
+    found = [str(v).strip().upper() for v in values if str(v).strip() and str(v).strip().upper() != "OTHER"]
+    typed = answers.get("other_channels")
+    if typed and any(str(v).strip().upper() == "OTHER" for v in values):
+        found += [t.strip().upper() for t in re.split(r"[,;\n]", str(typed)) if t.strip()]
+    return list(dict.fromkeys(found))
+
+
 def describe_answers(answers: Dict[str, Any]) -> str:
     """The answers as the user message shown in the chat.
 
@@ -447,16 +560,19 @@ def describe_answers(answers: Dict[str, Any]) -> str:
         parts.append("Target entity: " + next((o["label"].split(" (")[0] for o in ENTITY_OPTIONS if o["value"] == str(entity).upper()), str(entity)))
     if answers.get("threshold_amount") not in (None, ""):
         parts.append(f"Threshold amount: {_amount(answers['threshold_amount'])} JOD")
-    period = _date_range(answers.get("date_range")) if str(answers.get("timeframe")) == "custom" else None
+    timeframe = str(answers.get("timeframe") or "").upper()
+    period = _date_range(answers.get("date_range")) if timeframe == "CUSTOM" else None
+    quarter = _quarter(answers) if timeframe in QUARTERS else None
     if period:
         parts.append(f"Timeframe: {period[0].isoformat()} to {period[1].isoformat()}")
-    elif answers.get("timeframe") not in (None, "", "custom"):
+    elif quarter:
+        parts.append(f"Timeframe: {QUARTER_NAMES[timeframe]} {quarter[0].year} ({quarter[0].isoformat()} to {quarter[1].isoformat()})")
+    elif answers.get("timeframe") not in (None, "") and timeframe != "CUSTOM" and timeframe not in QUARTERS:
         parts.append(f"Timeframe: last {answers['timeframe']} days")
-    channels = answers.get("channels")
+    channels = _channel_values(answers)
     if channels:
-        values = channels if isinstance(channels, list) else [channels]
         labels = {o["value"]: o["label"] for o in CHANNEL_OPTIONS}
-        parts.append("Channels: " + ", ".join(labels.get(str(v).upper(), str(v)) for v in values))
+        parts.append("Channels: " + ", ".join(labels.get(v, v.title()) for v in channels))
     return "Clarification answers: " + "; ".join(parts) if parts else "Clarification answers submitted."
 
 
@@ -471,19 +587,28 @@ def answered_fields(answers: Optional[Dict[str, Any]]) -> Set[str]:
     """
     if not answers:
         return set()
-    filled = {k for k in ("target_entity", "threshold_amount", "channels") if answers.get(k) not in (None, "", [])}
-    timeframe = answers.get("timeframe")
-    if timeframe not in (None, "") and (str(timeframe) != "custom" or _date_range(answers.get("date_range"))):
+    filled = {k for k in ("target_entity", "threshold_amount") if answers.get(k) not in (None, "", [])}
+    if _channel_values(answers):
+        filled.add("channels")
+    timeframe = str(answers.get("timeframe") or "").upper()
+    if timeframe == "CUSTOM":
+        if _date_range(answers.get("date_range")):
+            filled.add("timeframe")
+    elif timeframe in QUARTERS:
+        if _quarter(answers):
+            filled.add("timeframe")
+    elif timeframe:
         filled.add("timeframe")
     return filled
 
 
-def apply_answers(intent: Dict[str, Any], answers: Dict[str, Any]) -> Dict[str, Any]:
+def apply_answers(intent: Dict[str, Any], answers: Dict[str, Any], record: bool = True) -> Dict[str, Any]:
     """Merge the form answers into an intent; they override whatever the LLM guessed.
 
     Args:
         intent (Dict[str, Any]): The intent (not modified).
         answers (Dict[str, Any]): {question id: value}.
+        record (bool): Whether to mark the fields as clarified (False for a business default).
 
     Returns:
         Dict[str, Any]: The updated copy, with 'clarified_fields' listing what the answers set.
@@ -517,8 +642,9 @@ def apply_answers(intent: Dict[str, Any], answers: Dict[str, Any]) -> Dict[str, 
         updated["thresholds"] = thresholds
 
     if "timeframe" in filled:
-        if str(answers["timeframe"]) == "custom":
-            first, last = _date_range(answers.get("date_range"))  # type: ignore[misc]
+        timeframe = str(answers["timeframe"]).upper()
+        if timeframe in ("CUSTOM",) or timeframe in QUARTERS:
+            first, last = _date_range(answers.get("date_range")) if timeframe == "CUSTOM" else _quarter(answers)  # type: ignore[misc]
             updated["anchor_date"] = last.isoformat()
             updated["time_window"] = window_for_period(first, last)
         else:
@@ -526,8 +652,7 @@ def apply_answers(intent: Dict[str, Any], answers: Dict[str, Any]) -> Dict[str, 
                                       "provenance": "stated"}
 
     if "channels" in filled:
-        values = answers["channels"] if isinstance(answers["channels"], list) else [answers["channels"]]
-        values = [str(v).strip().upper() for v in values if str(v).strip()]
+        values = _channel_values(answers)
         if "ALL" in values:
             updated["transaction_type"] = "ALL"
             updated["transaction_types"] = None
@@ -543,9 +668,10 @@ def apply_answers(intent: Dict[str, Any], answers: Dict[str, Any]) -> Dict[str, 
                     if condition.get("transaction_type") and str(condition["transaction_type"]).upper() not in values:
                         condition["transaction_type"] = values[0] if len(values) == 1 and "ALL" not in values else None
 
-    updated["clarifications"] = []
-    updated["clarification_needed"] = False
-    updated["clarified_fields"] = sorted(filled | set(updated.get("clarified_fields") or []))
+    if record:
+        updated["clarifications"] = []
+        updated["clarification_needed"] = False
+        updated["clarified_fields"] = sorted(filled | set(updated.get("clarified_fields") or []))
     return updated
 
 

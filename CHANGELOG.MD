@@ -5,6 +5,78 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-10-19] fix: "3 high cash deposits in one week in 2019" - amount asked, every week of 2019 checked
+
+### What
+- **Problem**: the generated SQL had `EQU_TRA_AMT >= 0` (no amount for "high") and checked only the last 5 working
+  days of 2019 (`:bd_minus_5` .. 2019-12-31): 0 customers. Correct (any week of 2019, deposits >= 10,000): 6 customers.
+- **Amount** (`clarification._threshold_stated`): a count ("3 deposits") is not an amount; "high / large / big ..."
+  without a number asks for the amount (pre-filled 10,000 JOD). "high-risk" is not an amount word; count-only rules
+  ("more than 20 withdrawals in a month") still ask nothing.
+- **Window inside a period** (`sql_dates.slide_window_over_period`): a per-customer / per-account rule with HAVING whose
+  window is shorter than the stated period now checks every window of the period: moving `COUNT/SUM ... OVER (PARTITION
+  BY ... ORDER BY TRA_DATE RANGE ...)` limited to the period, flagged on the best window. Weeks and months exact; N
+  working days as about N*7/5 calendar days. Not rewritten (last window only, as before): DISTINCT counts, "fewer than"
+  conditions, ORDER BY, per-transaction rules. Shadow result: `fixed_period.window_slides_over_period`.
+- **Plan**: `AMLIntent.evaluation_period`; Evaluation Mode reads "Any `1 week` window within `2019-01-01` to `2019-12-31`".
+- Tests: +15 (`test_business_dates.py`, `test_clarification.py`); full suite 210 passed. Live (port 8005): form asks only
+  the amount → plan "any 1-week window within 2019" → shadow test 6 customers (= hand query). No new files.
+
+---
+
+## [2026-10-19] fix: Side panel form always shown; banking questions answered
+
+### What
+- **Problem 1**: "Flag transactions in the last 90 days." got "please complete the form in the side panel" but no form:
+  the agent (`gpt-5.4-mini`) wrote the sentence without calling the intent tool. Then "give me the side panel" was
+  refused by the scope guard.
+- **Fix** (`routes/chat.py`): a reply that promises a form when the intent tool was not called triggers the tool
+  server-side; the form is sent and recorded in the conversation. "give me the side panel" / "show the form" /
+  "أين النموذج" re-sends the open form (else the latest plan) without the scope guard or the LLM. The prompt no
+  longer contains the example sentence, and requires the intent tool for every scenario request.
+- **Frontend** (`ChatBubble.tsx`): a "Complete scenario details" button on the message that asked reopens the form.
+- **Problem 2**: banking questions were refused. **Fix**: the scope guard has a `banking` category (transactions,
+  customers, accounts, cards, loans, branches, products, codes, the bank's data) and treats screen requests as about
+  the assistant; only messages outside banking are refused (new refusal text). The agent no longer refuses anything
+  itself; questions about the bank's own records go through the plan → read-only shadow test.
+- Tests: `test_clarification.py` (+12), `test_scope_guard.py` (+5); full suite 195 passed; `tsc` clean. Live: the five
+  messages above behave as described. No new files.
+
+---
+
+## [2026-10-19] fix: Clarification never re-asks what the user wrote; form starts pre-filled
+
+### What
+- **Problem**: "Flag any above 50,000 JOD" could ask for the amount again (the LLM's provenance label is inconsistent:
+  a written amount or window came back as `assumed_default`), and asked for the channel although the user said "any".
+- **Fix** (`clarification.py`): the user's words decide. A threshold whose number is in the text and a timeframe
+  phrase in the text count as stated whatever the label; "any / all" with no type named = all transaction types
+  (`all_types_if_any` sets the scope to ALL).
+- **Form** (`ClarificationForm.tsx`): every question starts filled with its default (30 days, cash deposit + withdrawal,
+  10,000 JOD), so the user only changes what differs; stated values are never asked and show in "What I understood".
+- Live: "Flag any above 50,000 JOD" asks only the timeframe; "... within 7 days" asks nothing.
+- Tests: 2 added to `test_clarification.py`; backend 179 passed; frontend 8 passed, `tsc` clean. No new files.
+
+---
+
+## [2026-10-19] change: Clarification form - per customer always, quarters, typed transaction types
+
+### What
+- **Business decision: monitor per customer.** "What should be monitored?" is no longer asked
+  (`CLARIFICATION_ASK_ENTITY=false`); `clarification.default_entity` sets per customer when the request does not
+  name accounts, customers or single transactions.
+- **Quarter options** in the timeframe question (First / Second / Third / Last quarter) with a year question
+  (`quarter_year`, shown only for a quarter) → a fixed 3-month period ending on the quarter's last day.
+- **Other transaction type**: `OTHER` option + `other_channels` text question (shown only when Other is picked);
+  typed types are added to the channels and searched in the code catalog.
+- `show_if` now supports `equals`, `in` and `includes` (schema field added; frontend `isVisible` updated).
+- No new files: changes in `clarification.py`, `settings.py`, `schemas.py`, `tools.py`, the existing tests, and in
+  `AI_AML_INTERFACE` `clarificationForm.ts`, `ClarificationForm.tsx`, `types/clarification.ts`, `clarification-form.test.cjs`.
+- Tests: backend 177 passed; frontend form tests 8 passed, speech 8 passed, `tsc` clean. Live: "Flag suspicious deposits"
+  → form without the entity question → Q1 2019 + "LOAN REPAYMENT" → plan with 2019-01-01..2019-03-31 and loan-repayment codes.
+
+---
+
 ## [2026-10-18] feat: Clarification Question Flow; one run per conversation
 
 ### What

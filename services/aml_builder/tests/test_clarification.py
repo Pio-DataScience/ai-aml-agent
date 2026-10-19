@@ -45,14 +45,33 @@ def _flow_on(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(aml_tools.settings, "CLARIFICATION_DEFAULT_WINDOW_DAYS", 30)
     monkeypatch.setattr(aml_tools.settings, "CLARIFICATION_DEFAULT_CHANNELS", "CASH DEPOSIT,CASH WITHDRAWAL")
     monkeypatch.setattr(aml_tools.settings, "CLARIFICATION_DEFAULT_ENTITY", "CUSTOMER")
+    monkeypatch.setattr(aml_tools.settings, "CLARIFICATION_ASK_ENTITY", False)
 
 
 # ─────────────────────────── gap analysis ───────────────────────────
 
 
-def test_a_vague_request_misses_all_four_parameters() -> None:
-    """Values the LLM assumed, or a type the user never named, are gaps."""
+def test_a_vague_request_misses_amount_timeframe_and_channels() -> None:
+    """Values the LLM assumed, or a type the user never named, are gaps; the entity is never asked."""
+    assert cl.find_gaps(VAGUE_INTENT, VAGUE) == ["threshold_amount", "timeframe", "channels"]
+
+
+def test_the_entity_question_can_be_switched_back_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    """CLARIFICATION_ASK_ENTITY=True asks 'What should be monitored?' again."""
+    monkeypatch.setattr(aml_tools.settings, "CLARIFICATION_ASK_ENTITY", True)
     assert cl.find_gaps(VAGUE_INTENT, VAGUE) == ["target_entity", "threshold_amount", "timeframe", "channels"]
+
+
+def test_per_customer_is_the_business_default() -> None:
+    """Unstated entity -> per customer; a request that names accounts or single transactions keeps it."""
+    llm_guess = {**VAGUE_INTENT, "scenario_type": "ACCOUNT", "aggregation": {"function": "SUM", "grain": "PER ACCOUNT PER WINDOW"}}
+    decided = cl.default_entity(llm_guess, VAGUE)
+
+    assert decided["scenario_type"] == "CUSTOMER" and decided["aggregation"]["grain"] == "PER CUSTOMER PER WINDOW"
+    assert "clarified_fields" not in decided
+    assert cl.default_entity(llm_guess, "Flag accounts with more than 20 cash withdrawals in a month")["scenario_type"] == "ACCOUNT"
+    single = {**VAGUE_INTENT, "scenario_type": "TRANSACTION", "aggregation": None}
+    assert cl.default_entity(single, "Flag any single cash withdrawal above 50,000 in 2019")["scenario_type"] == "TRANSACTION"
 
 
 @pytest.mark.parametrize(
@@ -84,6 +103,28 @@ def test_a_number_the_user_never_wrote_is_a_gap() -> None:
     """Even marked 'stated', an amount absent from the text is a guess."""
     intent = {**VAGUE_INTENT, "thresholds": [{"field": "transaction_amount", "value_from": 10000, "provenance": "stated"}]}
     assert "threshold_amount" in cl.find_gaps(intent, "Flag customers with large cash deposits within 7 days")
+
+
+def test_the_users_words_win_over_the_llm_label() -> None:
+    """A written amount or period is never asked again, even if the LLM labels it 'assumed_default'."""
+    intent = {**VAGUE_INTENT,
+              "thresholds": [{"field": "transaction_amount", "value_from": 50000, "provenance": "assumed_default"}],
+              "time_window": {"unit": "DAYS", "value": 7, "provenance": "assumed_default"}}
+    gaps = cl.find_gaps(intent, "Flag customers with cash deposits above 50,000 JOD within 7 days")
+    assert "threshold_amount" not in gaps and "timeframe" not in gaps
+
+
+def test_any_without_a_type_means_all_transaction_types() -> None:
+    """Live case: 'Flag any above 50,000 JOD' asks only the timeframe, and the scope is all types."""
+    intent = {"scenario_type": "CUSTOMER", "transaction_type": None, "transaction_types": None,
+              "thresholds": [{"field": "transaction_amount", "operator": ">", "value_from": 50000.0}],
+              "time_window": {"unit": "DAY", "value": 1, "is_rolling": False}}
+    text = "Flag any above 50,000 JOD"
+
+    assert cl.find_gaps(intent, text) == ["timeframe"]
+    assert cl.all_types_if_any(intent, text)["transaction_type"] == "ALL"
+    assert cl.all_types_if_any({**intent, "transaction_types": ["CASH DEPOSIT"]}, text)["transaction_types"] == ["CASH DEPOSIT"]
+    assert cl.all_types_if_any(intent, "Flag large deposits") == intent
 
 
 def test_a_debit_credit_filter_states_the_channel() -> None:
@@ -132,13 +173,18 @@ def test_questions_carry_the_agreed_industry_defaults() -> None:
     questions = {q["id"]: q for q in payload["questions"]}
 
     assert payload["status"] == "NEEDS_CLARIFICATION" and payload["missing_fields"] == [
-        "target_entity", "threshold_amount", "timeframe", "channels"]
-    assert questions["target_entity"]["default_value"] == "CUSTOMER"
+        "threshold_amount", "timeframe", "channels"]
+    assert "target_entity" not in questions
     assert questions["threshold_amount"]["default_value"] == 10000.0 and questions["threshold_amount"]["unit"] == "JOD"
     assert questions["timeframe"]["default_value"] == 30
     assert questions["channels"]["default_value"] == ["CASH DEPOSIT"]  # pre-selects what the request suggested
     assert questions["date_range"]["required"] is False and questions["date_range"]["show_if"] == {
         "question_id": "timeframe", "equals": "custom"}
+    assert [o["value"] for o in questions["timeframe"]["options"]][-5:] == ["Q1", "Q2", "Q3", "Q4", "custom"]
+    assert questions["quarter_year"]["show_if"] == {"question_id": "timeframe", "in": ["Q1", "Q2", "Q3", "Q4"]}
+    assert questions["channels"]["options"][-1] == {"value": "OTHER", "label": "Other (type it)"}
+    assert questions["other_channels"]["input_type"] == "text"
+    assert questions["other_channels"]["show_if"] == {"question_id": "channels", "includes": "OTHER"}
     ClarificationResponse(**{k: payload[k] for k in ("understood_summary", "missing_fields", "questions")})
     assert all(ClarificationQuestion(**q) for q in payload["questions"])
 
@@ -146,7 +192,8 @@ def test_questions_carry_the_agreed_industry_defaults() -> None:
 def test_the_summary_never_shows_guessed_values() -> None:
     """Assumed amount and window stay out of 'What I understood'."""
     summary = cl.understood_summary(VAGUE_INTENT, cl.find_gaps(VAGUE_INTENT, VAGUE))
-    assert summary == ["Goal: Customers making suspicious deposits."]
+    assert summary == ["Goal: Customers making suspicious deposits.",
+                       "Monitoring: Per customer (all of a customer's accounts together)"]
 
 
 # ─────────────────────────── answers ───────────────────────────
@@ -171,6 +218,39 @@ def test_a_fixed_date_range_answer_sets_the_period() -> None:
     updated = cl.apply_answers(VAGUE_INTENT, {"timeframe": "custom", "date_range": {"start": "2016-01-01", "end": "2019-12-31"}})
     assert updated["anchor_date"] == "2019-12-31"
     assert updated["time_window"] == {"unit": "YEARS", "value": 4, "is_rolling": False, "provenance": "stated"}
+
+
+@pytest.mark.parametrize(
+    "quarter, year, start, end",
+    [("Q1", 2019, "2019-01-01", "2019-03-31"), ("Q2", 2018, "2018-04-01", "2018-06-30"),
+     ("Q3", 2017, "2017-07-01", "2017-09-30"), ("Q4", 2016, "2016-10-01", "2016-12-31")],
+)
+def test_a_quarter_answer_is_that_exact_quarter(quarter: str, year: int, start: str, end: str) -> None:
+    """First / second / third / last quarter of a year -> a fixed 3-month period."""
+    answers = {"timeframe": quarter, "quarter_year": year}
+    updated = cl.apply_answers(VAGUE_INTENT, answers)
+
+    assert updated["anchor_date"] == end
+    assert updated["time_window"] == {"unit": "MONTHS", "value": 3, "is_rolling": False, "provenance": "stated"}
+    assert f"({start} to {end})" in cl.describe_answers(answers)
+
+
+def test_a_quarter_without_a_year_is_not_answered() -> None:
+    """The year is needed; without it the timeframe stays open."""
+    assert "timeframe" not in cl.answered_fields({"timeframe": "Q2"})
+    assert "timeframe" not in cl.answered_fields({"timeframe": "Q2", "quarter_year": "20"})
+
+
+def test_other_transaction_types_are_typed_in() -> None:
+    """'Other (type it)' adds the typed types to the chosen ones, for a fresh code search."""
+    answers = {"channels": ["CASH DEPOSIT", "OTHER"], "other_channels": "loan repayment, Swift transfer"}
+    updated = cl.apply_answers(VAGUE_INTENT, answers)
+
+    assert updated["transaction_types"] == ["CASH DEPOSIT", "LOAN REPAYMENT", "SWIFT TRANSFER"]
+    assert cl.describe_answers(answers).endswith("Channels: Cash deposit, Loan Repayment, Swift Transfer")
+    assert "channels" not in cl.answered_fields({"channels": ["OTHER"]})
+    assert cl.apply_answers(VAGUE_INTENT, {"channels": ["OTHER"], "other_channels": "Trade finance"})["transaction_types"] == [
+        "TRADE FINANCE"]
 
 
 def test_all_channels_and_a_new_threshold() -> None:
@@ -225,7 +305,8 @@ def test_the_intent_tool_stops_and_asks(monkeypatch: pytest.MonkeyPatch) -> None
 
     assert result["status"] == "NEEDS_CLARIFICATION" and "plan_artifact" not in result
     assert result["original_request"] == VAGUE and searched == []
-    assert [q["id"] for q in result["questions"]] == ["target_entity", "threshold_amount", "timeframe", "date_range", "channels"]
+    assert [q["id"] for q in result["questions"]] == [
+        "threshold_amount", "timeframe", "quarter_year", "date_range", "channels", "other_channels"]
 
 
 def test_the_answers_complete_the_original_request(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -365,3 +446,122 @@ def test_the_lock_is_released_after_a_run(monkeypatch: pytest.MonkeyPatch) -> No
     client.post("/chat/stream", json=body)
     assert "no_project_free_u" not in chat_route._ACTIVE_THREADS
     assert [e["type"] for e in _events(client.post("/chat/stream", json=body))][-1] == "done"
+
+
+# ─────────────────────────── "give me the side panel" ───────────────────────────
+
+
+class PanelGraph(FakeGraph):
+    """A graph whose conversation state already holds tool results; records state writes."""
+
+    def __init__(self, state_messages: List[Any]) -> None:
+        super().__init__({"status": "COMPLETE"})
+        self.state_messages = state_messages
+        self.recorded: List[Any] = []
+
+    async def aget_state(self, config: Dict[str, Any]) -> Any:
+        return SimpleNamespace(values={"messages": self.state_messages})
+
+    async def aupdate_state(self, config: Dict[str, Any], values: Dict[str, Any], as_node: str = "") -> None:
+        self.recorded.extend(values["messages"])
+
+
+@pytest.mark.parametrize("message, expected", [
+    ("give me the side panel", True), ("show the form", True), ("أين النموذج", True), ("open the plan again", True),
+    ("give me a plan for a structuring scenario", False), ("Flag transactions in the last 90 days.", False),
+    ("go ahead", False),
+])
+def test_panel_requests_are_recognised(message: str, expected: bool) -> None:
+    """Short 'show me the panel / form / the plan' requests; a new scenario request is not one."""
+    assert chat_route.is_panel_request(message) is expected
+
+
+def test_give_me_the_side_panel_re_sends_the_open_form(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Live case: the form is sent again, without the scope guard or an agent run."""
+    form = cl.clarification_payload(VAGUE_INTENT, cl.find_gaps(VAGUE_INTENT, VAGUE), VAGUE)
+    graph = PanelGraph([ToolMessage(content=json.dumps(form), tool_call_id="t1")])
+    client = _client(monkeypatch, graph)
+    monkeypatch.setattr(chat_route.scope_guard, "check",
+                        lambda message, history: (_ for _ in ()).throw(AssertionError("scope guard must not run")))
+
+    events = _events(client.post("/chat/stream", json={"messages": [{"role": "user", "content": "give me the side panel"}],
+                                                       "metadata": {"chat_id": "p1", "user_id": "u"}}))
+
+    assert [e["type"] for e in events] == ["thinking", "clarification_request", "content", "done"]
+    assert events[1]["data"]["missing_fields"] == form["missing_fields"]
+    assert graph.inputs == [] and [m.content for m in graph.recorded] == ["give me the side panel", chat_route.PANEL_FORM_REPLY]
+
+
+def test_with_no_open_form_the_latest_plan_is_shown(monkeypatch: pytest.MonkeyPatch) -> None:
+    """After the form was answered, the side panel request shows the plan."""
+    graph = PanelGraph([ToolMessage(content=json.dumps({"status": "COMPLETE", "enriched_intent": {}, "plan_artifact": "# Plan"}),
+                                    tool_call_id="t2")])
+    events = _events(_client(monkeypatch, graph).post("/chat/stream", json={
+        "messages": [{"role": "user", "content": "show me the plan"}], "metadata": {"chat_id": "p2", "user_id": "u"}}))
+    assert [e["type"] for e in events][1:3] == ["plan_artifact", "content"] and events[1]["text"] == "# Plan"
+
+
+def test_with_nothing_to_show_the_agent_answers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No form and no plan yet: the message goes to the agent as usual."""
+    graph = PanelGraph([])
+    _client(monkeypatch, graph).post("/chat/stream", json={
+        "messages": [{"role": "user", "content": "show the form"}], "metadata": {"chat_id": "p3", "user_id": "u"}})
+    assert len(graph.inputs) == 1
+
+
+class ClaimingGraph(PanelGraph):
+    """A graph whose agent claims a form without calling the intent tool (the live gpt-5.4-mini case)."""
+
+    async def astream(self, inputs: Any, config: Dict[str, Any]) -> Any:
+        self.inputs.append(inputs)
+        yield {"agent": {"messages": [AIMessage(content="I need a few details — please complete the form in the side panel.")]}}
+
+
+def test_a_promised_form_is_made_real(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The agent skipped the tool: the server runs it, sends the form and records it for the next turn."""
+    form = cl.clarification_payload(VAGUE_INTENT, cl.find_gaps(VAGUE_INTENT, VAGUE), VAGUE)
+    ran: List[str] = []
+
+    def fake_tool(user_prompt: str, state: Any = None, config: Any = None, **kw: Any) -> str:
+        ran.append(user_prompt)
+        return json.dumps(form)
+
+    monkeypatch.setattr(aml_tools.analyze_intent_and_discover_explanation_codes, "func", fake_tool)
+    graph = ClaimingGraph([])
+    events = _events(_client(monkeypatch, graph).post("/chat/stream", json={
+        "messages": [{"role": "user", "content": "Flag transactions in the last 90 days."}],
+        "metadata": {"chat_id": "b1", "user_id": "u"}}))
+
+    assert ran == ["Flag transactions in the last 90 days."]
+    assert [e["type"] for e in events][-2:] == ["clarification_request", "done"]
+    assert getattr(graph.recorded[0], "tool_calls", None) and graph.recorded[1].content == json.dumps(form)
+    assert cl.pending_clarification(graph.recorded)["original_request"] == VAGUE
+
+
+def test_no_backstop_when_the_tool_was_called(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A normal turn (the tool ran and sent the form) is left alone."""
+    form = cl.clarification_payload(VAGUE_INTENT, cl.find_gaps(VAGUE_INTENT, VAGUE), VAGUE)
+    monkeypatch.setattr(aml_tools.analyze_intent_and_discover_explanation_codes, "func",
+                        lambda **kw: (_ for _ in ()).throw(AssertionError("backstop must not run")))
+    events = _events(_client(monkeypatch, FakeGraph(form)).post("/chat/stream", json={
+        "messages": [{"role": "user", "content": VAGUE}], "metadata": {"chat_id": "b2", "user_id": "u"}}))
+    assert [e["type"] for e in events].count("clarification_request") == 1
+
+
+@pytest.mark.parametrize("text, asks_amount", [
+    ("flag all customer they have 3 high cash deposite in one week in 2019", True),
+    ("Flag customers with 3 large cash deposits within 7 days", True),
+    ("Flag customers with 3 cash deposits above 10,000 JOD within 7 days", False),
+    ("Flag accounts with more than 20 cash withdrawals in a month", False),
+    ("Flag 3 cash deposits from high-risk customers within 7 days", False),
+])
+def test_a_count_is_not_an_amount(text: str, asks_amount: bool) -> None:
+    """Live case: '3 high cash deposits' gave EQU_TRA_AMT >= 0; 'high' without a number now asks the amount."""
+    import re as _re
+
+    count = int(_re.search(r"\b(3|20)\b", text).group(1))
+    amount = 10000 if "10,000" in text else 0
+    intent = {**VAGUE_INTENT, "thresholds": [
+        {"field": "transaction_count", "operator": ">=", "value_from": count, "target_scope": "AGGREGATE"},
+        {"field": "transaction_amount", "operator": ">=", "value_from": amount, "target_scope": "DETAIL"}]}
+    assert ("threshold_amount" in cl.find_gaps(intent, text)) is asks_amount

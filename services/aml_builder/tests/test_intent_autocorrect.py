@@ -356,4 +356,5 @@ def test_unresolved_refusal_is_corrected_and_completes(monkeypatch: pytest.Monke
     assert len(sent) == 2 and sent[1]["semantic_conditions"] == []
     # "from 2020 into 2022" ends on 31 Dec 2022; the stated 7-day window is kept, not widened.
     assert result["evaluation_date"] == "2022-12-31"
-    assert result["fixed_period"] == {"start": "2020-01-01", "end": "2022-12-31", "pinned_in_sql": False}
+    assert result["fixed_period"] == {"start": "2020-01-01", "end": "2022-12-31", "pinned_in_sql": False,
+                                      "window_slides_over_period": False}

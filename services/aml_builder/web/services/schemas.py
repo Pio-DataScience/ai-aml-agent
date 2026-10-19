@@ -293,6 +293,7 @@ class ClarificationQuestion(BaseModel):
         required (bool): Whether the scenario cannot be built without it.
         unit (Optional[str]): Unit shown next to the input (e.g. 'JOD', 'days').
         help_text (Optional[str]): One line under the question.
+        show_if (Optional[dict]): Visibility rule {question_id, equals | in | includes}.
     """
 
     id: str
@@ -304,6 +305,10 @@ class ClarificationQuestion(BaseModel):
     required: bool = True
     unit: Optional[str] = None
     help_text: Optional[str] = None
+    show_if: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Shown only when another answer matches: {question_id, equals | in | includes}.",
+    )
 
 
 class ClarificationResponse(BaseModel):
@@ -487,6 +492,13 @@ class AMLIntent(BaseModel):
     expected_alert_range_max: Optional[int] = Field(
         default=None,
         description="Maximum expected alert count (used in validator sanity check).",
+    )
+    evaluation_period: Optional[Dict[str, str]] = Field(
+        default=None,
+        description=(
+            "{'start', 'end'} (YYYY-MM-DD) of a fixed period that contains a shorter window "
+            "(\"3 deposits in one week, in 2019\"): the window is checked anywhere inside the period."
+        ),
     )
     anchor_date: Optional[str] = Field(
         default=None,

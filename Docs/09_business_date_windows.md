@@ -106,7 +106,9 @@ bounded by `DATE '2016-01-01'` and `DATE '2023-01-01'` (verified on OPENBI2, 202
 - Gaps between two events inside a sequence rule ("then within 1 day", written by PioTech as `in_date + 1`) are still
   calendar days.
 - Public holidays are not in the calendar; only weekends are skipped.
-- A short window inside a period ("within 7 days, from 2020 into 2022") is evaluated once, for the 7 days ending on
-  the period's last day; it does not slide across the whole period.
+- ~~A short window inside a period is evaluated once, for the window ending on the period's last day.~~ Since
+  2026-10-19 it **slides across the whole period** (`sql_dates.slide_window_over_period`) for rules grouped per customer
+  / account with a HAVING condition ("3 deposits in one week, in 2019" → any week of 2019). Still evaluated once: rules
+  with DISTINCT counts, "fewer than" conditions or ORDER BY, and per-transaction rules.
 - When the SQL has several different window starts (e.g. a baseline window), the period is not pinned; the windows
   are counted back from the period's last day.

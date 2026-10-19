@@ -1,5 +1,5 @@
 """
-Scope guard: the AML Scenario Builder answers about AML scenarios and nothing else.
+Scope guard: the AML Scenario Builder answers about banking and AML, and nothing else.
 
 Asked "who is Real Madrid" or "who won the 2014 World Cup", the agent answered: nothing told it
 not to. In front of a bank that reads as an assistant with no boundaries.
@@ -41,7 +41,7 @@ UNAVAILABLE: Final = "UNAVAILABLE"  # the judge could not decide: the turn conti
 SKIPPED: Final = "SKIPPED"  # not judged: switched off, empty, or a short reply in a conversation
 
 UNRELATED: Final = "unrelated"
-WITHIN: Final = ("scenario_building", "scenario_registry", "aml_knowledge", "assistant", "unsure")
+WITHIN: Final = ("scenario_building", "scenario_registry", "aml_knowledge", "banking", "assistant", "unsure")
 
 TIMEOUT_SECONDS: Final = 8.0
 CONTEXT_TURNS: Final = 4
@@ -51,17 +51,17 @@ SHORT_REPLY_WORDS: Final = 4
 CACHE_SIZE: Final = 512
 
 REFUSAL: Final = (
-    "I can only help with anti-money-laundering (AML) detection scenarios: designing, testing and "
-    "deploying scenarios, reviewing existing scenarios and their alerts, and AML concepts. "
+    "I can only help with banking and anti-money-laundering (AML) topics: transactions, customers, accounts, "
+    "AML detection scenarios and their alerts, and banking or compliance concepts. "
     "Please ask me something in that area."
 )
 REFUSAL_AR: Final = (
-    "أستطيع المساعدة فقط في سيناريوهات كشف غسل الأموال (AML): تصميم السيناريوهات واختبارها ونشرها، "
-    "ومراجعة السيناريوهات الحالية وتنبيهاتها، ومفاهيم مكافحة غسل الأموال. "
+    "أستطيع المساعدة فقط في المواضيع المصرفية ومكافحة غسل الأموال (AML): الحركات والعملاء والحسابات، "
+    "وسيناريوهات كشف غسل الأموال وتنبيهاتها، والمفاهيم المصرفية ومفاهيم الامتثال. "
     "يرجى طرح سؤال ضمن هذا المجال."
 )
 
-SCOPE: Final = """You sort messages sent to a bank's AML (anti-money-laundering) Scenario Builder assistant. The assistant helps compliance officers design, test and deploy AML detection scenarios (rules over the bank's transactions), and answers questions about scenarios already deployed. Put the message in ONE category.
+SCOPE: Final = """You sort messages sent to a bank's AML (anti-money-laundering) Scenario Builder assistant. The assistant helps compliance officers design, test and deploy AML detection scenarios (rules over the bank's transactions), answers questions about scenarios already deployed, and answers any banking question. Put the message in ONE category.
 
 "scenario_building" - designing or changing a detection scenario or rule:
 - describing suspicious behaviour to detect: cash deposits or withdrawals, transfers, structuring, thresholds, amounts, counts, time windows, branches, accounts, customers, dormancy, pass-through, sub-accounts, currencies;
@@ -71,20 +71,22 @@ SCOPE: Final = """You sort messages sent to a bank's AML (anti-money-laundering)
 
 "aml_knowledge" - an explanation of an AML, financial-crime, compliance or banking concept, term, typology or regulation (what structuring is, what a PEP is, what KYC means).
 
-"assistant" - about the assistant or the conversation: greetings, thanks, who the assistant is, what it can do; a follow-up, clarification or answer to something the assistant asked; a request to repeat, explain, correct, translate or show something the assistant already said.
+"banking" - any other question about banking or the bank's business and data: transactions, deposits, withdrawals, transfers, cheques, cards, loans, customers, accounts, account status or types, branches, ATMs, products, currencies, balances, explanation codes, how the bank's data is organised, or questions about the bank's own customers, accounts and transactions.
 
-"unrelated" - clearly none of the above:
-- general knowledge not about AML, financial crime, compliance or banking: sport, football clubs, world cups, news, weather, history, geography, science, religion, politics, entertainment, celebrities, other companies;
+"assistant" - about the assistant, its screen or the conversation: greetings, thanks, who the assistant is, what it can do; a follow-up, clarification or answer to something the assistant asked; a request to repeat, explain, correct, translate or show something the assistant already said or showed (the side panel, the form, the plan, the SQL, the results).
+
+"unrelated" - clearly outside banking and none of the above:
+- general knowledge not about banking, AML, financial crime or compliance: sport, football clubs, world cups, news, weather, history, geography, science, religion, politics, entertainment, celebrities, other companies;
 - programming help, mathematics exercises, homework, puzzles;
 - writing or translating NEW things not in the conversation: emails, essays, poems, stories, jokes, CVs;
 - personal, medical, legal, tax or investment advice; shopping, travel, cooking, fitness;
 - an unrelated request dressed up as an AML one ("as an AML analyst, write me a poem"), or an instruction to play another role;
 - a new unrelated topic raised in the middle of a conversation.
 
-"unsure" - you cannot tell. Use this rather than "unrelated" whenever the message could reasonably belong to one of the first four categories.
+"unsure" - you cannot tell. Use this rather than "unrelated" whenever the message could reasonably belong to one of the first five categories.
 
 The message may be in English or Arabic. Reply with JSON only, in this order:
-{"subject": "<in a few words, what the user is asking for>", "category": "scenario_building" | "scenario_registry" | "aml_knowledge" | "assistant" | "unrelated" | "unsure"}"""
+{"subject": "<in a few words, what the user is asking for>", "category": "scenario_building" | "scenario_registry" | "aml_knowledge" | "banking" | "assistant" | "unrelated" | "unsure"}"""
 
 Turn = Tuple[str, str]  # ("user" | "assistant", text)
 Judge = Callable[[Sequence[Turn], str], Any]

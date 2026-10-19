@@ -195,7 +195,15 @@ class Settings(BaseSettings):
         description="'Apply Industry Defaults' value for the channels (comma-separated transaction types).",
     )
     CLARIFICATION_DEFAULT_ENTITY: str = Field(
-        default="CUSTOMER", description="'Apply Industry Defaults' value for the target entity."
+        default="CUSTOMER",
+        description="Target entity used when a request does not state one (business decision: per customer).",
+    )
+    CLARIFICATION_ASK_ENTITY: bool = Field(
+        default=False,
+        description=(
+            "Ask 'What should be monitored?' in the clarification form. False (business decision): never ask; a "
+            "request that does not name accounts, customers or single transactions is monitored per customer."
+        ),
     )
     AML_SCOPE_GUARD: bool = Field(
         default=True,
