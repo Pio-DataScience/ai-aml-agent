@@ -176,11 +176,11 @@ def test_llm_token_setting_preserves_provider_default_when_unset(
     assert captured[expected_parameter] == 123
 
 
-def test_fresh_state_directory_initializes_catalogs_and_checkpoint_store(
+def test_fresh_state_directory_initializes_catalogs_and_app_state_store(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Fresh-state startup components work without contacting external systems."""
+    """The app-state DB is separate from checkpoints and live integrations."""
     config = _required_settings(
         STATE_DIR=tmp_path / "v2",
         CATALOG_DIR=Path("config/aml_catalogs"),
@@ -195,9 +195,10 @@ def test_fresh_state_directory_initializes_catalogs_and_checkpoint_store(
     session_store.init_session_db()
 
     assert config.CHECKPOINT_DB_PATH is not None
-    assert config.CHECKPOINT_DB_PATH.exists()
+    assert config.APP_STATE_DB_PATH.exists()
+    assert not config.CHECKPOINT_DB_PATH.exists()
     assert config.APP_STATE_DB_PATH == config.STATE_DIR / "app_state.sqlite"
-    with sqlite3.connect(config.CHECKPOINT_DB_PATH) as connection:
+    with sqlite3.connect(config.APP_STATE_DB_PATH) as connection:
         tables = {
             row[0]
             for row in connection.execute(
@@ -246,7 +247,8 @@ def test_application_lifespan_boots_with_fresh_state_and_mocked_adapters(
     async def run_lifespan() -> None:
         async with aml_main.lifespan(aml_main.app):
             assert config.CHECKPOINT_DB_PATH is not None
-            assert config.CHECKPOINT_DB_PATH.exists()
+            assert config.APP_STATE_DB_PATH.exists()
+            assert not config.CHECKPOINT_DB_PATH.exists()
             assert config.APP_STATE_DB_PATH == config.STATE_DIR / "app_state.sqlite"
 
     asyncio.run(run_lifespan())

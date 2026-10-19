@@ -15,6 +15,7 @@ from services.aml_builder.web.api.codec import (
     encode_tool_result,
 )
 from services.aml_builder.web.api import sse_mapper
+from services.aml_builder.web.api.dependencies import Identity
 from services.aml_builder.web.api.routes import sessions
 from services.aml_builder.web.domain.hashing import normalize_sql, stable_hash
 from services.aml_builder.web.services import tools as aml_tools
@@ -273,6 +274,8 @@ def test_history_endpoint_decodes_synthetic_tool_envelope(
         return FakeGraph()
 
     monkeypatch.setattr(sessions, "get_tool_driven_graph", fake_get_graph)
-    response = asyncio.run(sessions.get_chat_history("proj", "chat", "user"))
+    response = asyncio.run(
+        sessions.get_chat_history("proj", "chat", "user", Identity("user", "", "proj"))
+    )
 
     assert response.messages[-1].plan_artifact == "# Recovered plan"

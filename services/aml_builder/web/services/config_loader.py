@@ -64,6 +64,21 @@ class FiltersCatalog(CatalogModel):
     dimensions: dict[str, FilterDimension]
 
 
+class RevisionPolicy(BaseModel):
+    """Configurable revision history retention defaults."""
+
+    history_cap: int = Field(default=5, ge=0)
+    evict: str = "oldest_undeployed"
+    carry_over_user_edited_metadata: bool = True
+    restore_from_history: str = "reserved"
+
+
+class WorkflowPolicy(BaseModel):
+    """Workflow enforcement mode used during staged rollout."""
+
+    enforcement: Literal["observe", "enforce"] = "observe"
+
+
 class PolicyCatalog(CatalogModel):
     """Authorization and conflict policy catalog."""
 
@@ -80,6 +95,8 @@ class PolicyCatalog(CatalogModel):
     max_matches_shown: int = Field(ge=1)
     dimension_weights: dict[str, int]
     reason_required_for: list[str]
+    revisions: RevisionPolicy = Field(default_factory=RevisionPolicy)
+    workflow: WorkflowPolicy = Field(default_factory=WorkflowPolicy)
 
 
 class UiCopyCatalog(BaseModel):

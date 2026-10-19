@@ -541,6 +541,7 @@ class SSEEvent(BaseModel):
         "scenario_result",
         "plan_artifact",
         "scenario_metadata_catalog",
+        "stage_changed",
         "error",
         "done",
     ] = Field(..., description="SSE event type.")

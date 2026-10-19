@@ -5,6 +5,22 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-10-19] refactor: P3 workflow state, revisions, and guards
+
+### What
+- Added per-chat workflow state, revision history with bounded eviction, pending-card state, append-only card audit, and SQLite WAL/busy-timeout/schema versioning.
+- Added identity- and ownership-checked workflow state and revision endpoints, workflow-aware tool results, stage events, and transient model context for superseded results.
+- Added policy guards with `observe` as the default; observe records `would_block` and permits workflow progress, while deployed-chat locks and permission denials remain enforced. P5 must switch enforcement to `enforce`.
+- Added offline workflow tests and documented the P3 state model and API.
+
+### Why
+- Establishes server-owned workflow and revision state while keeping the existing chat flow usable until P5 enables enforcement.
+
+### Verification
+- `python -m compileall -q services app.py run_alert_engine.py`
+- `python -m pytest -q` — full offline suite result recorded in `Docs/refactor_status.md`.
+- No legacy `chat_sessions` rows were copied; no live Oracle, LLM, or Service B call was made.
+
 ## [2026-10-17] feat: P2 trusted identity and mock role authorization
 
 ### What

@@ -35,3 +35,13 @@ dimension_weights:
   transaction_scope: 2
   filters: 1
 reason_required_for: [revise, rollback, retire]
+revisions:
+  history_cap: 5
+  evict: oldest_undeployed
+  carry_over_user_edited_metadata: true
+  restore_from_history: reserved
+workflow:
+  enforcement: observe
+card_audit:
+  store: sqlite
+  retention: permanent

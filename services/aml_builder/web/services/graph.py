@@ -8,6 +8,7 @@ checkpointer) and manages its process-lifetime singleton and shutdown.
 import logging
 from pathlib import Path
 from typing import Any
+from langchain_core.runnables import RunnableConfig
 
 from services.aml_builder.web.services.settings import settings
 from services.aml_builder.web.services.llm_client import build_llm
@@ -21,11 +22,84 @@ from services.aml_builder.web.services.tools import (
 )
 
 from services.aml_builder.web.services.prompts.loader import load_prompt
+from services.aml_builder.web.domain.policy import authorize
+from services.aml_builder.web.workflow.context import build_model_messages
+from services.aml_builder.web.workflow.runtime import get_workflow_repo
 
 logger = logging.getLogger(__name__)
 
 _tool_graph = None
 _checkpointer_conn = None
+
+
+def workflow_pre_model_hook(
+    state: dict[str, Any], config: RunnableConfig
+) -> dict[str, Any]:
+    """Provide current workflow context and transiently stub superseded results."""
+    configurable = config.get("configurable", {})
+    thread_id = configurable.get("thread_id")
+    messages = list(state.get("messages", []))
+    if not thread_id:
+        return {"llm_input_messages": messages}
+    repo = get_workflow_repo()
+    workflow = repo.get_workflow(str(thread_id))
+    if workflow is None:
+        return {"llm_input_messages": messages}
+    revision = repo.current(str(thread_id))
+    summary = revision.payload_free_summary() if revision else None
+    actions_by_stage = {
+        "EMPTY": ["analyze_intent_and_discover_explanation_codes", "query_production_scenario_registry"],
+        "INTAKE": ["generate_scenario_execution_plan", "query_production_scenario_registry"],
+        "PARAMS_PENDING": ["query_production_scenario_registry"],
+        "PARAMS_CONFIRMED": ["query_production_scenario_registry"],
+        "CONFLICT_CHECKED": ["generate_scenario_execution_plan", "query_production_scenario_registry"],
+        "PLAN_PENDING": ["generate_scenario_execution_plan", "query_production_scenario_registry"],
+        "PLAN_APPROVED": ["execute_oracle_dwh_shadow_test", "query_production_scenario_registry"],
+        "SHADOW_PASSED": ["prepare_scenario_metadata_for_persistence", "query_production_scenario_registry"],
+        "RESULT_APPROVED": ["prepare_scenario_metadata_for_persistence", "query_production_scenario_registry"],
+        "METADATA_READY": ["persist_and_validate_scenario_in_dwh", "query_production_scenario_registry"],
+        "DEPLOYED": ["query_production_scenario_registry"],
+    }
+    action_permissions = {
+        "analyze_intent_and_discover_explanation_codes": "scenario.create",
+        "generate_scenario_execution_plan": "scenario.create",
+        "execute_oracle_dwh_shadow_test": "scenario.create",
+        "prepare_scenario_metadata_for_persistence": "scenario.create",
+        "persist_and_validate_scenario_in_dwh": "scenario.create",
+        "query_production_scenario_registry": "chat.read",
+    }
+    user_id = str(configurable.get("user_id", ""))
+    user_email = str(configurable.get("user_email", "")) or None
+    if repo.enforcement == "observe" and not workflow.locked:
+        allowed_actions = [
+            name
+            for name, permission in action_permissions.items()
+            if authorize(
+                user_id,
+                permission,
+                {"user_id": user_id},
+                user_email=user_email,
+            )
+        ]
+    else:
+        allowed_actions = [
+            name
+            for name in actions_by_stage.get(workflow.stage, [])
+            if authorize(
+                user_id,
+                action_permissions[name],
+                {"user_id": user_id},
+                user_email=user_email,
+            )
+        ]
+    projected = build_model_messages(
+        messages,
+        current_revision=summary,
+        superseded=repo.list_superseded_revision_numbers(str(thread_id)),
+        allowed_actions=allowed_actions,
+        enforcement=repo.enforcement,
+    )
+    return {"llm_input_messages": projected}
 
 
 async def get_tool_driven_graph() -> Any:
@@ -66,6 +140,7 @@ async def get_tool_driven_graph() -> Any:
             tools=tools,
             prompt=goal_prompt,
             checkpointer=checkpointer,
+            pre_model_hook=workflow_pre_model_hook,
         )
         logger.info(
             "[TOOL_AGENT] Compiled production ReAct graph with checkpointer ready."

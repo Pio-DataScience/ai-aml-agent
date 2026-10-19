@@ -41,3 +41,11 @@ def map_tool_result_to_sse(tool_name: str, content: Any) -> List[SSEEvent]:
         ):
             return [SSEEvent(type="scenario_result", data=payload)]
     return []
+
+
+def stage_changed_event(stage: str, revision_id: str | None) -> SSEEvent:
+    """Build the SSE event emitted after a workflow tool round."""
+    return SSEEvent(
+        type="stage_changed",
+        data={"stage": stage, "revision_id": revision_id},
+    )

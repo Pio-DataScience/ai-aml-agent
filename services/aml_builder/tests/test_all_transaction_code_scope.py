@@ -40,7 +40,8 @@ def test_any_transaction_scope_skips_explanation_code_search(monkeypatch):
 
     result = json.loads(
         aml_tools.analyze_intent_and_discover_explanation_codes.invoke(
-            {"user_prompt": "Customers with at least one transaction of 10K or more."}
+            {"user_prompt": "Customers with at least one transaction of 10K or more."},
+            config={"configurable": {"user_id": "999"}},
         )
     )
 

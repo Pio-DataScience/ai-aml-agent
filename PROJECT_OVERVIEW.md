@@ -16,10 +16,10 @@ Primary implementation evidence: `services/aml_builder/web/api/main.py`, `servic
 
 The application has four practical layers:
 
-1. **HTTP interface:** FastAPI startup and routes under `services/aml_builder/web/api/` expose chat/SSE, session history and sidebar operations, direct deployment, alert-engine execution, and health.
-2. **Agent orchestration:** `services/aml_builder/web/services/graph.py:get_tool_driven_graph` builds one process-level ReAct agent with six tools and an `AsyncSqliteSaver`. There is no deterministic multi-node workflow in Python. Tool order and approval pauses are directed by `prompts/tool_driven_system.md` and tool descriptions.
+1. **HTTP interface:** FastAPI startup and routes under `services/aml_builder/web/api/` expose chat/SSE, workflow state and revision reads, session history and sidebar operations, direct deployment, alert-engine execution, and health.
+2. **Agent orchestration:** `services/aml_builder/web/services/graph.py:get_tool_driven_graph` builds one process-level ReAct agent with six tools, an `AsyncSqliteSaver`, and a pre-model hook that adds current workflow context and stubs superseded tool results in model input. Tool selection remains LLM-driven; P3 adds a deterministic workflow store and configurable observe/enforce guards around tool calls.
 3. **Domain and integration services:** pure intent normalization, code binding, metadata rules, window conversion, SQL extraction and hashing live under `web/domain/`. Oracle-backed metadata lookups, deterministic plan rendering, explanation-code search, registry analytics, external text-to-SQL calls, and alert processing remain under `web/services/`.
-4. **Persistence:** SQLite stores LangGraph checkpoints and chat-sidebar metadata; Oracle stores source/lookups, scenario definitions and governance records, and generated alerts.
+4. **Persistence:** SQLite stores LangGraph checkpoints in `STATE_DIR/checkpoints.sqlite`; workflow, revision, card-audit, workflow-event, and composite-key chat-sidebar data live in `STATE_DIR/app_state.sqlite`. Oracle stores source/lookups, scenario definitions and governance records, and generated alerts.
 
 The service is synchronous at several integration boundaries despite async HTTP routes: Oracle helpers, OpenAI/LangChain invocations inside tools, the `httpx.Client` call to the text-to-SQL service, and alert-engine execution are synchronous. FastAPI engine routes invoke that work directly rather than enqueueing it.
 
@@ -31,12 +31,14 @@ The service is synchronous at several integration boundaries despite async HTTP 
 | `services/aml_builder/web/api/dependencies.py` | Validates BFF service-token/identity headers and rejects body/path ID mismatches. |
 | `services/aml_builder/web/api/routes/me.py` | `GET /me/permissions` returns the caller's YAML policy role and allowed actions. |
 | `services/aml_builder/web/api/routes/chat.py` | `POST /chat/stream`; converts graph messages and selected tool results to SSE events. |
+| `services/aml_builder/web/api/routes/workflow.py` | Own-chat workflow state, revision summaries, and revision detail endpoints. |
 | `services/aml_builder/web/api/routes/sessions.py` | Checkpoint-backed history reconstruction and sidebar list/rename/pin/soft-delete endpoints. |
 | `services/aml_builder/web/api/routes/deploy.py` | Direct side-panel deployment by recovering SQL/intent from checkpoint messages. |
 | `services/aml_builder/web/api/codec.py` | Versioned tool-result envelope, per-tool payload models, and legacy checkpoint decoding. |
 | `services/aml_builder/web/api/sse_mapper.py` | Maps decoded tool results to the existing UI-visible SSE events. |
 | `services/aml_builder/web/api/routes/engine.py` | Synchronous alert-engine trigger and active-scenario listing. |
 | `services/aml_builder/web/services/graph.py` | ReAct graph/checkpointer singleton lifecycle and six-tool registration. |
+| `services/aml_builder/web/workflow/` | Typed workflow records, stage transitions, SQLite repositories, revision history/eviction, stage guards, and transient model context. |
 | `services/aml_builder/web/services/tools.py` | Agent-facing intent, plan, shadow-test, metadata, persistence, and registry-query tools. |
 | `services/aml_builder/web/domain/intent_normalize.py` | Pure intent normalization with default provenance and `applied_defaults` entries. |
 | `services/aml_builder/web/domain/code_binding.py` | Pure transaction-scope selection and explanation-code binding. |
@@ -53,7 +55,7 @@ The service is synchronous at several integration boundaries despite async HTTP 
 | `services/aml_builder/web/services/scenario_registry_analytics.py` | Read-only scenario search, counts, detail, and alert telemetry. |
 | `services/aml_builder/web/services/alert_engine.py` | Loads active scenarios, executes saved SQL, and writes alert headers/details. |
 | `services/aml_builder/web/services/oracle.py` | Primary and shadow Oracle pools plus query/transaction helpers. |
-| `services/aml_builder/web/services/session_store.py` | SQLite `chat_sessions` table and sidebar CRUD. |
+| `services/aml_builder/web/services/session_store.py` | Composite-key `chat_sessions` table and sidebar CRUD in the app-state database. |
 | `services/aml_builder/web/services/settings.py` | Pydantic environment configuration. |
 | `services/aml_builder/web/services/config_loader.py` | Pydantic validation and mtime-based reload for the four AML YAML catalogs. |
 | `config/aml_catalogs/` | Demo parameter, filter, policy, and UI-copy catalogs. |
@@ -103,6 +105,9 @@ $env:PYTHONPATH = "services\aml_builder"
 | `GET /health` | Returns static service/version health data. |
 | `GET /me/permissions` | Requires BFF identity headers; returns policy role and allowed actions. |
 | `POST /chat/stream` | Runs the ReAct graph and streams SSE. |
+| `GET /workflow/{project_id}/{chat_id}/{user_id}/state` | Returns current stage, current revision summary, pending-card slot, and history summaries without payloads. |
+| `GET /workflow/{project_id}/{chat_id}/{user_id}/revisions` | Lists current, historical, and evicted revision summaries without payloads. |
+| `GET /workflow/{project_id}/{chat_id}/{user_id}/revisions/{revision_id}` | Returns one full revision after checking chat ownership. |
 | `GET /chat/{project_id}/{chat_id}/{user_id}/history` | Reconstructs user/assistant turns and artifacts from the graph checkpoint. |
 | `GET /chats/user/{user_id}/list` | Lists non-deleted sidebar sessions, optionally filtered by project query parameter. |
 | `DELETE /chat/{project_id}/{chat_id}/{user_id}` | Soft-deletes sidebar metadata only. |
@@ -112,7 +117,7 @@ $env:PYTHONPATH = "services\aml_builder"
 | `POST /engine/run-scenarios` | Synchronously evaluates all active scenarios or one requested scenario. |
 | `GET /engine/active-scenarios` | Lists active registry rows and governance fields. |
 
-The chat stream emits `thinking`, `tool_call`, `content`, selected artifact/result events, `error`, and `done`. Raw tool messages are suppressed. The Service A `SSEEvent` schema contains only event types used by the route; `ChatRequest.reasoning_mode` remains accepted but is documented as ignored.
+The chat stream emits `thinking`, `tool_call`, `content`, `stage_changed`, selected artifact/result events, `error`, and `done`. Raw tool messages are suppressed. The Service A `SSEEvent` schema contains only event types used by the route; `ChatRequest.reasoning_mode` remains accepted but is documented as ignored.
 
 `ChatRequest.reasoning_mode` is accepted but not used to choose a model or graph configuration. The request may contain full message history, but the route sends only the latest message content to LangGraph; prior context comes from the checkpoint for the derived thread ID. If `chat_id` is omitted, the route generates one internally but does not emit that generated ID in a dedicated response event.
 
@@ -158,13 +163,17 @@ The cache has no TTL or source-data invalidation. Changing explanation-code rows
 
 ```text
 POST /chat/stream
-  -> normalize identifiers and upsert sidebar metadata
+  -> normalize identifiers, upsert sidebar metadata, and get-or-create workflow row
   -> thread_id = "{project_id}_{chat_id}_{user_id}"
   -> graph.astream(..., recursion_limit=settings.AGENT_RECURSION_LIMIT)
-  -> LLM chooses among six tools under prompt rules
+  -> LLM chooses among six tools; the pre-model hook adds current stage/revision context
+  -> tool wrapper records guard verdicts and successful stage progress
   -> route selected graph/tool messages into SSE events
-  -> persist conversation state in SQLite checkpoints
+  -> emit stage_changed after tool results
+  -> persist conversation in checkpoints and workflow state in app_state.sqlite
 ```
+
+P3's `workflow.enforcement` catalog setting defaults to `observe` so the existing tool sequence remains usable until P5 is integrated. Observe mode appends `would_block` workflow events for ordinary stage/stale-card verdicts and still allows the tool to continue; successful tools advance the stored stage. `CHAT_LOCKED_DEPLOYED` and `PERMISSION_DENIED` always block. P5 must set `workflow.enforcement: enforce` when its typed approval actions are ready.
 
 The intended prompt-governed workflow is:
 

@@ -182,7 +182,7 @@ async def delete_chat_session(project_id: str, chat_id: str, user_id: str, ident
     if not authorize(user_id, "chat.read", {"user_id": user_id}, user_email=identity.user_email):
         raise HTTPException(status_code=403, detail="Permission denied.")
     normalized_project = _normalize_project(project_id)
-    if not os.path.exists(settings.CHECKPOINT_DB_PATH):
+    if not os.path.exists(settings.APP_STATE_DB_PATH):
         raise HTTPException(status_code=404, detail="Database not found")
 
     found = soft_delete_chat_session(chat_id, user_id, normalized_project)
@@ -199,7 +199,7 @@ async def rename_chat_session_route(project_id: str, chat_id: str, user_id: str,
     if not authorize(user_id, "chat.read", {"user_id": user_id}, user_email=identity.user_email):
         raise HTTPException(status_code=403, detail="Permission denied.")
     normalized_project = _normalize_project(project_id)
-    if not os.path.exists(settings.CHECKPOINT_DB_PATH):
+    if not os.path.exists(settings.APP_STATE_DB_PATH):
         raise HTTPException(status_code=404, detail="Database not found")
 
     found = rename_chat_session(chat_id, user_id, normalized_project, request.title)
@@ -221,7 +221,7 @@ async def toggle_chat_pin_route(project_id: str, chat_id: str, user_id: str, ide
     if not authorize(user_id, "chat.read", {"user_id": user_id}, user_email=identity.user_email):
         raise HTTPException(status_code=403, detail="Permission denied.")
     normalized_project = _normalize_project(project_id)
-    if not os.path.exists(settings.CHECKPOINT_DB_PATH):
+    if not os.path.exists(settings.APP_STATE_DB_PATH):
         raise HTTPException(status_code=404, detail="Database not found")
 
     new_pin = toggle_chat_pin(chat_id, user_id, normalized_project)

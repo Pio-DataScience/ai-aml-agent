@@ -19,12 +19,14 @@ from services.aml_builder.web.services.schemas import ChatRequest, SSEEvent
 from services.aml_builder.web.services.session_store import upsert_chat_session
 from services.aml_builder.web.services.settings import settings
 from services.aml_builder.web.api.sse_mapper import map_tool_result_to_sse
+from services.aml_builder.web.api.sse_mapper import stage_changed_event
 from services.aml_builder.web.api.dependencies import (
     Identity,
     assert_identity_matches,
     require_identity,
 )
 from services.aml_builder.web.domain.policy import authorize
+from services.aml_builder.web.workflow.runtime import get_workflow_repo
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +75,9 @@ async def chat_stream(
         project_id = "no_project"
 
     thread_id = f"{project_id}_{chat_id}_{user_id}"
+
+    workflow_repo = get_workflow_repo()
+    workflow_repo.get_or_create_workflow(thread_id, project_id, chat_id, user_id)
 
     first_msg = request.messages[0].content if request.messages else "New Chat"
     upsert_chat_session(chat_id, user_id, project_id, first_msg)
@@ -123,6 +128,7 @@ async def chat_stream(
                     if not isinstance(node_output, dict):
                         continue
                     msgs = node_output.get("messages", [])
+                    tool_round_completed = False
                     for m in msgs:
 
                         # ── AIMessage: register tool calls + emit tool_call SSE ──
@@ -143,6 +149,7 @@ async def chat_stream(
 
                         # ── ToolMessage: intercept specific tools, suppress the rest ──
                         elif isinstance(m, ToolMessage) or getattr(m, "type", None) == "tool":
+                            tool_round_completed = True
                             tool_call_id = getattr(m, "tool_call_id", None)
                             tool_name = tool_call_id_to_name.get(tool_call_id, "")
 
@@ -163,6 +170,17 @@ async def chat_stream(
                                 )
 
                             # All other ToolMessages are suppressed — raw JSON stays internal
+
+                    if tool_round_completed:
+                        current_workflow = workflow_repo.get_workflow(thread_id)
+                        if current_workflow is not None:
+                            current_revision = workflow_repo.current(thread_id)
+                            yield _sse(
+                                stage_changed_event(
+                                    current_workflow.stage,
+                                    current_revision.revision_id if current_revision else None,
+                                )
+                            )
 
         except Exception as exc:
             logger.error("[API] Stream error: %s", exc, exc_info=True)

@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from services.aml_builder.web.api.routes import chat, sessions, engine, deploy, me
+from services.aml_builder.web.api.routes import chat, sessions, engine, deploy, me, workflow
 from services.aml_builder.web.services.graph import get_tool_driven_graph, close_checkpointer
 from services.aml_builder.web.services.logging_config import setup_logging
 from services.aml_builder.web.services.oracle import close_pool, close_shadow_pool, init_pool, init_shadow_pool
@@ -132,6 +132,7 @@ app.include_router(sessions.router)
 app.include_router(engine.router)
 app.include_router(deploy.router)
 app.include_router(me.router)
+app.include_router(workflow.router)
 
 
 # =============================================================================

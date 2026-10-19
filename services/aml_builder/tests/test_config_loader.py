@@ -115,3 +115,5 @@ def test_section_six_catalog_drafts_load_from_repository() -> None:
     assert catalogs.params.status == "demo"
     assert catalogs.filters.dimensions["account_status"].status == "needs_advisor_input"
     assert catalogs.filters.dimensions["explanation_code"].status == "confirmed"
+    assert catalogs.policy.revisions.history_cap == 5
+    assert catalogs.policy.workflow.enforcement == "observe"

@@ -28,6 +28,17 @@ class ToolErrorCode(str, Enum):
     NOT_FOUND = "NOT_FOUND"
     INTERNAL_ERROR = "INTERNAL_ERROR"
     PERMISSION_DENIED = "PERMISSION_DENIED"
+    STAGE_NOT_ALLOWED = "STAGE_NOT_ALLOWED"
+    CHAT_LOCKED_DEPLOYED = "CHAT_LOCKED_DEPLOYED"
+    PARAMS_UNCONFIRMED = "PARAMS_UNCONFIRMED"
+    PARAMS_INCOMPLETE = "PARAMS_INCOMPLETE"
+    CARD_STALE = "CARD_STALE"
+    CARD_PENDING = "CARD_PENDING"
+    REVISION_STALE = "REVISION_STALE"
+    PLAN_NOT_APPROVED = "PLAN_NOT_APPROVED"
+    SHADOW_NOT_PASSED = "SHADOW_NOT_PASSED"
+    HASH_MISMATCH = "HASH_MISMATCH"
+    WORKFLOW_CONFLICT = "WORKFLOW_CONFLICT"
 
 
 class PayloadModel(BaseModel):
@@ -108,6 +119,7 @@ class ToolResult(BaseModel):
     schema_version: int = Field(default=1)
     status: ToolStatus = ToolStatus.OK
     error_code: Optional[ToolErrorCode] = None
+    revision_id: Optional[str] = None
     payload: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -177,6 +189,7 @@ def encode_tool_result(
     payload: Dict[str, Any],
     status: Optional[ToolStatus] = None,
     error_code: Optional[ToolErrorCode] = None,
+    revision_id: Optional[str] = None,
 ) -> str:
     """Encode a tool payload as a JSON ToolResult envelope.
 
@@ -199,6 +212,7 @@ def encode_tool_result(
     envelope = ToolResult(
         status=result_status,
         error_code=inferred_code,
+        revision_id=revision_id,
         payload=validated_payload,
     )
     return envelope.model_dump_json(indent=2, exclude_none=True)
@@ -248,7 +262,48 @@ def typed_tool(function: Callable[..., str]) -> Any:
 
     @wraps(function)
     def wrapped(*args: Any, **kwargs: Any) -> str:
-        """Run the original tool and encode its JSON result."""
+        """Guard, run, advance, and encode one workflow-aware tool result."""
+        config = kwargs.get("config", {})
+        configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
+        thread_id = configurable.get("thread_id")
+        repo = None
+        current_revision_id = None
+        if thread_id:
+            from services.aml_builder.web.domain.policy import authorize
+            from services.aml_builder.web.workflow.guards import guard_tool
+            from services.aml_builder.web.workflow.runtime import get_workflow_repo
+
+            repo = get_workflow_repo()
+            current = repo.current(str(thread_id))
+            current_revision_id = current.revision_id if current else None
+            action = (
+                "chat.read"
+                if function.__name__ == "query_production_scenario_registry"
+                else "scenario.create"
+            )
+            user_id = str(configurable.get("user_id", ""))
+            user_email = str(configurable.get("user_email", "")) or None
+            authorized = authorize(
+                user_id,
+                action,
+                {"user_id": user_id},
+                user_email=user_email,
+            )
+            verdict = guard_tool(
+                repo,
+                str(thread_id),
+                function.__name__,
+                current_revision_id,
+                authorized=authorized,
+            )
+            if not verdict.allowed:
+                return encode_tool_result(
+                    function.__name__,
+                    {"error": f"{verdict.code.value}: {verdict.message}"},
+                    status=ToolStatus.BLOCKED,
+                    error_code=ToolErrorCode(verdict.code.value),
+                    revision_id=current_revision_id,
+                )
         raw_result = function(*args, **kwargs)
         try:
             payload = json.loads(raw_result)
@@ -256,6 +311,15 @@ def typed_tool(function: Callable[..., str]) -> Any:
             payload = {"error": str(raw_result)}
         if not isinstance(payload, dict):
             payload = {"result": payload}
-        return encode_tool_result(function.__name__, payload)
+        if repo is not None and thread_id and "error" not in payload:
+            actor = str(configurable.get("user_id", "system"))
+            from services.aml_builder.web.workflow.runtime import record_tool_success
+
+            current_revision_id = record_tool_success(
+                repo, str(thread_id), function.__name__, payload, actor=actor
+            )
+        return encode_tool_result(
+            function.__name__, payload, revision_id=current_revision_id
+        )
 
     return langchain_tool(wrapped)

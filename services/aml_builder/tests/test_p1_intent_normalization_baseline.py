@@ -73,7 +73,8 @@ def test_intent_tool_calls_extracted_baseline_helper(
 
     result = json.loads(
         aml_tools.analyze_intent_and_discover_explanation_codes.invoke(
-            {"user_prompt": "Find large deposits"}
+            {"user_prompt": "Find large deposits"},
+            config={"configurable": {"user_id": "999"}},
         )
     )
 
