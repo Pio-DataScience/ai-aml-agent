@@ -383,6 +383,9 @@ $env:DEBUG = "false"
 
 The `DEBUG` override avoids unrelated ambient-variable collisions and applies only to the current PowerShell process. The pytest suite does not call live Oracle, the LLM, or Service B.
 
+GitHub Actions runs the same offline compile and pytest checks in
+`.github/workflows/ci.yml` using Python 3.14.7, matching the development venv.
+
 Do not run the integration script, start the app lifespan, invoke agent tools, or trigger the engine merely as a routine test: those paths can call paid APIs, query live systems, create Oracle tables, or write production data.
 
 ## 12. Build, run, and deployment model

@@ -33,6 +33,10 @@ Format: `[DATE] TYPE: Description`
 
 - Keep the latest per-tool result and other protected messages intact even when their revision is superseded; older superseded results remain one-line stubs.
 
+## [2026-10-20] ci: P10 offline checks
+
+- Added GitHub Actions checks using Python 3.14.7 for compileall and the offline pytest suite.
+
 ## [2026-10-20] feat: P9 versioning flows
 
 ### What
