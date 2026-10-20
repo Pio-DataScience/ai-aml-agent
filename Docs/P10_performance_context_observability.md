@@ -44,6 +44,10 @@ improvement.
 | Three type searches | 61.617 ms | 61.790 ms | +0.173 ms |
 | Event-loop delay | 20.488 ms | 20.641 ms | +0.153 ms |
 
+Superseded-revision stubs apply only to messages outside the never-trim list;
+the latest tool result, current-revision artifacts, pending card, and recent
+turns stay intact even if an item is marked superseded.
+
 ### Bounded I/O adapters
 
 Seven fake runs with blocking adapter and state-store work moved to the dedicated

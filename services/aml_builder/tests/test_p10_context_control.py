@@ -33,7 +33,7 @@ def test_projection_trims_only_old_tool_messages_and_preserves_protected_items()
     projected = build_model_messages(
         messages,
         current_revision={"revision_id": "rev-current", "rev_no": 2, "stage": "PLAN_PENDING"},
-        superseded={},
+        superseded={"rev-old": 3},
         pending_request_id="req-pending",
         context_policy={
             "trimming": True,
@@ -54,6 +54,8 @@ def test_projection_trims_only_old_tool_messages_and_preserves_protected_items()
     assert any("current plan" in message.content for message in projected_tools)
     assert "req-pending" in pending_card.content
     assert len(shadow_latest.content) > 80
+    assert "superseded by revision 3" not in shadow_latest.content
+    assert "superseded by revision 3" in shadow_old.content
     assert "newer intent" in intent_latest.content
     assert messages[1].content == original[1]
     assert [message.content for message in messages] == original

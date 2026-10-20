@@ -56,10 +56,6 @@ def build_model_messages(
         if isinstance(message, ToolMessage):
             result = _decode_result(message.content)
             revision_id = result.get("revision_id") if result else None
-            if revision_id in superseded:
-                content = _tool_summary(message, result, prefix=f"[superseded by revision {superseded[revision_id]}]")
-                projected.append(_copy_tool_message(message, content))
-                continue
             payload = result.get("payload", {}) if result else {}
             pending_card = payload.get("parameter_card") if isinstance(payload, dict) else None
             protects_pending = bool(
@@ -69,13 +65,24 @@ def build_model_messages(
             protects_current = bool(current_revision_id and revision_id == current_revision_id)
             protects_latest = index in latest_tool_indexes
             protects_recent = index >= recent_start
+            protected = (
+                protects_pending
+                or protects_current
+                or protects_latest
+                or protects_recent
+            )
+            if revision_id in superseded and not protected:
+                content = _tool_summary(
+                    message,
+                    result,
+                    prefix=f"[superseded by revision {superseded[revision_id]}]",
+                )
+                projected.append(_copy_tool_message(message, content))
+                continue
             if (
                 trimming
                 and len(str(message.content)) > max_chars
-                and not protects_pending
-                and not protects_current
-                and not protects_latest
-                and not protects_recent
+                and not protected
             ):
                 projected.append(
                     _copy_tool_message(message, _tool_summary(message, result))
