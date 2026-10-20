@@ -1,0 +1,4 @@
+version: 1
+status: demo
+params:
+  window: {required: true, input: duration, default: null}

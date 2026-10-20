@@ -63,6 +63,12 @@ def _fixture(*, enforcement: str = "enforce"):
         def current(self, thread_id):
             return self.revision if thread_id == workflow.thread_id else None
 
+        def get_revision(self, revision_id):
+            return self.revision if revision_id == self.revision.revision_id else None
+
+        def save_conflict_report(self, thread_id, revision_id, report, *, actor="system"):
+            self.revision = replace(self.revision, conflict_json=json.dumps(report))
+
         def mark_deployed(self, thread_id, revision_id):
             self.mark_calls += 1
             if self.fail_mark:
@@ -270,7 +276,7 @@ def test_nullable_signature_and_conflict_gate_are_in_receipt():
     service, _workflow, oracle, command = _fixture(enforcement="observe")
     result = service.deploy(**command)
     assert oracle.rows[result.scenario_id]["signature_hash"] is None
-    assert result.receipt["conflict"] == {"status": "not_run", "acknowledgements": []}
+    assert result.receipt["conflict"] == {"status": "not_run", "acknowledgements": [], "needs_ack": False}
 
 
 def test_required_conflict_gate_rejects_default_not_run_status():

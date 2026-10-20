@@ -16,6 +16,15 @@ from services.aml_builder.web.workflow.runtime import record_tool_success
 from services.aml_builder.web.services.tools import confirmed_intent_for_tool
 
 
+@pytest.fixture(autouse=True)
+def _mock_conflict_checker(monkeypatch):
+    class ClearChecker:
+        def check_intent(self, _intent, **_kwargs):
+            return {"revision_id": None, "provisional": False, "status": "clear", "conflict_hash": "clear-hash", "blocking": False, "needs_ack": False, "matches": []}
+
+    monkeypatch.setattr(workflow, "make_conflict_checker", lambda _repo: ClearChecker())
+
+
 def _repo(tmp_path: Path, *, enforcement: str = "enforce") -> WorkflowRepo:
     repo = WorkflowRepo(
         tmp_path / "p6.sqlite",
@@ -302,7 +311,7 @@ def test_existing_plan_confirmation_copies_revision_and_preserves_old_payload(tm
     assert current.plan_approved_at is None
     assert current.shadow_json is None and current.sql_hash is None
     assert current.result_approved_at is None
-    assert current.conflict_json is None and current.signature_json is None
+    assert current.conflict_json is not None and current.signature_json is not None
     assert json.loads(current.card_json)["intent"]["thresholds"][0]["value_from"] == 12000
     historical = repo.get_revision(revision.revision_id)
     assert historical and historical.status == "history"

@@ -5,6 +5,20 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-10-20] feat: P8 deterministic signature conflicts and acknowledgement
+
+### What
+- Added canonical scenario signatures and deterministic active-registry comparisons, including range/scope/filter relations and informational legacy similarity fallback.
+- Added provisional `conflict_report` SSE hints, typed conflict gating at parameter confirmation, acknowledgement actions, state reporting, and deploy-time rechecks.
+- Included acknowledged overrides in the deployment receipt and wrote one `OVERRIDE_CONFLICT` audit row per acknowledged match in the deployment transaction.
+- Added UI conflict review with View scenario ID/diff fallback, Change params, Proceed anyway, and Cancel; enabled conflict enforcement in policy.
+
+### Verification
+- P8 and related P4/P5/P6 offline regression coverage passed; see `Docs/refactor_status.md`.
+- No live LLM, Oracle, or Service B call was made. No registry detail read endpoint exists, so View scenario displays the scenario ID and deterministic diff.
+
+---
+
 ## [2026-10-20] feat: P7 filter catalog, resolution, and SQL recheck
 
 ### What

@@ -36,6 +36,8 @@ class _NotRunConflictGate:
 def deployment_blockers(
     workflow: Any, revision: Any, *, user_can_create: bool,
     approval_enforcement: str = "enforce",
+    conflict_check_required: bool = False,
+    conflict_on_unavailable: str = "block",
 ) -> list[str]:
     """Return typed deploy blockers shared by the state API and DeployService."""
     blockers: list[str] = []
@@ -51,6 +53,13 @@ def deployment_blockers(
         blockers.append("REVISION_STALE")
     if workflow.stage != "METADATA_READY" or revision.stage != "METADATA_READY":
         blockers.append("STAGE_NOT_ALLOWED")
+    conflict = _json_value(revision.conflict_json) or {}
+    if conflict.get("blocking") or conflict.get("status") == "blocked":
+        blockers.append("CONFLICT_BLOCKED")
+    elif conflict.get("needs_ack") or conflict.get("status") == "needs_ack":
+        blockers.append("CONFLICT_ACK_REQUIRED")
+    elif conflict_check_required and conflict_on_unavailable == "block" and conflict.get("status") == "unavailable":
+        blockers.append("CONFLICT_CHECK_UNAVAILABLE")
     shadow = _json_value(revision.shadow_json) or {}
     sql = shadow.get("raw_sql")
     if not shadow.get("validation_success"):
@@ -88,6 +97,7 @@ class DeployService:
         conflict_gate: ConflictGate | None = None,
         enforcement: str | dict[str, str] | None = None,
         conflict_check_required: bool = False,
+        conflict_on_unavailable: str = "block",
         numeric_created_by_default: int | None = None,
     ) -> None:
         """Configure adapters and the current P4 approval policy."""
@@ -103,6 +113,7 @@ class DeployService:
             else self.enforcement
         )
         self.conflict_check_required = conflict_check_required
+        self.conflict_on_unavailable = conflict_on_unavailable
         self.numeric_created_by_default = _numeric_user(
             settings.AML_CREATED_BY if numeric_created_by_default is None else numeric_created_by_default,
             fallback=999,
@@ -222,8 +233,65 @@ class DeployService:
             raise DeployError("METADATA_INVALID", "Governance metadata is invalid.", details=errors)
 
         conflict = self.conflict_gate.check(thread_id, revision_id)
+        if (
+            self.conflict_check_required
+            and conflict.get("status") == "unavailable"
+            and self.conflict_on_unavailable == "block"
+        ):
+            raise DeployError(
+                "CONFLICT_CHECK_UNAVAILABLE",
+                "The active scenario registry could not be checked.",
+            )
         if self.conflict_check_required and conflict.get("status") == "not_run":
             raise DeployError("CONFLICT_CHECK_REQUIRED", "The required conflict check has not run.")
+        if conflict.get("blocking"):
+            if hasattr(self.workflow_repo, "save_conflict_report"):
+                self.workflow_repo.save_conflict_report(thread_id, revision_id, conflict)
+            raise DeployError(
+                "CONFLICT_BLOCKED",
+                "A blocking active scenario conflict was found.",
+                details=conflict.get("matches", []),
+            )
+        prior_conflict = _json_value(revision.conflict_json) or {}
+        prior_acknowledgements = prior_conflict.get("acknowledgements", [])
+        acknowledged = {
+            (str(item.get("scenario_id")), str(item.get("relation"))): item
+            for item in prior_acknowledgements if isinstance(item, dict)
+        }
+        warn_matches = [item for item in conflict.get("matches", []) if item.get("action") == "warn_confirm"]
+        unacknowledged = [
+            item for item in warn_matches
+            if (str(item.get("scenario_id")), str(item.get("relation"))) not in acknowledged
+        ]
+        if unacknowledged:
+            conflict["needs_ack"] = True
+            conflict["status"] = "needs_ack"
+            conflict["acknowledgements"] = list(prior_acknowledgements)
+            if hasattr(self.workflow_repo, "save_conflict_report"):
+                self.workflow_repo.save_conflict_report(thread_id, revision_id, conflict)
+            raise DeployError(
+                "CONFLICT_ACK_REQUIRED",
+                "New or changed warning conflicts need acknowledgement.",
+                details=conflict.get("matches", []),
+            )
+        conflict["acknowledgements"] = [
+            acknowledged[(str(item.get("scenario_id")), str(item.get("relation")))]
+            for item in warn_matches
+        ]
+        conflict["needs_ack"] = False
+        conflict["status"] = "acknowledged" if warn_matches else conflict.get("status", "clear")
+        override_conflicts = [
+            {
+                "revision_id": revision_id,
+                "other_scenario_id": ack.get("scenario_id"),
+                "relation": ack.get("relation"),
+                "actor": ack.get("actor"),
+                "role": ack.get("role"),
+                "acknowledged_at": ack.get("time"),
+                "reason": ack.get("reason"),
+            }
+            for ack in conflict["acknowledgements"]
+        ]
         card_audits = []
         card_audit_repo = getattr(self.workflow_repo, "card_audit_repo", None)
         if card_audit_repo is not None:
@@ -267,6 +335,7 @@ class DeployService:
             "approval_status": approval_status,
             "missing_approvals": missing_approvals,
             "conflict": conflict,
+            "conflict_acknowledgements": conflict.get("acknowledgements", []),
         }
         row = {
             "scenario_id": scenario_id,
@@ -298,6 +367,7 @@ class DeployService:
             "created_by_number": created_by_number,
             "actor_role": actor_role,
             "audit_action": "REVISE" if parent_scenario_id else "CREATE",
+            "override_conflicts": override_conflicts,
         }
         self._ensure_schema()
         existing = self.oracle_repo.get_by_thread(thread_id)

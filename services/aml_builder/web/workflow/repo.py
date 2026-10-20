@@ -16,9 +16,10 @@ from services.aml_builder.web.workflow.models import Revision, WorkflowRow
 class WorkflowConflict(RuntimeError):
     """Raised when a workflow write uses a stale optimistic-lock version."""
 
-    def __init__(self, message: str, code: str = "REVISION_STALE") -> None:
+    def __init__(self, message: str, code: str = "REVISION_STALE", *, details: Any = None) -> None:
         super().__init__(message)
         self.code = code
+        self.details = details
 
 
 def _now() -> str:
@@ -394,6 +395,10 @@ class WorkflowRepo:
         outcome: str,
         confirmation_hash: str,
         resolved_rows: list[dict[str, Any]],
+        signature: dict[str, Any] | None = None,
+        signature_hash: str | None = None,
+        conflict: dict[str, Any] | None = None,
+        resulting_stage: str = "PLAN_PENDING",
     ) -> tuple[Revision, bool]:
         """Atomically apply a confirmed card and return its current revision.
 
@@ -495,13 +500,19 @@ class WorkflowRepo:
                         "SELECT COALESCE(MAX(rev_no), 0) + 1 FROM scenario_revision WHERE thread_id=?",
                         (thread_id,),
                     ).fetchone()[0]
+                    if conflict is not None:
+                        conflict["revision_id"] = revision_id
                     connection.execute(
                         """INSERT INTO scenario_revision
                         (revision_id,thread_id,rev_no,status,stage,card_json,params_hash,
-                         plan_md,plan_hash,metadata_json,metadata_hash,created_at,created_by)
-                        VALUES(?,?,?,'current','PLAN_PENDING',?,?,?,?,?,?,?,?)""",
-                        (revision_id, thread_id, rev_no, json.dumps(stored_card, ensure_ascii=False),
-                         params_hash, plan_md, plan_hash, json.dumps(metadata, ensure_ascii=False),
+                         signature_json,signature_hash,conflict_json,plan_md,plan_hash,
+                         metadata_json,metadata_hash,created_at,created_by)
+                        VALUES(?,?,?,'current',?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        (revision_id, thread_id, rev_no, resulting_stage,
+                         json.dumps(stored_card, ensure_ascii=False), params_hash,
+                         json.dumps(signature, ensure_ascii=False) if signature is not None else None,
+                         signature_hash, json.dumps(conflict, ensure_ascii=False) if conflict is not None else None,
+                         plan_md, plan_hash, json.dumps(metadata, ensure_ascii=False),
                          metadata_hash, now, actor),
                     )
                 elif current.plan_md:
@@ -511,6 +522,8 @@ class WorkflowRepo:
                         "SELECT COALESCE(MAX(rev_no), 0) + 1 FROM scenario_revision WHERE thread_id=?",
                         (thread_id,),
                     ).fetchone()[0]
+                    if conflict is not None:
+                        conflict["revision_id"] = revision_id
                     connection.execute(
                         """UPDATE scenario_revision SET status='history',superseded_at=?,
                         superseded_by_revision_id=?,version=version+1 WHERE revision_id=? AND status='current'""",
@@ -519,28 +532,37 @@ class WorkflowRepo:
                     connection.execute(
                         """INSERT INTO scenario_revision
                         (revision_id,thread_id,rev_no,status,stage,parent_revision_id,card_json,
-                         params_hash,plan_md,plan_hash,metadata_json,metadata_hash,created_at,created_by)
-                        VALUES(?,?,?,'current','PLAN_PENDING',?,?,?,?,?,?,?,?,?)""",
-                        (revision_id, thread_id, rev_no, current.revision_id,
-                         json.dumps(stored_card, ensure_ascii=False), params_hash, plan_md,
-                         plan_hash, json.dumps(metadata, ensure_ascii=False), metadata_hash,
+                         params_hash,signature_json,signature_hash,conflict_json,plan_md,plan_hash,
+                         metadata_json,metadata_hash,created_at,created_by)
+                        VALUES(?,?,?,'current',?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        (revision_id, thread_id, rev_no, resulting_stage, current.revision_id,
+                         json.dumps(stored_card, ensure_ascii=False), params_hash,
+                         json.dumps(signature, ensure_ascii=False) if signature is not None else None,
+                         signature_hash, json.dumps(conflict, ensure_ascii=False) if conflict is not None else None,
+                         plan_md, plan_hash, json.dumps(metadata, ensure_ascii=False), metadata_hash,
                          now, actor),
                     )
                 else:
                     revision_id = current.revision_id
+                    if conflict is not None:
+                        conflict["revision_id"] = revision_id
                     connection.execute(
-                        """UPDATE scenario_revision SET card_json=?,params_hash=?,plan_md=?,plan_hash=?,
+                        """UPDATE scenario_revision SET card_json=?,params_hash=?,signature_json=?,signature_hash=?,
+                        conflict_json=?,plan_md=?,plan_hash=?,
                         plan_approved_at=NULL,plan_approved_by=NULL,shadow_json=NULL,sql_hash=NULL,
                         result_approved_at=NULL,result_approved_by=NULL,metadata_json=?,metadata_hash=?,
-                        conflict_json=NULL,signature_json=NULL,signature_hash=NULL,stage='PLAN_PENDING',
+                        stage=?,
                         version=version+1 WHERE revision_id=? AND status='current'""",
-                        (json.dumps(stored_card, ensure_ascii=False), params_hash, plan_md, plan_hash,
-                         json.dumps(metadata, ensure_ascii=False), metadata_hash, revision_id),
+                        (json.dumps(stored_card, ensure_ascii=False), params_hash,
+                         json.dumps(signature, ensure_ascii=False) if signature is not None else None,
+                         signature_hash, json.dumps(conflict, ensure_ascii=False) if conflict is not None else None,
+                         plan_md, plan_hash, json.dumps(metadata, ensure_ascii=False), metadata_hash,
+                         resulting_stage, revision_id),
                     )
                 if new_revision_created:
                     self._event(
                         connection, thread_id, actor, "revision_created",
-                        current.stage if current else workflow["stage"], "PLAN_PENDING",
+                        current.stage if current else workflow["stage"], resulting_stage,
                         {"revision_id": revision_id, "rev_no": rev_no,
                          "parent_revision_id": current.revision_id if current else None},
                     )
@@ -550,15 +572,15 @@ class WorkflowRepo:
                     revision_id, rows_override=resolved_rows,
                 )
                 connection.execute(
-                    """UPDATE scenario_workflow SET current_revision_id=?,stage='PLAN_PENDING',
+                    """UPDATE scenario_workflow SET current_revision_id=?,stage=?,
                     pending_card_json=NULL,version=version+1,updated_at=? WHERE thread_id=?""",
-                    (revision_id, now, thread_id),
+                    (revision_id, resulting_stage, now, thread_id),
                 )
                 self._event(
                     connection, thread_id, actor,
                     "card_auto_confirmed" if outcome == "auto_confirmed" else "card_confirmed",
                     workflow["stage"],
-                    "PLAN_PENDING", {"request_id": request_id, "revision_id": revision_id,
+                    resulting_stage, {"request_id": request_id, "revision_id": revision_id,
                     "confirmation_hash": confirmation_hash, "carry_over": carry_over},
                 )
                 connection.commit()
@@ -819,6 +841,158 @@ class WorkflowRepo:
         finally:
             connection.close()
         return self.get_revision(revision_id)
+
+    def acknowledge_conflicts(
+        self,
+        thread_id: str,
+        revision_id: str,
+        *,
+        conflict_hash: str,
+        actor: str,
+        role: str,
+        reason: str | None = None,
+        plan_md: str | None = None,
+        plan_hash: str | None = None,
+    ) -> Revision:
+        """Record a conflict acknowledgement and optionally release plan rendering.
+
+        Args:
+            thread_id: Owning workflow thread.
+            revision_id: Exact current revision shown in the conflict panel.
+            conflict_hash: Hash of the warning matches the user approved.
+            actor: Authenticated user identifier.
+            role: Resolved policy role for the audit event.
+            reason: Optional officer reason for proceeding.
+            plan_md: Deterministically rendered plan when acknowledging before planning.
+            plan_hash: Hash of that rendered plan.
+
+        Returns:
+            Updated current revision.
+
+        Raises:
+            WorkflowConflict: The revision, conflict report, or stage is stale/invalid.
+        """
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            workflow = connection.execute(
+                "SELECT stage,current_revision_id,version FROM scenario_workflow WHERE thread_id=?",
+                (thread_id,),
+            ).fetchone()
+            row = connection.execute(
+                "SELECT * FROM scenario_revision WHERE revision_id=? AND thread_id=?",
+                (revision_id, thread_id),
+            ).fetchone()
+            if workflow is None or row is None or workflow["current_revision_id"] != revision_id:
+                raise WorkflowConflict("The supplied revision is no longer current.", "REVISION_STALE")
+            if workflow["stage"] not in {"PARAMS_CONFIRMED", "METADATA_READY"}:
+                raise WorkflowConflict("Conflicts can only be acknowledged before planning or deployment.", "STAGE_NOT_ALLOWED")
+            try:
+                conflict = json.loads(row["conflict_json"] or "{}")
+            except (json.JSONDecodeError, TypeError) as exc:
+                raise WorkflowConflict("The conflict report is unavailable.", "CONFLICT_STALE") from exc
+            if conflict.get("conflict_hash") != conflict_hash:
+                raise WorkflowConflict("The conflict report changed. Refresh before proceeding.", "CONFLICT_STALE")
+            if conflict.get("status") == "unavailable":
+                raise WorkflowConflict("The registry conflict check is unavailable.", "CONFLICT_CHECK_UNAVAILABLE")
+            warn_matches = [item for item in conflict.get("matches", []) if item.get("action") == "warn_confirm"]
+            if not warn_matches:
+                raise WorkflowConflict("There are no warning conflicts to acknowledge.", "CONFLICT_STALE")
+            now = _now()
+            acknowledgements = list(conflict.get("acknowledgements") or [])
+            existing = {
+                (str(item.get("scenario_id")), str(item.get("relation")))
+                for item in acknowledgements if isinstance(item, dict)
+            }
+            new_acknowledgements = []
+            for match in warn_matches:
+                scenario_id = str(match.get("scenario_id") or "")
+                acknowledgement_key = (scenario_id, str(match.get("relation") or ""))
+                if acknowledgement_key in existing:
+                    continue
+                ack = {
+                    "revision_id": revision_id,
+                    "scenario_id": scenario_id,
+                    "relation": match.get("relation"),
+                    "actor": actor,
+                    "role": role,
+                    "time": now,
+                    "reason": reason,
+                }
+                acknowledgements.append(ack)
+                new_acknowledgements.append(ack)
+                existing.add(acknowledgement_key)
+            conflict["acknowledgements"] = acknowledgements
+            conflict["status"] = "acknowledged"
+            conflict["needs_ack"] = False
+            next_stage = "PLAN_PENDING" if workflow["stage"] == "PARAMS_CONFIRMED" else workflow["stage"]
+            if next_stage == "PLAN_PENDING" and (not plan_md or not plan_hash):
+                raise WorkflowConflict("The confirmed plan is unavailable.", "PLAN_NOT_READY")
+            connection.execute(
+                """UPDATE scenario_revision SET conflict_json=?,stage=?,plan_md=COALESCE(?,plan_md),
+                plan_hash=COALESCE(?,plan_hash),version=version+1 WHERE revision_id=?""",
+                (json.dumps(conflict, ensure_ascii=False), next_stage, plan_md, plan_hash, revision_id),
+            )
+            connection.execute(
+                "UPDATE scenario_workflow SET stage=?,version=version+1,updated_at=? WHERE thread_id=?",
+                (next_stage, now, thread_id),
+            )
+            self._event(
+                connection, thread_id, actor, "conflict_acknowledged", workflow["stage"], next_stage,
+                {"revision_id": revision_id, "conflict_hash": conflict_hash, "actor_role": role,
+                 "acknowledgements": new_acknowledgements},
+            )
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+        updated = self.get_revision(revision_id)
+        if updated is None:
+            raise KeyError(revision_id)
+        return updated
+
+    def save_conflict_report(
+        self, thread_id: str, revision_id: str, report: dict[str, Any], *, actor: str = "system"
+    ) -> Revision:
+        """Persist a new authoritative conflict result without changing workflow stage.
+
+        Args:
+            thread_id: Owning workflow thread.
+            revision_id: Exact current revision being checked.
+            report: Fresh authoritative conflict result.
+            actor: Event actor for the state update.
+
+        Returns:
+            Updated revision.
+        """
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            workflow = connection.execute(
+                "SELECT stage,current_revision_id FROM scenario_workflow WHERE thread_id=?", (thread_id,)
+            ).fetchone()
+            if workflow is None or workflow["current_revision_id"] != revision_id:
+                raise WorkflowConflict("The supplied revision is no longer current.", "REVISION_STALE")
+            old_stage = workflow["stage"]
+            connection.execute(
+                "UPDATE scenario_revision SET conflict_json=?,version=version+1 WHERE revision_id=?",
+                (json.dumps(report, ensure_ascii=False), revision_id),
+            )
+            self._event(connection, thread_id, actor, "conflict_checked", old_stage, old_stage,
+                        {"revision_id": revision_id, "conflict_hash": report.get("conflict_hash"),
+                         "status": report.get("status")})
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+        updated = self.get_revision(revision_id)
+        if updated is None:
+            raise KeyError(revision_id)
+        return updated
 
     @staticmethod
     def _serialize_field(key: str, value: Any) -> Any:

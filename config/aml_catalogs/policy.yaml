@@ -44,8 +44,13 @@ workflow:
   enforcement:
     approvals: enforce
     card_confirmation: enforce
-    conflict_check: observe
-  conflict_check_required: false
+    conflict_check: enforce
+  conflict_check_required: true
+conflict_check:
+  on_unavailable: block
+  window_mismatch_relation: RELATED
+  diff_same_template: "{dimension}: {new}"
+  diff_changed_template: "{dimension}: new {new}; existing {existing}"
 filter_check:
   unverifiable: warn
 card_audit:

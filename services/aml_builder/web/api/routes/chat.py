@@ -27,8 +27,15 @@ from services.aml_builder.web.api.dependencies import (
     assert_identity_matches,
     require_identity,
 )
+from services.aml_builder.web.api.codec import decode_tool_result
 from services.aml_builder.web.domain.policy import authorize
 from services.aml_builder.web.workflow.runtime import get_workflow_repo
+from services.aml_builder.web.workflow.runtime import record_tool_success
+from services.aml_builder.web.workflow.repo import WorkflowConflict
+from services.aml_builder.web.services.conflict_check import (
+    has_comparable_core,
+    make_conflict_checker,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -179,10 +186,44 @@ async def chat_stream(
                             tool_round_completed = True
                             tool_call_id = getattr(m, "tool_call_id", None)
                             tool_name = tool_call_id_to_name.get(tool_call_id, "")
+                            tool_content = getattr(m, "content", "{}")
+                            try:
+                                decoded_tool = decode_tool_result(tool_content, tool_name)
+                                tool_payload = dict(decoded_tool.payload)
+                                if decoded_tool.status.value == "ok":
+                                    checker = None
+                                    if tool_name == "analyze_intent_and_discover_explanation_codes":
+                                        checker = make_conflict_checker(workflow_repo)
+                                        intent = tool_payload.get("enriched_intent")
+                                        if isinstance(intent, dict) and has_comparable_core(intent):
+                                            workflow_snapshot = workflow_repo.get_workflow(thread_id)
+                                            tool_payload["conflict_report"] = checker.check_intent(
+                                                intent,
+                                                thread_id=thread_id,
+                                                scenario_key=workflow_snapshot.scenario_key if workflow_snapshot else None,
+                                                provisional=True,
+                                            )
+                                    try:
+                                        record_tool_success(
+                                            workflow_repo,
+                                            thread_id,
+                                            tool_name,
+                                            tool_payload,
+                                            actor=user_id,
+                                            conflict_checker=checker,
+                                        )
+                                    except WorkflowConflict as exc:
+                                        tool_payload["conflict_report"] = exc.details
+                                        workflow_snapshot = workflow_repo.get_workflow(thread_id)
+                                        tool_payload["parameter_card"] = workflow_snapshot.pending_card if workflow_snapshot else None
+                                        tool_payload["card_auto_confirmed"] = False
+                                tool_content = json.dumps(tool_payload, ensure_ascii=False)
+                            except (ValueError, TypeError):
+                                pass
 
                             try:
                                 mapped_events = map_tool_result_to_sse(
-                                    tool_name, getattr(m, "content", "{}")
+                                    tool_name, tool_content
                                 )
                                 for mapped_event in mapped_events:
                                     yield _sse(mapped_event)

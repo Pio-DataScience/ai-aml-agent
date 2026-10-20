@@ -1,0 +1,13 @@
+version: 1
+status: demo
+roles: {}
+users: {}
+default_role: viewer
+cross_user_chat_read: false
+chat_may_deploy: false
+auth_mode: dev
+relations: {}
+similar_min_score: 0.85
+max_matches_shown: 5
+dimension_weights: {}
+reason_required_for: []

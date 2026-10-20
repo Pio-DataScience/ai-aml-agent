@@ -1,5 +1,6 @@
 """Own-chat workflow reads and typed actions with P2 identity checks."""
 
+import json
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -21,8 +22,11 @@ from services.aml_builder.web.domain.deploy_service import deployment_blockers
 from services.aml_builder.web.domain.policy import get_role
 from services.aml_builder.web.domain.param_gaps import validate_confirmed_values
 from services.aml_builder.web.domain.hashing import stable_hash
+from services.aml_builder.web.services.conflict_check import make_conflict_checker
+from services.aml_builder.web.services.plan_renderer import render_plan
 from services.aml_builder.web.workflow.cards import (
     commit_confirmed_card,
+    create_revision_card,
     resolved_card_rows,
 )
 
@@ -50,6 +54,15 @@ class DiscardCardRequest(BaseModel):
 
     request_id: str = Field(min_length=1)
     source: Literal["ui", "api"] = "api"
+
+
+class ConflictAcknowledgementRequest(BaseModel):
+    """Acknowledge a specific warning report for the current revision."""
+
+    revision_id: str = Field(min_length=1)
+    conflict_hash: str = Field(min_length=1)
+    choice: Literal["proceed", "cancel"]
+    reason: str | None = None
 
 
 def _project_id(value: str) -> str:
@@ -326,10 +339,16 @@ def confirm_params(
             source=request.source,
             resolved_rows=resolved_card_rows(card.get("rows", []), values),
             confirmation_hash=request_hash,
+            conflict_checker=make_conflict_checker(repo),
         )
     except WorkflowConflict as exc:
         raise HTTPException(
-            status_code=409, detail={"error_code": exc.code, "message": str(exc)}
+            status_code=409, detail={
+                "error_code": exc.code,
+                "message": str(exc),
+                "matches": exc.details.get("matches") if isinstance(exc.details, dict) else exc.details,
+                "conflict_report": exc.details if isinstance(exc.details, dict) else None,
+            }
         ) from exc
     response = get_workflow_state(
         project_id, chat_id, user_id, identity, repo, include_current_revision=True
@@ -346,9 +365,99 @@ def confirm_params(
             "carry_over": result["carry_over"],
             "history_count": result["history_count"],
             "action_message": result["action_message"],
+            "conflict_report": result.get("conflict_report"),
         }
     )
     return response
+
+
+@router.post("/workflow/{project_id}/{chat_id}/{user_id}/actions/acknowledge_conflicts")
+def acknowledge_conflicts(
+    project_id: str,
+    chat_id: str,
+    user_id: str,
+    request: ConflictAcknowledgementRequest,
+    identity: Identity = Depends(require_identity),
+    repo: WorkflowRepo = Depends(get_workflow_repo),
+) -> dict[str, Any]:
+    """Acknowledge the exact current warning report, or dismiss its panel."""
+    workflow = _owned_workflow(project_id, chat_id, user_id, identity, repo)
+    if not authorize(
+        identity.user_id, "scenario.create", {"user_id": workflow.user_id},
+        user_email=identity.user_email,
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail={"error_code": "PERMISSION_DENIED", "message": "Permission denied."},
+        )
+    current = repo.current(workflow.thread_id)
+    if current is None or current.revision_id != request.revision_id:
+        raise HTTPException(
+            status_code=409,
+            detail={"error_code": "REVISION_STALE", "message": "The revision is no longer current."},
+        )
+    if request.choice == "cancel":
+        return get_workflow_state(
+            project_id, chat_id, user_id, identity, repo, include_current_revision=True
+        )
+    plan_md = None
+    plan_hash = None
+    if workflow.stage == "PARAMS_CONFIRMED":
+        try:
+            card = json.loads(current.card_json or "{}")
+        except (json.JSONDecodeError, TypeError) as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={"error_code": "PLAN_NOT_READY", "message": "The confirmed intent is unavailable."},
+            ) from exc
+        intent = card.get("intent") if isinstance(card, dict) else None
+        if not isinstance(intent, dict):
+            raise HTTPException(
+                status_code=409,
+                detail={"error_code": "PLAN_NOT_READY", "message": "The confirmed intent is unavailable."},
+            )
+        rendered = render_plan(intent, card.get("explanation_code_checkpoint"))
+        plan_md = rendered["plan_artifact"]
+        plan_hash = stable_hash(plan_md)
+    try:
+        repo.acknowledge_conflicts(
+            workflow.thread_id,
+            request.revision_id,
+            conflict_hash=request.conflict_hash,
+            actor=identity.user_id,
+            role=get_role(identity.user_id, identity.user_email),
+            reason=request.reason,
+            plan_md=plan_md,
+            plan_hash=plan_hash,
+        )
+    except WorkflowConflict as exc:
+        raise HTTPException(
+            status_code=409, detail={"error_code": exc.code, "message": str(exc)}
+        ) from exc
+    return get_workflow_state(
+        project_id, chat_id, user_id, identity, repo, include_current_revision=True
+    )
+
+
+@router.post("/workflow/{project_id}/{chat_id}/{user_id}/actions/change_params")
+def change_conflict_params(
+    project_id: str,
+    chat_id: str,
+    user_id: str,
+    identity: Identity = Depends(require_identity),
+    repo: WorkflowRepo = Depends(get_workflow_repo),
+) -> dict[str, Any]:
+    """Open a pending parameter card seeded from the current confirmed revision."""
+    workflow = _owned_workflow(project_id, chat_id, user_id, identity, repo)
+    if not authorize(identity.user_id, "scenario.create", {"user_id": workflow.user_id}, user_email=identity.user_email):
+        raise HTTPException(status_code=403, detail={"error_code": "PERMISSION_DENIED", "message": "Permission denied."})
+    if workflow.stage not in {"PARAMS_CONFIRMED", "PLAN_PENDING", "PLAN_APPROVED", "SHADOW_PASSED", "RESULT_APPROVED", "METADATA_READY"}:
+        raise HTTPException(status_code=409, detail={"error_code": "STAGE_NOT_ALLOWED", "message": "Parameters cannot be changed at this stage."})
+    try:
+        create_revision_card(repo, workflow.thread_id, actor=identity.user_id)
+    except WorkflowConflict as exc:
+        raise HTTPException(status_code=409, detail={"error_code": exc.code, "message": str(exc)}) from exc
+    return get_workflow_state(project_id, chat_id, user_id, identity, repo, include_current_revision=True)
 
 
 @router.post("/workflow/{project_id}/{chat_id}/{user_id}/actions/discard_card")
@@ -411,19 +520,24 @@ def get_workflow_state(
     user_can_create = authorize(
         identity.user_id, "scenario.create", user_email=identity.user_email
     )
+    policy = load_catalogs(settings.CATALOG_DIR).policy
     blockers = deployment_blockers(
         workflow,
         current,
         user_can_create=user_can_create,
-        approval_enforcement=load_catalogs(
-            settings.CATALOG_DIR
-        ).policy.workflow.enforcement.approvals,
+        approval_enforcement=policy.workflow.enforcement.approvals,
+        conflict_check_required=policy.workflow.conflict_check_required,
+        conflict_on_unavailable=policy.conflict_check.on_unavailable,
     )
     current_data = (
         {key: getattr(current, key) for key in current.__dataclass_fields__}
         if include_current_revision and current
         else _revision_summary(current)
     )
+    try:
+        conflict_report = json.loads(current.conflict_json) if current and current.conflict_json else None
+    except (json.JSONDecodeError, TypeError):
+        conflict_report = None
     return {
         "thread_id": workflow.thread_id,
         "stage": workflow.stage,
@@ -435,6 +549,7 @@ def get_workflow_state(
         "can_deploy": not blockers,
         "blockers": blockers,
         "pending_card": workflow.pending_card,
+        "conflict_report": conflict_report,
         "history": [revision.payload_free_summary() for revision in history],
     }
 

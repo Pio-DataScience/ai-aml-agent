@@ -7,6 +7,7 @@ import uuid
 from typing import Any
 
 from services.aml_builder.web.domain.hashing import stable_hash
+from services.aml_builder.web.domain.signature import build_signature
 from services.aml_builder.web.domain.param_gaps import (
     apply_confirmed_params,
     build_param_rows,
@@ -21,6 +22,7 @@ from services.aml_builder.web.services.scenario_metadata import (
 )
 from services.aml_builder.web.services.settings import settings
 from services.aml_builder.web.workflow.repo import WorkflowRepo, WorkflowConflict
+from services.aml_builder.web.services.conflict_check import ConflictChecker
 
 
 def prepare_card(
@@ -29,6 +31,7 @@ def prepare_card(
     payload: dict[str, Any],
     *,
     actor: str,
+    conflict_checker: ConflictChecker | None = None,
 ) -> dict[str, Any]:
     """Prepare or auto-confirm the latest merged intent from a tool result.
 
@@ -106,7 +109,7 @@ def prepare_card(
                     "provenance": row.get("provenance"),
                 }
         repo.set_pending_card(thread_id, card)
-        commit_confirmed_card(
+        confirmation = commit_confirmed_card(
             repo,
             thread_id,
             request_id,
@@ -116,7 +119,9 @@ def prepare_card(
             source="system",
             outcome="auto_confirmed",
             resolved_rows=resolved_card_rows(rows, resolved_values),
+            conflict_checker=conflict_checker,
         )
+        payload["conflict_report"] = confirmation.get("conflict_report")
         return {}
     repo.set_pending_card(thread_id, card)
     repo.set_stage(
@@ -137,6 +142,7 @@ def commit_confirmed_card(
     outcome: str = "confirmed",
     resolved_rows: list[dict[str, Any]] | None = None,
     confirmation_hash: str | None = None,
+    conflict_checker: ConflictChecker | None = None,
 ) -> dict[str, Any]:
     """Apply a confirmed card atomically and deterministically render its plan.
 
@@ -184,7 +190,35 @@ def commit_confirmed_card(
             "The card was shown for a revision that is no longer current", "CARD_STALE"
         )
     confirmed_intent = apply_confirmed_params(card.get("intent") or {}, values)
-    rendered = render_plan(confirmed_intent, card.get("explanation_code_checkpoint"))
+    signature, signature_hash = build_signature(confirmed_intent)
+    conflict = (
+        conflict_checker.check_intent(
+            confirmed_intent,
+            thread_id=thread_id,
+            scenario_key=workflow.scenario_key if workflow else None,
+        )
+        if conflict_checker is not None
+        else {
+            "revision_id": None,
+            "provisional": False,
+            "status": "clear",
+            "conflict_hash": stable_hash([]),
+            "blocking": False,
+            "needs_ack": False,
+            "matches": [],
+        }
+    )
+    if conflict.get("blocking"):
+        raise WorkflowConflict(
+            "An identical active scenario blocks confirmation.",
+            "CONFLICT_BLOCKED",
+            details=conflict,
+        )
+    requires_ack = bool(conflict.get("needs_ack"))
+    rendered = None if requires_ack else render_plan(
+        confirmed_intent, card.get("explanation_code_checkpoint")
+    )
+    resulting_stage = "PARAMS_CONFIRMED" if requires_ack else "PLAN_PENDING"
     metadata, edited_keys, carry_over = _carry_forward_metadata(
         current, card, confirmed_intent
     )
@@ -200,8 +234,8 @@ def commit_confirmed_card(
         request_id,
         base_revision_id=card.get("base_revision_id"),
         stored_card=stored_card,
-        plan_md=rendered["plan_artifact"],
-        plan_hash=stable_hash(rendered["plan_artifact"]),
+        plan_md=rendered["plan_artifact"] if rendered else None,
+        plan_hash=stable_hash(rendered["plan_artifact"]) if rendered else None,
         params_hash=stable_hash(confirmed_intent),
         metadata=metadata,
         metadata_hash=stable_hash(metadata),
@@ -212,6 +246,10 @@ def commit_confirmed_card(
         outcome=outcome,
         confirmation_hash=confirmation_hash,
         resolved_rows=resolved_rows or resolved_card_rows(card.get("rows", []), values),
+        signature=signature,
+        signature_hash=signature_hash,
+        conflict=conflict,
+        resulting_stage=resulting_stage,
     )
     return {
         "revision_id": revision.revision_id,
@@ -219,7 +257,8 @@ def commit_confirmed_card(
         "carry_over": carry_over,
         "already_confirmed": already_confirmed,
         "history_count": repo.history_count(thread_id),
-        "action_message": f"[ACTION] card_confirmed revision {revision.rev_no}",
+        "action_message": f"[ACTION] card_confirmed revision {revision.rev_no}" if not requires_ack else None,
+        "conflict_report": conflict,
     }
 
 
@@ -341,6 +380,51 @@ def resolved_card_rows(
             snapshot["final_value"] = submitted
         snapshots.append(snapshot)
     return snapshots
+
+
+def create_revision_card(repo: WorkflowRepo, thread_id: str, *, actor: str) -> dict[str, Any]:
+    """Create an editable parameter card from the exact current revision intent.
+
+    Args:
+        repo: Workflow repository for the chat.
+        thread_id: Deterministic workflow thread ID.
+        actor: Authenticated user who requested the change.
+
+    Returns:
+        New pending card populated from the current confirmed values.
+
+    Raises:
+        WorkflowConflict: The chat has no current intent or is already locked.
+    """
+    workflow = repo.get_workflow(thread_id)
+    current = repo.current(thread_id)
+    if workflow is None or current is None or workflow.locked:
+        raise WorkflowConflict("A current editable scenario is required.", "STAGE_NOT_ALLOWED")
+    intent = _intent_from_revision(current)
+    if intent is None:
+        raise WorkflowConflict("The current revision intent is unavailable.", "PARAMS_UNCONFIRMED")
+    catalogs = load_catalogs(settings.CATALOG_DIR)
+    rows = build_param_rows(intent, catalogs.params, base_intent=intent, filters_catalog=catalogs.filters)
+    stored = {}
+    try:
+        stored = json.loads(current.card_json or "{}")
+    except (json.JSONDecodeError, TypeError):
+        stored = {}
+    card = {
+        "request_id": uuid.uuid4().hex,
+        "rows": rows,
+        "intent": intent,
+        "metadata": _metadata_from_revision(current) or {},
+        "metadata_from_analysis": False,
+        "explanation_code_checkpoint": stored.get("explanation_code_checkpoint"),
+        "base_revision_id": current.revision_id,
+        "base_stage": workflow.stage,
+        "created_by": actor,
+        "created_at": None,
+    }
+    repo.set_pending_card(thread_id, card)
+    repo.set_stage(thread_id, "PARAMS_PENDING", actor=actor, action="conflict_change_params")
+    return repo.get_workflow(thread_id).pending_card or card
 
 
 def _merge_intent(base: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:

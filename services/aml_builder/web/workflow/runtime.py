@@ -5,6 +5,8 @@ from services.aml_builder.web.services.settings import settings
 from services.aml_builder.web.workflow.repo import WorkflowRepo
 from services.aml_builder.web.domain.hashing import normalize_sql, stable_hash
 from services.aml_builder.web.workflow.cards import prepare_card
+from services.aml_builder.web.workflow.repo import WorkflowConflict
+from services.aml_builder.web.services.conflict_check import ConflictChecker
 
 
 def get_workflow_repo() -> WorkflowRepo:
@@ -24,10 +26,20 @@ def record_tool_success(
     payload: dict[str, object],
     *,
     actor: str = "system",
+    conflict_checker: ConflictChecker | None = None,
 ) -> str | None:
     """Create the first revision or advance observed state after tool success."""
     if tool_name == "analyze_intent_and_discover_explanation_codes":
-        card = prepare_card(repo, thread_id, payload, actor=actor)
+        try:
+            card = prepare_card(
+                repo, thread_id, payload, actor=actor, conflict_checker=conflict_checker
+            )
+        except WorkflowConflict as exc:
+            workflow = repo.get_workflow(thread_id)
+            payload["parameter_card"] = workflow.pending_card if workflow else None
+            payload["card_auto_confirmed"] = False
+            payload["conflict_report"] = exc.details
+            return None
         current = repo.current(thread_id)
         payload["parameter_card"] = card or None
         payload["card_auto_confirmed"] = not bool(card)

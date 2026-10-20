@@ -1,0 +1,9 @@
+version: 1
+status: demo
+dimensions:
+  pending_filter:
+    label: Pending
+    level: account
+    target: {table: TBD, column: TBD}
+    resolver: lookup
+    status: needs_advisor_input

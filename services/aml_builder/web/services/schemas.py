@@ -576,6 +576,7 @@ class SSEEvent(BaseModel):
         "plan_artifact",
         "scenario_metadata_catalog",
         "parameter_card",
+        "conflict_report",
         "stage_changed",
         "error",
         "done",

@@ -21,6 +21,10 @@ class GuardCode(StrEnum):
     SHADOW_NOT_PASSED = "SHADOW_NOT_PASSED"
     HASH_MISMATCH = "HASH_MISMATCH"
     PERMISSION_DENIED = "PERMISSION_DENIED"
+    CONFLICT_BLOCKED = "CONFLICT_BLOCKED"
+    CONFLICT_ACK_REQUIRED = "CONFLICT_ACK_REQUIRED"
+    CONFLICT_CHECK_UNAVAILABLE = "CONFLICT_CHECK_UNAVAILABLE"
+    CONFLICT_STALE = "CONFLICT_STALE"
 
 
 @dataclass(frozen=True)
@@ -47,6 +51,7 @@ _TOOL_STAGES: dict[str, frozenset[str] | None] = {
     "approve_plan": frozenset({"PLAN_PENDING"}),
     "approve_result": frozenset({"SHADOW_PASSED"}),
     "deploy": frozenset({"METADATA_READY"}),
+    "acknowledge_conflicts": frozenset({"PARAMS_CONFIRMED", "METADATA_READY"}),
 }
 
 

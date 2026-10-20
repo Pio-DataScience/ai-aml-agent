@@ -19,6 +19,7 @@ from services.aml_builder.web.api.dependencies import Identity, assert_identity_
 from services.aml_builder.web.domain.policy import authorize
 from services.aml_builder.web.services.config_loader import load_catalogs
 from services.aml_builder.web.workflow.runtime import get_workflow_repo
+from services.aml_builder.web.services.conflict_check import make_conflict_checker
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +81,8 @@ async def deploy_scenario(
         ),
         enforcement=catalogs.policy.workflow.enforcement.model_dump(),
         conflict_check_required=catalogs.policy.workflow.conflict_check_required,
+        conflict_on_unavailable=catalogs.policy.conflict_check.on_unavailable,
+        conflict_gate=make_conflict_checker(workflow_repo),
         numeric_created_by_default=settings.AML_CREATED_BY,
     )
     try:
@@ -97,6 +100,7 @@ async def deploy_scenario(
         elif code in {
             "REVISION_STALE", "CARD_PENDING", "CHAT_LOCKED_DEPLOYED",
             "DUPLICATE_ACTIVE_SIGNATURE", "REGISTRY_SCHEMA_INCOMPATIBLE",
+            "CONFLICT_BLOCKED", "CONFLICT_ACK_REQUIRED", "CONFLICT_CHECK_UNAVAILABLE",
         }:
             http_status = status.HTTP_409_CONFLICT
         else:

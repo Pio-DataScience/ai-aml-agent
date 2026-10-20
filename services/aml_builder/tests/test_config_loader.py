@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from services.aml_builder.web.services.config_loader import CatalogLoader
+from services.aml_builder.web.services.config_loader import CatalogLoader, ConflictCheckPolicy
 
 
 def _write_catalogs(root: Path) -> None:
@@ -42,6 +42,16 @@ def test_loads_valid_catalogs(tmp_path: Path) -> None:
     assert catalogs.filters.dimensions == {}
     assert catalogs.policy.default_role == "viewer"
     assert catalogs.ui_copy.conflict_warn == "{n} conflicts"
+
+
+def test_conflict_check_policy_has_validated_defaults_and_rejects_unknown_modes():
+    defaults = ConflictCheckPolicy()
+    assert defaults.on_unavailable == "block"
+    assert defaults.window_mismatch_relation == "RELATED"
+    with pytest.raises(ValueError):
+        ConflictCheckPolicy(on_unavailable="ignore")
+    with pytest.raises(ValueError):
+        ConflictCheckPolicy(window_mismatch_relation="IDENTICAL")
 
 
 def test_invalid_catalog_raises_clear_error(tmp_path: Path) -> None:

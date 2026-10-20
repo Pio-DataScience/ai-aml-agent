@@ -170,6 +170,15 @@ class WorkflowPolicy(BaseModel):
     conflict_check_required: bool = False
 
 
+class ConflictCheckPolicy(BaseModel):
+    """Conflict-comparison options and deterministic display templates."""
+
+    on_unavailable: Literal["block", "warn"] = "block"
+    window_mismatch_relation: Literal["RELATED", "OVERLAP"] = "RELATED"
+    diff_same_template: str = "{dimension}: {new}"
+    diff_changed_template: str = "{dimension}: new {new}; existing {existing}"
+
+
 class FilterCheckPolicy(BaseModel):
     """Policy for predicates whose SQL values cannot be extracted safely."""
 
@@ -195,6 +204,7 @@ class PolicyCatalog(CatalogModel):
     revisions: RevisionPolicy = Field(default_factory=RevisionPolicy)
     filter_check: FilterCheckPolicy = Field(default_factory=FilterCheckPolicy)
     workflow: WorkflowPolicy = Field(default_factory=WorkflowPolicy)
+    conflict_check: ConflictCheckPolicy = Field(default_factory=ConflictCheckPolicy)
 
 
 class UiCopyCatalog(BaseModel):

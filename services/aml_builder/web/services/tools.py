@@ -57,6 +57,7 @@ from services.aml_builder.web.domain.filter_applied_check import (
     check_filter_application,
 )
 from services.aml_builder.web.workflow.runtime import get_workflow_repo
+from services.aml_builder.web.services.conflict_check import make_conflict_checker
 from services.aml_builder.web.services.scenario_metadata import (
     seed_scenario_metadata,
     build_metadata_catalog,
@@ -850,6 +851,8 @@ def persist_and_validate_scenario_in_dwh(
         ),
         enforcement=policy.workflow.enforcement.model_dump(),
         conflict_check_required=policy.workflow.conflict_check_required,
+        conflict_on_unavailable=policy.conflict_check.on_unavailable,
+        conflict_gate=make_conflict_checker(workflow_repo),
         numeric_created_by_default=settings.AML_CREATED_BY,
     )
     try:

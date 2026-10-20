@@ -1,0 +1,4 @@
+locked_chat_tip: "Locked {scenario_id} v{version}"
+locked_composer_placeholder: "Locked"
+conflict_block: "Conflict {scenario_id}"
+conflict_warn: "{n} conflicts"

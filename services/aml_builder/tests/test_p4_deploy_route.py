@@ -41,7 +41,8 @@ def test_direct_route_uses_current_revision_and_returns_extra_receipt(monkeypatc
                 workflow=SimpleNamespace(
                     enforcement=SimpleNamespace(model_dump=lambda: {"approvals": "observe", "card_confirmation": "observe", "conflict_check": "observe"}),
                     conflict_check_required=False,
-                )
+                ),
+                conflict_check=SimpleNamespace(on_unavailable="block"),
             )
         ),
     )

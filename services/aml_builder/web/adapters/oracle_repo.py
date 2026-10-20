@@ -174,10 +174,10 @@ class OracleRegistryRepo:
 
     def list_active_signatures(self, scenario_type: str | None = None) -> list[dict[str, Any]]:
         """Return active signatures for conflict checks."""
-        sql = "SELECT SCENARIO_ID, SCENARIO_KEY, SCENARIO_TYPE, SIGNATURE_HASH, SIGNATURE_JSON FROM PIO_AML_AGENT_PRODUCTION_SCENARIOS WHERE STATUS='ACTIVE'"
+        sql = "SELECT SCENARIO_ID, SCENARIO_KEY, VERSION_NO, SCENARIO_NAME, SCENARIO_TYPE, THREAD_ID, SIGNATURE_HASH, SIGNATURE_JSON FROM PIO_AML_AGENT_PRODUCTION_SCENARIOS WHERE STATUS='ACTIVE'"
         params: dict[str, Any] = {}
         if scenario_type:
-            sql += " AND SCENARIO_TYPE=:scenario_type"
+            sql += " AND UPPER(SCENARIO_TYPE)=UPPER(:scenario_type)"
             params["scenario_type"] = scenario_type
         columns, rows = run_readonly(sql, params)
         return [_row_dict(columns, row) for row in rows]
@@ -205,6 +205,24 @@ class OracleRegistryRepo:
                 )
                 self._insert_metadata(cursor, row)
                 self._append_audit_in_transaction(cursor, row)
+                for override in row.get("override_conflicts", []):
+                    self._append_audit_in_transaction(
+                        cursor,
+                        {
+                            "scenario_id": row["scenario_id"],
+                            "scenario_key": row["scenario_key"],
+                            "audit_action": "OVERRIDE_CONFLICT",
+                            "actor_id": override.get("actor"),
+                            "actor_role": override.get("role"),
+                            "reason": override.get("reason"),
+                            "audit_diff_json": {
+                                "revision_id": override.get("revision_id"),
+                                "other_scenario_id": override.get("other_scenario_id"),
+                                "relation": override.get("relation"),
+                                "acknowledged_at": override.get("acknowledged_at"),
+                            },
+                        },
+                    )
             return row
         except Exception as exc:
             if "ORA-00001" in str(exc).upper() or "UNIQUE CONSTRAINT" in str(exc).upper():
@@ -330,7 +348,11 @@ class OracleRegistryRepo:
                 "action": row.get("audit_action", "CREATE"), "actor": row.get("actor_id", row.get("created_by")),
                 "actor_role": row.get("actor_role", ""), "from_status": row.get("from_status"),
                 "to_status": row.get("to_status", row.get("status")), "reason": row.get("change_reason", row.get("reason")),
-                "diff_json": json.dumps(row.get("receipt_json", {}), ensure_ascii=False, default=str),
+                "diff_json": json.dumps(
+                    row.get("audit_diff_json", row.get("receipt_json", {})),
+                    ensure_ascii=False,
+                    default=str,
+                ),
             },
         )
 

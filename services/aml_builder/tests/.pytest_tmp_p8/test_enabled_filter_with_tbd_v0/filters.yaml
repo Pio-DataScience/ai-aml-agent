@@ -1,0 +1,9 @@
+version: 1
+status: demo
+dimensions:
+  enabled_filter:
+    label: Enabled
+    level: account
+    target: {table: TBD, column: TBD}
+    resolver: lookup
+    status: confirmed

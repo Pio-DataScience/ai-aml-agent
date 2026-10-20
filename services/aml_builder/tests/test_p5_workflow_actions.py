@@ -11,6 +11,15 @@ from services.aml_builder.web.api.routes import workflow
 from services.aml_builder.web.workflow.repo import WorkflowRepo
 
 
+@pytest.fixture(autouse=True)
+def _mock_conflict_checker(monkeypatch):
+    class ClearChecker:
+        def check_intent(self, _intent, **_kwargs):
+            return {"revision_id": None, "provisional": False, "status": "clear", "conflict_hash": "clear-hash", "blocking": False, "needs_ack": False, "matches": []}
+
+    monkeypatch.setattr(workflow, "make_conflict_checker", lambda _repo: ClearChecker())
+
+
 def _fixture(tmp_path: Path, *, role: str = "999"):
     repo = WorkflowRepo(tmp_path / "p5.sqlite", enforcement={"approvals": "enforce", "card_confirmation": "observe", "conflict_check": "observe"})
     repo.get_or_create_workflow(f"p1_c1_{role}", "p1", "c1", role)

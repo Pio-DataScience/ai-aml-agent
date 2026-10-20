@@ -1,0 +1,4 @@
+version: 1
+status: demo
+params:
+  new_field: {label: New, required: false, input: text, options: [], default: null, validation: {}, prompt: Ask, status: demo}
