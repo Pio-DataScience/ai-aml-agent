@@ -11,7 +11,7 @@ import os
 import pickle
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, MutableMapping, Optional
 
 import numpy as np
 from langchain_openai import OpenAIEmbeddings
@@ -19,6 +19,9 @@ from langchain_openai import OpenAIEmbeddings
 from services.aml_builder.web.services.oracle import run_readonly
 from services.aml_builder.web.services.settings import settings
 from services.aml_builder.web.services.llm_client import build_llm
+from services.aml_builder.web.services.explanation_code_retrieval import (
+    _run_per_type_searches,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -327,7 +330,10 @@ def _select_codes_for_single_type(
 
 
 def select_relevant_explanation_codes(
-    transaction_type: Any, min_similarity: float = 0.55
+    transaction_type: Any,
+    min_similarity: float = 0.55,
+    *,
+    status_by_type: MutableMapping[str, str] | None = None,
 ) -> List[Dict[str, Any]]:
     """Select and rank explanation codes for single or multiple transaction types with deduplication."""
     if not transaction_type:
@@ -354,8 +360,17 @@ def select_relevant_explanation_codes(
     all_matches: List[Dict[str, Any]] = []
     seen_codes = set()
 
-    for tx in types_list:
-        codes = _select_codes_for_single_type(tx, min_similarity=min_similarity)
+    searches = _run_per_type_searches(
+        types_list,
+        lambda tx: _select_codes_for_single_type(
+            tx, min_similarity=min_similarity
+        ),
+    )
+    for search in searches:
+        tx = str(search["transaction_type"])
+        if status_by_type is not None:
+            status_by_type[tx] = str(search["status"])
+        codes = search["codes"]
         for c in codes:
             code_val = str(c.get("code", "")).strip()
             if code_val and code_val not in seen_codes:

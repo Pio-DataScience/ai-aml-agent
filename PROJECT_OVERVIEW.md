@@ -344,6 +344,7 @@ Important caveats:
 - LangSmith values loaded from `.env` through `BaseSettings` are copied to the process environment at startup under both `LANGCHAIN_*` and `LANGSMITH_*` names when the corresponding variables are absent, so LangChain's tracing integration can read them. Keys are not logged.
 - `LLM_MAX_TOKENS` is optional and only passed to the model when set; reasoning models use `max_completion_tokens`. `AGENT_RECURSION_LIMIT` (default 25) is authoritative for chat. `MAX_AGENT_ITERATIONS` is retained as a reserved overlapping setting, and `MAX_VALIDATION_RETRIES` remains configurable but unused because no validation retry path exists.
 - Blocking tool, workflow, sidebar, Oracle, and engine work is dispatched through a dedicated bounded `IO_WORKERS` executor. Service B uses an async HTTP SSE client. SQLite adapters open their own connections per operation; the executor does not share connections between threads.
+- Explanation-code searches for separate transaction types run concurrently up to `RETRIEVAL_CONCURRENCY`, preserve input order, and isolate a failed type. Their vector cache uses row count plus an available update timestamp, or a checksum fallback; a failed key lookup rebuilds the vectors.
 - Startup validates all four YAML catalogs and fails with the catalog path and validation details when a catalog is invalid. The filter loader allows `TBD` only for dimensions with `status: needs_advisor_input`.
 
 ## 10. Authentication, authorization, and trust boundaries

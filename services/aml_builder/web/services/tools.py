@@ -241,6 +241,7 @@ def analyze_intent_and_discover_explanation_codes(
         explicit_codes = intent_dict.get("explanation_codes")
 
         discovered_codes = []
+        explanation_code_lookup_status: Dict[str, str] = {}
         expl_checkpoint = None
 
         target_types = tx_types if tx_types else tx_type
@@ -262,7 +263,9 @@ def analyze_intent_and_discover_explanation_codes(
             search_types: Any = (
                 specific_types if isinstance(target_types, list) else specific_types[0]
             )
-            discovered_codes = select_relevant_explanation_codes(search_types)
+            discovered_codes = select_relevant_explanation_codes(
+                search_types, status_by_type=explanation_code_lookup_status
+            )
             if discovered_codes:
                 expl_checkpoint = format_explanation_code_checkpoint(
                     search_types, discovered_codes
@@ -411,6 +414,7 @@ def analyze_intent_and_discover_explanation_codes(
                 "enriched_intent": intent.model_dump(),
                 "explanation_code_checkpoint": expl_checkpoint,
                 "discovered_explanation_codes": discovered_codes,
+                "explanation_code_lookup_status": explanation_code_lookup_status,
                 "scenario_metadata": scenario_metadata,
             },
             ensure_ascii=False,

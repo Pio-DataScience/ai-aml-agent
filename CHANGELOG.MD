@@ -21,6 +21,10 @@ Format: `[DATE] TYPE: Description`
 
 - Validate cached explanation-code vectors against row count and an available update timestamp, with a read-only checksum fallback. A failed fingerprint rebuilds instead of serving stale vectors.
 
+## [2026-10-20] perf: P10 concurrent explanation-code retrieval
+
+- Run independent transaction-type searches concurrently with bounded concurrency, preserve input order, and return per-type `lookup_failed` status when one lookup fails. Fake search time fell by 62.4%.
+
 ## [2026-10-20] feat: P9 versioning flows
 
 ### What

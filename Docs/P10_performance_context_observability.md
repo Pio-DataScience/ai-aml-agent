@@ -77,6 +77,24 @@ and `final` modes. The final report will record the measured result after each
 optimization commit. An optimization that does not improve the relevant measured
 dimension, or adds unacceptable risk, will be reverted and recorded here.
 
+### Per-type explanation-code retrieval
+
+Seven fake runs with three concurrent type searches measured 23.166 ms for the
+searches, compared with 61.617 ms for the same serial fake work (62.4% lower).
+The scenario total fell from 149.472 ms to 102.108 ms. Event-loop delay remained
+about 20.5 ms in this mode because this comparison isolates retrieval concurrency
+from the separate I/O-offload change. Retrieval results retained input order; an
+overlap-count test verifies concurrency is at least two and no greater than the
+configured limit, and a failure test verifies one type can report
+`lookup_failed` without losing other types.
+
+| Measurement | Baseline | Concurrent retrieval | Change |
+|---|---:|---:|---:|
+| Three type searches | 61.617 ms | 23.166 ms | −62.4% |
+| Fake scenario total | 149.472 ms | 102.108 ms | −31.7% |
+| Event-loop delay | 20.488 ms | 20.537 ms | +0.049 ms |
+| Model-context input | 5,767 chars | 5,767 chars | unchanged |
+
 ## Runtime metrics
 
 Service A emits one JSON-lines record for each completed tool call through the
