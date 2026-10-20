@@ -1,16 +1,122 @@
 version: 1
 status: demo
 skip_card_when_complete: true
+card:
+  order: [needs_input, assumed_defaults]
+  one_click_confirm: true
+  pending_expiry: null
+  one_pending_per_chat: true
+ambiguity:
+  llm_may_flag: true
+  block_on_required: true
+  block_on_optional: false
 params:
-  scenario_type: {required: true, input: enum, options: [TRANSACTION, ACCOUNT, CUSTOMER], default: null}
-  grain: {required: true, input: enum, options: [customer, account, transaction], default: null}
-  metric: {required: true, input: enum, options: [transaction_amount, transaction_count], default: transaction_amount}
-  aggregation: {required: true, input: enum, options: [SUM, COUNT, MAX, AVG], default: SUM}
-  comparator: {required: true, input: enum, options: [">", ">=", "<", "<=", between], default: ">"}
-  threshold: {required: true, input: number, default: null}
-  window: {required: true, input: duration, default: null, min_days: 1, max_days: 365, all_time_allowed: false}
-  window_kind: {required: true, input: enum, options: [rolling, calendar], default: rolling}
-  transaction_scope: {required: true, input: enum, options: [specific, all], default: all}
-  baseline: {required: false, input: duration, required_if: "threshold.relative == true"}
-  exclusions: {required: false, input: text}
-  expected_alert_range: {required: false, input: range}
+  scenario_type:
+    label: Scenario type
+    required: true
+    input: enum
+    options: [TRANSACTION, ACCOUNT, CUSTOMER]
+    default: null
+    validation: {}
+    prompt: Which entity should the scenario monitor?
+    status: demo
+  grain:
+    label: Analysis grain
+    required: true
+    input: enum
+    options: [customer, account, transaction]
+    default: null
+    validation: {}
+    prompt: At what level should activity be grouped?
+    status: demo
+  metric:
+    label: Metric
+    required: true
+    input: enum
+    options: [transaction_amount, transaction_count]
+    default: transaction_amount
+    validation: {}
+    prompt: Which transaction measure should be evaluated?
+    status: demo
+  aggregation:
+    label: Aggregation
+    required: true
+    input: enum
+    options: [SUM, COUNT, MAX, AVG]
+    default: SUM
+    validation: {}
+    prompt: How should the measure be aggregated?
+    status: demo
+  comparator:
+    label: Comparator
+    required: true
+    input: enum
+    options: [">", ">=", "<", "<=", between]
+    default: ">"
+    validation: {}
+    prompt: How should the value be compared?
+    status: demo
+  threshold:
+    label: Threshold
+    required: true
+    input: number
+    options: []
+    default: null
+    validation: {min: 0}
+    prompt: What value should trigger the scenario?
+    status: demo
+  window:
+    label: Time window
+    required: true
+    input: duration
+    options: []
+    default: null
+    validation: {min_days: 1, max_days: 365, all_time_allowed: false}
+    prompt: What observation period should be used?
+    status: demo
+  window_kind:
+    label: Window type
+    required: true
+    input: enum
+    options: [rolling, calendar]
+    default: rolling
+    validation: {}
+    prompt: Should the window roll daily or follow calendar periods?
+    status: demo
+  transaction_scope:
+    label: Transaction scope
+    required: true
+    input: enum
+    options: [specific, all]
+    default: all
+    validation: {}
+    prompt: Should this cover all transaction types or selected types?
+    status: demo
+  baseline:
+    label: Baseline period
+    required: false
+    input: duration
+    options: []
+    default: null
+    validation: {min_days: 1, max_days: 365, all_time_allowed: false}
+    required_if: {param: relative, equals: true}
+    prompt: What historical period should be used as the baseline?
+    status: demo
+  exclusions:
+    label: Exclusions
+    required: false
+    input: text
+    options: []
+    default: null
+    validation: {}
+    prompt: Are there transactions or customers to exclude?
+    status: demo
+  expected_alert_range:
+    label: Expected alert range
+    required: false
+    input: range
+    options: []
+    default: null
+    validation: {min: 0}
+    prompt: What alert volume do you expect?
+    status: demo

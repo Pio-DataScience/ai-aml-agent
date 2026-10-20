@@ -5,6 +5,18 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-10-20] feat: P6 parameter confirmation card
+
+### What
+- Added a fully described demo parameter catalog, safe structured `required_if` evaluation, pure gap/ambiguity detection, and typed parameter-card confirmation/discard actions.
+- Added durable pending cards, refusal workflow events, resolution-only immutable card audits with choice/provenance snapshots, and automatic deterministic plan rendering after confirmation.
+- Updated shadow and persistence tools to use the confirmed revision intent, and added the editable UI card with reload restoration and success-only action messages.
+- Documented the interim in-place reset for changed cards until P6b adds revision copy-forward/history; conflict enforcement remains for P8.
+
+### Verification
+- Offline P6/catalog/workflow tests, compileall, and UI lint/build results are recorded in `docs/refactor_status.md`.
+- No live LLM, Oracle, or Service B call was made.
+
 ## [2026-10-20] feat: P5 server-driven workflow state and approvals
 
 ### What

@@ -147,7 +147,8 @@ class WorkflowRepo:
                     shown_at TEXT NOT NULL,
                     resolved_at TEXT,
                     outcome TEXT NOT NULL,
-                    rows_json TEXT NOT NULL
+                    rows_json TEXT NOT NULL,
+                    attempts INTEGER NOT NULL DEFAULT 0
                 );
                 CREATE TABLE IF NOT EXISTS workflow_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -179,6 +180,14 @@ class WorkflowRepo:
             user_version = connection.execute("PRAGMA user_version").fetchone()[0]
             if user_version < 1:
                 connection.execute("PRAGMA user_version = 1")
+            audit_columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(param_card_audit)").fetchall()
+            }
+            if "attempts" not in audit_columns:
+                connection.execute(
+                    "ALTER TABLE param_card_audit ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0"
+                )
             connection.commit()
         finally:
             connection.close()
@@ -659,21 +668,140 @@ class WorkflowRepo:
         )
 
     def set_pending_card(self, thread_id: str, card: dict[str, Any] | None) -> None:
-        """Set or clear the chat's single pending card slot."""
+        """Set the single pending card and resolve a replaced card as superseded."""
         self.initialize()
         connection = self._connect()
         try:
+            connection.execute("BEGIN IMMEDIATE")
+            workflow = connection.execute(
+                "SELECT stage,pending_card_json FROM scenario_workflow WHERE thread_id=?",
+                (thread_id,),
+            ).fetchone()
+            if workflow is None:
+                raise KeyError(thread_id)
+            old_card = json.loads(workflow["pending_card_json"]) if workflow["pending_card_json"] else None
+            if old_card and card and old_card.get("request_id") != card.get("request_id"):
+                self._insert_card_audit(
+                    connection, old_card, thread_id, "superseded", "system", "system", "system", None
+                )
+            now = _now()
+            if card is not None:
+                card = dict(card)
+                card.setdefault("created_at", now)
             connection.execute(
                 "UPDATE scenario_workflow SET pending_card_json=?,version=version+1,updated_at=? WHERE thread_id=?",
                 (
                     json.dumps(card, ensure_ascii=False) if card is not None else None,
-                    _now(),
+                    now,
                     thread_id,
                 ),
             )
+            if card is not None:
+                self._event(
+                    connection,
+                    thread_id,
+                    str(card.get("created_by") or "system"),
+                    "card_shown",
+                    workflow["stage"],
+                    workflow["stage"],
+                    {"request_id": card.get("request_id"), "rows": card.get("rows", [])},
+                )
             connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
         finally:
             connection.close()
+
+    def resolve_pending_card(
+        self,
+        thread_id: str,
+        request_id: str,
+        *,
+        outcome: str,
+        actor: str,
+        role: str,
+        source: str,
+        revision_id: str | None = None,
+        resolved_rows: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Atomically audit and clear the matching pending card."""
+        self.initialize()
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            workflow = connection.execute(
+                "SELECT stage,pending_card_json FROM scenario_workflow WHERE thread_id=?",
+                (thread_id,),
+            ).fetchone()
+            pending = json.loads(workflow["pending_card_json"]) if workflow and workflow["pending_card_json"] else None
+            if pending is None or pending.get("request_id") != request_id:
+                raise WorkflowConflict("The parameter card request is stale", "CARD_STALE")
+            attempts = connection.execute(
+                "SELECT COUNT(*) FROM workflow_events WHERE thread_id=? AND action='card_refused' AND json_extract(detail_json,'$.request_id')=?",
+                (thread_id, request_id),
+            ).fetchone()[0]
+            if outcome == "confirmed":
+                attempts += 1
+            self._insert_card_audit(
+                connection, pending, thread_id, outcome, actor, role, source,
+                revision_id, attempts=attempts, rows_override=resolved_rows,
+            )
+            connection.execute(
+                "UPDATE scenario_workflow SET pending_card_json=NULL,version=version+1,updated_at=? WHERE thread_id=?",
+                (_now(), thread_id),
+            )
+            event_action = {
+                "confirmed": "card_confirmed",
+                "auto_confirmed": "card_auto_confirmed",
+                "discarded": "card_discarded",
+                "superseded": "card_superseded",
+            }.get(outcome, "card_resolved")
+            self._event(
+                connection, thread_id, actor, event_action, workflow["stage"],
+                workflow["stage"], {"request_id": request_id, "revision_id": revision_id},
+            )
+            connection.commit()
+            pending["attempts"] = attempts
+            return pending
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    @staticmethod
+    def _insert_card_audit(
+        connection: sqlite3.Connection,
+        card: dict[str, Any],
+        thread_id: str,
+        outcome: str,
+        actor: str,
+        role: str,
+        source: str,
+        revision_id: str | None,
+        *,
+        attempts: int | None = None,
+        rows_override: list[dict[str, Any]] | None = None,
+    ) -> None:
+        """Insert the one final audit snapshot for a resolved card."""
+        request_id = str(card["request_id"])
+        if attempts is None:
+            attempts = connection.execute(
+                "SELECT COUNT(*) FROM workflow_events WHERE thread_id=? AND action='card_refused' AND json_extract(detail_json,'$.request_id')=?",
+                (thread_id, request_id),
+            ).fetchone()[0]
+        connection.execute(
+            """INSERT INTO param_card_audit
+            (request_id,thread_id,revision_id,user_id,user_role,source,shown_at,resolved_at,outcome,rows_json,attempts)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                request_id, thread_id, revision_id or card.get("base_revision_id"),
+                str(card.get("created_by") or actor), role, source,
+                card.get("created_at") or _now(), _now(), outcome,
+                json.dumps(rows_override if rows_override is not None else card.get("rows", []), ensure_ascii=False), attempts,
+            ),
+        )
 
     def mark_deployed(self, thread_id: str, revision_id: str) -> None:
         """Lock the chat and mark its current revision deployed."""
@@ -919,14 +1047,15 @@ class CardAuditRepo:
         rows: list[dict[str, Any]],
         shown_at: str | None = None,
         resolved_at: str | None = None,
+        attempts: int = 0,
     ) -> None:
         """Append one permanent audit row; duplicate request IDs are rejected."""
         self.workflow_repo.initialize()
         with self.workflow_repo._connection() as connection:
             connection.execute(
                 """INSERT INTO param_card_audit
-                (request_id,thread_id,revision_id,user_id,user_role,source,shown_at,resolved_at,outcome,rows_json)
-                VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                (request_id,thread_id,revision_id,user_id,user_role,source,shown_at,resolved_at,outcome,rows_json,attempts)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     request_id,
                     thread_id,
@@ -938,6 +1067,7 @@ class CardAuditRepo:
                     resolved_at,
                     outcome,
                     json.dumps(rows, ensure_ascii=False),
+                    attempts,
                 ),
             )
 

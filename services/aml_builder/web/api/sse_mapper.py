@@ -24,6 +24,12 @@ def map_tool_result_to_sse(tool_name: str, content: Any) -> List[SSEEvent]:
     if tool_name == "generate_scenario_execution_plan":
         plan = payload.get("plan_artifact")
         return [SSEEvent(type="plan_artifact", text=plan)] if plan else []
+    if tool_name == "analyze_intent_and_discover_explanation_codes":
+        card = payload.get("parameter_card")
+        if isinstance(card, dict):
+            return [SSEEvent(type="parameter_card", data=card)]
+        if payload.get("card_auto_confirmed"):
+            return [SSEEvent(type="parameter_card", data={"auto_confirmed": True})]
     if tool_name == "prepare_scenario_metadata_for_persistence":
         return (
             [SSEEvent(type="scenario_metadata_catalog", data=payload)]

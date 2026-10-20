@@ -43,7 +43,7 @@ from services.aml_builder.web.domain.code_binding import (
     specific_transaction_types,
 )
 from services.aml_builder.web.domain.intent_normalize import normalize_intent
-from services.aml_builder.web.services.plan_renderer import build_plan_markdown
+from services.aml_builder.web.services.plan_renderer import render_plan
 from services.aml_builder.web.services.prompts.loader import load_prompt
 from services.aml_builder.web.domain.policy import authorize, get_role
 from services.aml_builder.web.services.config_loader import load_catalogs
@@ -61,6 +61,54 @@ from services.aml_builder.web.services.scenario_registry_analytics import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def confirmed_intent_for_tool(
+    repo: Any, thread_id: str, tool_name: str, supplied_intent: Any
+) -> dict[str, Any]:
+    """Return the confirmed intent stored on the current workflow revision.
+
+    Args:
+        repo: Workflow repository.
+        thread_id: Deterministic workflow thread ID.
+        tool_name: Shadow or persistence tool name for the audit event.
+        supplied_intent: Model-supplied intent argument, used only for mismatch detection.
+
+    Returns:
+        Stored confirmed intent mapping.
+
+    Raises:
+        ValueError: If the workflow has no confirmed intent.
+    """
+    current = repo.current(thread_id)
+    if current is None or not current.card_json:
+        raise ValueError("No confirmed scenario intent is stored on the current revision.")
+    try:
+        card = json.loads(current.card_json)
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise ValueError("The current revision intent is invalid.") from exc
+    intent = card.get("intent") if isinstance(card, dict) else None
+    if not isinstance(intent, dict) or not intent:
+        raise ValueError("No confirmed scenario intent is stored on the current revision.")
+    supplied: Any = supplied_intent
+    if isinstance(supplied, str):
+        try:
+            supplied = json.loads(supplied)
+        except json.JSONDecodeError:
+            supplied = None
+    if isinstance(supplied, dict):
+        if isinstance(supplied.get("payload"), dict):
+            supplied = supplied["payload"]
+        supplied = supplied.get("enriched_intent", supplied.get("intent", supplied))
+    if supplied != intent:
+        repo.add_event(
+            thread_id,
+            "system",
+            "intent_arg_mismatch",
+            detail={"tool": tool_name, "revision_id": current.revision_id},
+        )
+        logger.warning("%s ignored an LLM intent argument that differed from revision %s", tool_name, current.revision_id)
+    return intent
 
 
 def _permission_error(config: RunnableConfig, action: str) -> str | None:
@@ -97,8 +145,9 @@ def analyze_intent_and_discover_explanation_codes(
     ALL/ANY transaction scope does not need explanation-code discovery. Do not search the catalog
     for ALL/ANY or unspecified transaction types; only search for one or more specific types.
 
-    IMPORTANT: Always invoke `generate_scenario_execution_plan` immediately after this tool in the
-    same turn to render the implementation plan artifact in the side panel before responding to the user.
+    IMPORTANT: The server builds a parameter confirmation card from this result. Do not invoke the
+    plan tool while a card is pending; the typed confirm action applies confirmed values and renders
+    the plan deterministically.
 
     Args:
         user_prompt (str): The FULL, VERBATIM message or modification request from the user
@@ -316,33 +365,16 @@ def generate_scenario_execution_plan(
                 "[TOOL: PLANNER] Received empty or invalid intent dict: %s", intent
             )
 
-        plan_md = build_plan_markdown(
+        rendered = render_plan(
             intent if isinstance(intent, dict) else {}, explanation_code_checkpoint
         )
+        plan_md = rendered["plan_artifact"]
         logger.info("[TOOL: PLANNER] Plan artifact generated (%d chars).", len(plan_md))
-
-        # Build plan_conditions dynamically from what is present in the intent
-        plan_conditions = []
-        if intent.get("time_window"):
-            plan_conditions.append({"condition": "Time Window Isolation"})
-        if intent.get("explanation_codes") or explanation_code_checkpoint:
-            plan_conditions.append({"condition": "Explanation Code Match"})
-        thresholds = intent.get("thresholds", [])
-        if any(t.get("target_scope") == "DETAIL" for t in thresholds):
-            plan_conditions.append({"condition": "Detail Threshold Filter (WHERE)"})
-        if any(t.get("target_scope") == "AGGREGATE" for t in thresholds):
-            plan_conditions.append({"condition": "Aggregate Threshold Breach (HAVING)"})
-        if intent.get("baseline_window"):
-            plan_conditions.append({"condition": "Historical Baseline Window"})
-        if intent.get("semantic_conditions"):
-            plan_conditions.append({"condition": "Semantic / Behavioral Conditions"})
-        if intent.get("exclusions"):
-            plan_conditions.append({"condition": "Exclusion Rules"})
 
         return json.dumps(
             {
                 "plan_artifact": plan_md,
-                "plan_conditions": plan_conditions,
+                "plan_conditions": rendered["plan_conditions"],
             },
             ensure_ascii=False,
             indent=2,
@@ -370,33 +402,21 @@ def execute_oracle_dwh_shadow_test(intent_json: str, config: RunnableConfig = {}
     denied = _permission_error(config, "scenario.create")
     if denied:
         return denied
+    configurable = config.get("configurable", {})
+    thread_id = str(configurable.get("thread_id") or "")
+    if not thread_id:
+        return json.dumps({"error": "Authenticated workflow identity is required."})
+    try:
+        intent_dict = confirmed_intent_for_tool(
+            get_workflow_repo(), thread_id, "execute_oracle_dwh_shadow_test", intent_json
+        )
+    except ValueError as exc:
+        return json.dumps({"error": str(exc)})
     logger.info("[TOOL: SQL_BRIDGE] Requesting SQL generation from PioTech AI...")
 
     # -----------------------------------------------------------
     # Step 1: Validate intent JSON
     # -----------------------------------------------------------
-    try:
-        intent_dict = (
-            json.loads(intent_json) if isinstance(intent_json, str) else intent_json
-        )
-        if isinstance(intent_dict, dict):
-            if isinstance(intent_dict.get("payload"), dict):
-                intent_dict = intent_dict["payload"]
-            # Unwrap if wrapped under enriched_intent, AMLIntent, or intent
-            if "enriched_intent" in intent_dict and isinstance(
-                intent_dict["enriched_intent"], dict
-            ):
-                intent_dict = intent_dict["enriched_intent"]
-            elif "AMLIntent" in intent_dict and isinstance(
-                intent_dict["AMLIntent"], dict
-            ):
-                intent_dict = intent_dict["AMLIntent"]
-            elif "intent" in intent_dict and isinstance(intent_dict["intent"], dict):
-                intent_dict = intent_dict["intent"]
-    except (json.JSONDecodeError, TypeError) as exc:
-        logger.error("[TOOL: SQL_BRIDGE] Invalid intent JSON: %s", exc)
-        return json.dumps({"error": f"Invalid intent JSON: {exc}"})
-
     # -----------------------------------------------------------
     # Step 2: Call PioTech AI text-to-SQL SSE service
     # -----------------------------------------------------------
@@ -613,14 +633,16 @@ def persist_and_validate_scenario_in_dwh(
     )
 
     try:
-        intent_dict = json.loads(intent_json)
-        if isinstance(intent_dict.get("payload"), dict):
-            intent_dict = intent_dict["payload"]
-        if isinstance(intent_dict.get("enriched_intent"), dict):
-            intent_dict = intent_dict["enriched_intent"]
-    except json.JSONDecodeError as exc:
-        logger.error("[TOOL: PERSISTER] Invalid intent JSON: %s", exc)
-        return json.dumps({"error": f"Invalid intent JSON: {exc}"})
+        configurable = config.get("configurable", {})
+        thread_id = str(configurable.get("thread_id") or "")
+        if not thread_id:
+            raise ValueError("Authenticated workflow identity is required.")
+        intent_dict = confirmed_intent_for_tool(
+            get_workflow_repo(), thread_id, "persist_and_validate_scenario_in_dwh", intent_json
+        )
+    except ValueError as exc:
+        logger.error("[TOOL: PERSISTER] Confirmed intent unavailable: %s", exc)
+        return json.dumps({"write_success": False, "error_code": "PARAMS_UNCONFIRMED", "error": str(exc)})
 
     try:
         metadata_dict = json.loads(metadata_json) if metadata_json else {}

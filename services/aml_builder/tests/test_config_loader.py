@@ -60,7 +60,8 @@ def test_catalogs_reload_when_file_mtime_changes(tmp_path: Path) -> None:
     initial = loader.load()
     params_path = tmp_path / "params.yaml"
     params_path.write_text(
-        "version: 1\nstatus: demo\nparams:\n  new_field: {required: false}\n",
+        "version: 1\nstatus: demo\nparams:\n"
+        "  new_field: {label: New, required: false, input: text, options: [], default: null, validation: {}, prompt: Ask, status: demo}\n",
         encoding="utf-8",
     )
     params_path.touch()
@@ -69,6 +70,17 @@ def test_catalogs_reload_when_file_mtime_changes(tmp_path: Path) -> None:
 
     assert initial.params.params == {}
     assert "new_field" in updated.params.params
+
+
+def test_parameter_catalog_requires_ui_and_validation_metadata(tmp_path: Path) -> None:
+    _write_catalogs(tmp_path)
+    (tmp_path / "params.yaml").write_text(
+        "version: 1\nstatus: demo\nparams:\n"
+        "  window: {required: true, input: duration, default: null}\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="params.yaml"):
+        CatalogLoader(tmp_path).load()
 
 
 def test_enabled_filter_with_tbd_value_is_rejected(tmp_path: Path) -> None:
@@ -118,6 +130,10 @@ def test_section_six_catalog_drafts_load_from_repository() -> None:
     assert catalogs.policy.revisions.history_cap == 5
     assert catalogs.policy.workflow.enforcement.model_dump() == {
         "approvals": "enforce",
-        "card_confirmation": "observe",
+        "card_confirmation": "enforce",
         "conflict_check": "observe",
+    }
+    assert catalogs.params.card["one_pending_per_chat"] is True
+    assert catalogs.params.params["baseline"].required_if.model_dump() == {
+        "param": "relative", "equals": True
     }

@@ -85,15 +85,48 @@ def test_current_flow_uses_real_guards_with_per_gate_policy(tmp_path: Path) -> N
     gate_modes = load_catalogs(settings.CATALOG_DIR).policy.workflow.enforcement.model_dump()
     assert gate_modes == {
         "approvals": "enforce",
-        "card_confirmation": "observe",
+        "card_confirmation": "enforce",
         "conflict_check": "observe",
     }
     repo = WorkflowRepo(tmp_path / "full-flow.sqlite", enforcement=gate_modes)
     repo.get_or_create_workflow("p1_flow_999", "p1", "flow", "999")
     assert guard_tool(repo, "p1_flow_999", "analyze_intent_and_discover_explanation_codes", None).allowed
-    revision_id = record_tool_success(repo, "p1_flow_999", "analyze_intent_and_discover_explanation_codes", {"enriched_intent": {"scenario_name": "Flow"}}, actor="999")
+    intent = {
+        "scenario_name": "Flow",
+        "scenario_type": "CUSTOMER",
+        "detection_logic": "Customers with large transactions",
+        "thresholds": [{"field": "transaction_amount", "operator": ">", "value_from": 5000, "target_scope": "AGGREGATE", "provenance": "stated"}],
+        "time_window": None,
+        "aggregation": {"function": "SUM", "grain": "customer"},
+        "clarifications": [], "clarification_questions": [], "ready_for_handoff": True,
+        "applied_defaults": [],
+    }
+    record_tool_success(repo, "p1_flow_999", "analyze_intent_and_discover_explanation_codes", {"enriched_intent": intent, "scenario_metadata": {}, "explanation_code_checkpoint": None}, actor="999")
+    assert repo.get_workflow("p1_flow_999").stage == "PARAMS_PENDING"
+    assert repo.current("p1_flow_999") is None
+    card = repo.get_workflow("p1_flow_999").pending_card
+    assert card and any(row["key"] == "window" and row["status"] == "missing" for row in card["rows"])
+    values = {}
+    for row in card["rows"]:
+        if row.get("read_only") or row["key"] == "window":
+            continue
+        if row.get("status") in {"provided", "inferred"} and row.get("value") is not None:
+            values[row["key"]] = {
+                "value": row["value"],
+                "choice": "provided" if row["status"] == "provided" else "accepted_default",
+                "provenance": row.get("provenance"),
+            }
+        elif row.get("status") == "defaulted" and row.get("recommended_value") is not None:
+            values[row["key"]] = {"value": row["recommended_value"], "choice": "accepted_default", "provenance": row.get("provenance")}
+    values["window"] = {"value": {"unit": "DAYS", "value": 30, "is_rolling": True}, "choice": "user_input"}
+    confirmed = workflow.confirm_params(
+        "p1", "flow", "999",
+        workflow.ConfirmParamsRequest(request_id=card["request_id"], values=values),
+        Identity("999", "", "p1"), repo,
+    )
+    revision_id = confirmed["current_revision"]["revision_id"]
     revision = repo.current("p1_flow_999")
-    assert revision and revision.stage == "PLAN_PENDING"
+    assert revision and revision.stage == "PLAN_PENDING" and revision.plan_md
     assert guard_tool(repo, "p1_flow_999", "generate_scenario_execution_plan", revision_id).allowed
     from services.aml_builder.web.domain.hashing import stable_hash
     repo.update_revision(revision_id, expected_version=repo.get_workflow("p1_flow_999").version, plan_md="# Flow", plan_hash=stable_hash("# Flow"))

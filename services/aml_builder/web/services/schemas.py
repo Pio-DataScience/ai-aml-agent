@@ -66,7 +66,7 @@ class Threshold(BaseModel):
                 return v_clean
         return v
 
-    provenance: Literal["stated", "assumed_default", "needs_user", "default"] = Field(
+    provenance: Literal["stated", "assumed_default", "needs_user", "default", "inferred", "user_input"] = Field(
         default="stated",
         description=(
             "Where this value came from: 'stated' (user gave it), "
@@ -124,7 +124,7 @@ class TimeWindow(BaseModel):
         default=True,
         description="True = rolling from SYSDATE. False = fixed calendar period.",
     )
-    provenance: Literal["stated", "assumed_default", "needs_user", "default"] = Field(
+    provenance: Literal["stated", "assumed_default", "needs_user", "default", "inferred", "user_input"] = Field(
         default="stated",
         description="stated | assumed_default | needs_user (see Threshold.provenance).",
     )
@@ -167,7 +167,7 @@ class BaselineWindow(BaseModel):
     duration: int = Field(
         ..., description="Duration of historical baseline window in units."
     )
-    provenance: Literal["stated", "assumed_default", "needs_user", "default"] = Field(
+    provenance: Literal["stated", "assumed_default", "needs_user", "default", "inferred", "user_input"] = Field(
         default="stated",
         description="Where the baseline window value came from.",
     )
@@ -212,7 +212,7 @@ class AggregationProfile(BaseModel):
         default=None, description="sum | count | count distinct | max | None."
     )
     grain: str = Field(..., description="Evaluation grain, plain English.")
-    provenance: Literal["stated", "assumed_default", "needs_user", "default"] = Field(
+    provenance: Literal["stated", "assumed_default", "needs_user", "default", "inferred", "user_input"] = Field(
         default="stated"
     )
 
@@ -254,7 +254,7 @@ class SemanticCondition(BaseModel):
         default=None,
         description="Specific compliance explanation codes bound directly to this semantic condition.",
     )
-    provenance: Literal["stated", "assumed_default", "needs_user", "default"] = Field(
+    provenance: Literal["stated", "assumed_default", "needs_user", "default", "inferred", "user_input"] = Field(
         default="stated"
     )
 
@@ -541,6 +541,7 @@ class SSEEvent(BaseModel):
         "scenario_result",
         "plan_artifact",
         "scenario_metadata_catalog",
+        "parameter_card",
         "stage_changed",
         "error",
         "done",
@@ -553,7 +554,7 @@ class SSEEvent(BaseModel):
         default=None, description="Status string (thinking events)."
     )
     data: Optional[Any] = Field(
-        default=None, description="Structured payload (scenario_result)."
+        default=None, description="Structured event payload."
     )
 
 

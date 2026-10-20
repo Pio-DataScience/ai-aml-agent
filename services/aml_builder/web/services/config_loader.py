@@ -25,7 +25,33 @@ class CatalogModel(BaseModel):
 class ParamsCatalog(CatalogModel):
     """Scenario parameter catalog."""
 
-    params: dict[str, dict[str, Any]]
+    skip_card_when_complete: bool = True
+    card: dict[str, Any] = Field(default_factory=dict)
+    ambiguity: dict[str, Any] = Field(default_factory=dict)
+    params: dict[str, "ParamDefinition"]
+
+
+class RequiredIf(BaseModel):
+    """Safe, declarative conditional requirement."""
+
+    param: str
+    equals: Any
+
+
+class ParamDefinition(BaseModel):
+    """Validated definition for one editable parameter row."""
+
+    model_config = ConfigDict(extra="allow")
+
+    label: str
+    required: bool
+    input: Literal["enum", "number", "duration", "range", "text"]
+    options: list[Any] = Field(default_factory=list)
+    default: Any = None
+    validation: dict[str, Any] = Field(default_factory=dict)
+    required_if: RequiredIf | None = None
+    prompt: str
+    status: CatalogStatus
 
 
 class FilterDimension(BaseModel):

@@ -1,6 +1,6 @@
 """Own-chat workflow reads and typed actions with P2 identity checks."""
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -19,6 +19,8 @@ from services.aml_builder.web.services.config_loader import load_catalogs
 from services.aml_builder.web.services.settings import settings
 from services.aml_builder.web.domain.deploy_service import deployment_blockers
 from services.aml_builder.web.domain.policy import get_role
+from services.aml_builder.web.domain.param_gaps import validate_confirmed_values
+from services.aml_builder.web.workflow.cards import commit_confirmed_card, resolved_card_rows
 
 router = APIRouter(tags=["Workflow"])
 
@@ -28,6 +30,22 @@ class ApprovalRequest(BaseModel):
 
     revision_id: str
     expected_hash: str = Field(min_length=1)
+
+
+class ConfirmParamsRequest(BaseModel):
+    """Explicit values or default acceptances for the current parameter card."""
+
+    request_id: str = Field(min_length=1)
+    values: dict[str, Any] = Field(default_factory=dict)
+    accept_defaults: bool = False
+    source: Literal["ui", "api"] = "api"
+
+
+class DiscardCardRequest(BaseModel):
+    """Discard one exact pending-card request."""
+
+    request_id: str = Field(min_length=1)
+    source: Literal["ui", "api"] = "api"
 
 
 def _project_id(value: str) -> str:
@@ -65,6 +83,147 @@ def _owned_workflow(
 def _revision_summary(revision: Revision | None) -> dict[str, Any] | None:
     """Build the payload-free current revision summary."""
     return revision.payload_free_summary() if revision else None
+
+
+def _card_values(card: dict[str, Any], request: ConfirmParamsRequest) -> tuple[dict[str, Any], list[str], list[str], list[dict[str, str]]]:
+    """Expand explicit card inputs and evaluate required, ambiguous, and invalid rows."""
+    rows = card.get("rows", [])
+    values: dict[str, Any] = {}
+    for row in rows:
+        if row.get("read_only"):
+            continue
+        key = str(row.get("key", ""))
+        submitted = request.values.get(key)
+        if submitted is not None:
+            if isinstance(submitted, dict) and "value" in submitted:
+                resolved = dict(submitted)
+            else:
+                resolved = {"value": submitted}
+            resolved.setdefault("choice", "user_input")
+            resolved.setdefault("provenance", "user_input")
+            values[key] = resolved
+        elif request.accept_defaults and row.get("status") in {"defaulted", "inferred"} and row.get("recommended_value") is not None:
+            values[key] = {
+                "value": row["recommended_value"],
+                "choice": "accepted_default",
+                "provenance": row.get("provenance", "assumed_default"),
+            }
+    catalogs = load_catalogs(settings.CATALOG_DIR)
+    missing, unresolved, invalid = validate_confirmed_values(rows, values, catalogs.params)
+    if request.accept_defaults:
+        for row in rows:
+            if row.get("read_only") or row.get("key") in values:
+                continue
+            if row.get("status") == "provided" and row.get("value") is not None:
+                key = str(row["key"])
+                values[key] = {
+                    "value": row["value"], "choice": "provided",
+                    "provenance": row.get("provenance", "stated"),
+                }
+        missing, unresolved, invalid = validate_confirmed_values(rows, values, catalogs.params)
+    for key, submitted in values.items():
+        if submitted.get("choice") not in {"accepted_default", "user_input", "provided", "system_default"}:
+            invalid.append({"key": key, "reason": "Unknown value choice."})
+    return values, missing, unresolved, invalid
+
+
+def _require_card_action(
+    project_id: str, chat_id: str, user_id: str, request_id: str,
+    action: str, identity: Identity, repo: WorkflowRepo,
+) -> WorkflowRow:
+    """Check ownership, creator permission, and workflow card guards."""
+    workflow_row = _owned_workflow(project_id, chat_id, user_id, identity, repo)
+    if not authorize(identity.user_id, "scenario.create", {"user_id": workflow_row.user_id}, user_email=identity.user_email):
+        raise HTTPException(status_code=403, detail={"error_code": "PERMISSION_DENIED", "message": "Permission denied."})
+    current = repo.current(workflow_row.thread_id)
+    verdict = guard_tool(
+        repo, workflow_row.thread_id, action,
+        current.revision_id if current else None,
+        authorized=True, request_id=request_id,
+    )
+    if not verdict.allowed:
+        code = verdict.code.value if verdict.code else "STAGE_NOT_ALLOWED"
+        raise HTTPException(status_code=409, detail={"error_code": code, "message": verdict.message})
+    return workflow_row
+
+
+@router.post("/workflow/{project_id}/{chat_id}/{user_id}/actions/confirm_params")
+def confirm_params(
+    project_id: str, chat_id: str, user_id: str, request: ConfirmParamsRequest,
+    identity: Identity = Depends(require_identity),
+    repo: WorkflowRepo = Depends(get_workflow_repo),
+) -> dict[str, Any]:
+    """Resolve the exact pending card, persist a confirmed revision, and render its plan."""
+    workflow_row = _require_card_action(
+        project_id, chat_id, user_id, request.request_id, "confirm_params", identity, repo
+    )
+    card = workflow_row.pending_card
+    if card is None:
+        raise HTTPException(status_code=409, detail={"error_code": "CARD_STALE", "message": "The parameter card is stale."})
+    values, missing, unresolved, invalid = _card_values(card, request)
+    if missing or unresolved:
+        repo.add_event(
+            workflow_row.thread_id, identity.user_id, "card_refused",
+            detail={"request_id": request.request_id, "missing": missing, "unresolved": unresolved},
+        )
+        raise HTTPException(status_code=422, detail={
+            "error_code": "PARAMS_INCOMPLETE", "request_id": request.request_id,
+            "missing": missing, "unresolved": unresolved,
+        })
+    if invalid:
+        repo.add_event(
+            workflow_row.thread_id, identity.user_id, "card_refused",
+            detail={"request_id": request.request_id, "missing": [], "unresolved": [], "reasons": invalid},
+        )
+        raise HTTPException(status_code=422, detail={
+            "error_code": "PARAMS_INVALID", "request_id": request.request_id,
+            "reasons": invalid,
+        })
+    try:
+        commit_confirmed_card(
+            repo, workflow_row.thread_id, request.request_id, values,
+            actor=identity.user_id,
+            role=get_role(identity.user_id, identity.user_email),
+            source=request.source,
+            resolved_rows=resolved_card_rows(card.get("rows", []), values),
+        )
+    except WorkflowConflict as exc:
+        raise HTTPException(status_code=409, detail={"error_code": exc.code, "message": str(exc)}) from exc
+    return get_workflow_state(
+        project_id, chat_id, user_id, identity, repo, include_current_revision=True
+    )
+
+
+@router.post("/workflow/{project_id}/{chat_id}/{user_id}/actions/discard_card")
+def discard_card(
+    project_id: str, chat_id: str, user_id: str, request: DiscardCardRequest,
+    identity: Identity = Depends(require_identity),
+    repo: WorkflowRepo = Depends(get_workflow_repo),
+) -> dict[str, Any]:
+    """Discard and permanently audit one pending card."""
+    workflow_row = _require_card_action(
+        project_id, chat_id, user_id, request.request_id, "discard_card", identity, repo
+    )
+    card = workflow_row.pending_card or {}
+    try:
+        repo.resolve_pending_card(
+            workflow_row.thread_id, request.request_id,
+            outcome="discarded", actor=identity.user_id,
+            role=get_role(identity.user_id, identity.user_email),
+            source=request.source,
+            revision_id=card.get("base_revision_id"),
+        )
+    except WorkflowConflict as exc:
+        raise HTTPException(status_code=409, detail={"error_code": exc.code, "message": str(exc)}) from exc
+    repo.set_stage(
+        workflow_row.thread_id,
+        card.get("base_stage") or (repo.current(workflow_row.thread_id).stage if repo.current(workflow_row.thread_id) else "EMPTY"),
+        actor=identity.user_id,
+        action="discard_card_stage_restored",
+    )
+    return get_workflow_state(
+        project_id, chat_id, user_id, identity, repo, include_current_revision=True
+    )
 
 
 @router.get("/workflow/{project_id}/{chat_id}/{user_id}/state")

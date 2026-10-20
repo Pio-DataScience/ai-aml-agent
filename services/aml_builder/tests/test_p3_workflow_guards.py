@@ -77,7 +77,16 @@ def test_stale_revision_and_request_ids_are_typed(tmp_path: Path) -> None:
     [
         (
             "analyze_intent_and_discover_explanation_codes",
-            {"enriched_intent": {"x": 1}},
+            {"enriched_intent": {
+                "scenario_name": "Complete",
+                "scenario_type": "CUSTOMER",
+                "detection_logic": "Customer amount threshold",
+                "thresholds": [{"field": "transaction_amount", "operator": ">", "value_from": 1000, "target_scope": "AGGREGATE", "provenance": "stated"}],
+                "aggregation": {"function": "SUM", "grain": "customer"},
+                "time_window": {"unit": "DAYS", "value": 30, "is_rolling": True},
+                "clarifications": [], "clarification_questions": [],
+                "ready_for_handoff": True, "applied_defaults": [],
+            }},
             "PLAN_PENDING",
         ),
         ("generate_scenario_execution_plan", {"plan_artifact": "plan"}, "PLAN_PENDING"),

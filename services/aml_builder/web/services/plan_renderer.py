@@ -346,3 +346,35 @@ def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]
     lines.append("")
 
     return "\n".join(lines)
+
+
+def render_plan(intent: dict, explanation_code_checkpoint: Optional[str] = None) -> dict:
+    """Render the plan artifact and condition list through one deterministic entry point.
+
+    Args:
+        intent: Confirmed AMLIntent mapping.
+        explanation_code_checkpoint: Optional explanation-code markdown table.
+
+    Returns:
+        Plan artifact and structured conditions used by both the plan tool and card action.
+    """
+    plan_conditions = []
+    if intent.get("time_window"):
+        plan_conditions.append({"condition": "Time Window Isolation"})
+    if intent.get("explanation_codes") or explanation_code_checkpoint:
+        plan_conditions.append({"condition": "Explanation Code Match"})
+    thresholds = intent.get("thresholds", [])
+    if any(t.get("target_scope") == "DETAIL" for t in thresholds if isinstance(t, dict)):
+        plan_conditions.append({"condition": "Detail Threshold Filter (WHERE)"})
+    if any(t.get("target_scope") == "AGGREGATE" for t in thresholds if isinstance(t, dict)):
+        plan_conditions.append({"condition": "Aggregate Threshold Breach (HAVING)"})
+    if intent.get("baseline_window"):
+        plan_conditions.append({"condition": "Historical Baseline Window"})
+    if intent.get("semantic_conditions"):
+        plan_conditions.append({"condition": "Semantic / Behavioral Conditions"})
+    if intent.get("exclusions"):
+        plan_conditions.append({"condition": "Exclusion Rules"})
+    return {
+        "plan_artifact": build_plan_markdown(intent, explanation_code_checkpoint),
+        "plan_conditions": plan_conditions,
+    }

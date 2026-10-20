@@ -4,6 +4,7 @@ from services.aml_builder.web.services.config_loader import load_catalogs
 from services.aml_builder.web.services.settings import settings
 from services.aml_builder.web.workflow.repo import WorkflowRepo
 from services.aml_builder.web.domain.hashing import normalize_sql, stable_hash
+from services.aml_builder.web.workflow.cards import prepare_card
 
 
 def get_workflow_repo() -> WorkflowRepo:
@@ -26,19 +27,11 @@ def record_tool_success(
 ) -> str | None:
     """Create the first revision or advance observed state after tool success."""
     if tool_name == "analyze_intent_and_discover_explanation_codes":
-        revision = repo.ensure_initial_revision(
-            thread_id,
-            created_by=actor,
-            card={
-                "intent": payload.get("enriched_intent"),
-                "metadata": payload.get("scenario_metadata"),
-            },
-        )
-        workflow = repo.get_workflow(thread_id)
-        if workflow and workflow.stage != "PLAN_PENDING":
-            repo.set_stage(thread_id, "PLAN_PENDING", actor=actor, action="intent_ready_for_plan")
-            revision = repo.current(thread_id) or revision
-        return revision.revision_id
+        card = prepare_card(repo, thread_id, payload, actor=actor)
+        current = repo.current(thread_id)
+        payload["parameter_card"] = card or None
+        payload["card_auto_confirmed"] = not bool(card)
+        return current.revision_id if current else None
     if tool_name in {"generate_scenario_execution_plan", "prepare_scenario_metadata_for_persistence"}:
         current = repo.current(thread_id)
         workflow = repo.get_workflow(thread_id)

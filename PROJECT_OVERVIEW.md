@@ -17,7 +17,7 @@ Primary implementation evidence: `services/aml_builder/web/api/main.py`, `servic
 The application has four practical layers:
 
 1. **HTTP interface:** FastAPI startup and routes under `services/aml_builder/web/api/` expose chat/SSE, workflow state and revision reads, typed approval actions, authenticated UI copy, session history and sidebar operations, direct deployment, alert-engine execution, and health.
-2. **Agent orchestration:** `services/aml_builder/web/services/graph.py:get_tool_driven_graph` builds one process-level ReAct agent with six tools, an `AsyncSqliteSaver`, and a pre-model hook that adds current workflow context and stubs superseded tool results in model input. Tool selection remains LLM-driven; deterministic workflow state and guards are enforced per policy gate. P5 enforces approvals while P6 and P8 are expected to enable card-confirmation and conflict-check enforcement respectively.
+2. **Agent orchestration:** `services/aml_builder/web/services/graph.py:get_tool_driven_graph` builds one process-level ReAct agent with six tools, an `AsyncSqliteSaver`, and a pre-model hook that adds current workflow context and stubs superseded tool results in model input. Tool selection remains LLM-driven; deterministic workflow state and guards are enforced per policy gate. P5 enforces approvals and P6 enforces parameter-card confirmation; P8 remains responsible for conflict-check enforcement.
 3. **Domain and integration services:** pure intent normalization, code binding, metadata rules, window conversion, SQL extraction, hashing, and deterministic deployment orchestration live under `web/domain/`. Oracle registry-v2 operations live under `web/adapters/oracle_repo.py`; Oracle-backed metadata lookups, plan rendering, explanation-code search, registry analytics, external text-to-SQL calls, and alert processing remain under `web/services/`.
 4. **Persistence:** SQLite stores LangGraph checkpoints in `STATE_DIR/checkpoints.sqlite`; workflow, revision, card-audit, workflow-event, and composite-key chat-sidebar data live in `STATE_DIR/app_state.sqlite`. Oracle stores source/lookups, scenario definitions and governance records, and generated alerts.
 
@@ -110,6 +110,8 @@ $env:PYTHONPATH = "services\aml_builder"
 | `GET /workflow/{project_id}/{chat_id}/{user_id}/state` | Returns current stage, pending-card slot, revision summaries, `can_deploy` and typed blockers; `include_current_revision=true` includes the current payload. |
 | `POST /workflow/{project_id}/{chat_id}/{user_id}/actions/approve_plan` | Approves the current plan only when `revision_id` and `expected_hash` match. Requires `scenario.create`. |
 | `POST /workflow/{project_id}/{chat_id}/{user_id}/actions/approve_result` | Approves the successful shadow result only when `revision_id` and `expected_hash` match. Requires `scenario.create`. |
+| `POST /workflow/{project_id}/{chat_id}/{user_id}/actions/confirm_params` | Validates explicit values/default choices for the exact pending card, stores the confirmed intent and deterministic plan, and resolves the card audit. Requires `scenario.create`. |
+| `POST /workflow/{project_id}/{chat_id}/{user_id}/actions/discard_card` | Discards and audits the exact pending card. Requires `scenario.create`. |
 | `GET /ui/copy` | Returns the authenticated YAML UI-copy catalog. |
 | `GET /workflow/{project_id}/{chat_id}/{user_id}/revisions` | Lists current, historical, and evicted revision summaries without payloads. |
 | `GET /workflow/{project_id}/{chat_id}/{user_id}/revisions/{revision_id}` | Returns one full revision after checking chat ownership. |
@@ -172,19 +174,23 @@ POST /chat/stream
   -> thread_id = "{project_id}_{chat_id}_{user_id}"
   -> graph.astream(..., recursion_limit=settings.AGENT_RECURSION_LIMIT)
   -> LLM chooses among six tools; the pre-model hook adds current stage/revision context
+  -> intent analysis builds a catalog-driven parameter card; code validates required gaps
+  -> typed confirmation applies explicit values and deterministically renders the plan
   -> tool wrapper records guard verdicts and successful stage progress
   -> route selected graph/tool messages into SSE events
   -> emit stage_changed after tool results
   -> persist conversation in checkpoints and workflow state in app_state.sqlite
 ```
 
-P3's `workflow.enforcement` catalog setting defaults to `observe` so the existing tool sequence remains usable until P5 is integrated. Observe mode appends `would_block` workflow events for ordinary stage/stale-card verdicts and still allows the tool to continue; successful tools advance the stored stage. `CHAT_LOCKED_DEPLOYED` and `PERMISSION_DENIED` always block. P5 must set `workflow.enforcement: enforce` when its typed approval actions are ready.
+P5 enforces typed plan/result approvals and P6 enforces card confirmation in `config/aml_catalogs/policy.yaml`. The conflict-check gate remains in `observe` for P8. Observe mode appends `would_block` workflow events for ordinary stage/stale-card verdicts and still allows the tool to continue; successful tools advance the stored stage. `CHAT_LOCKED_DEPLOYED` and `PERMISSION_DENIED` always block.
 
 The intended prompt-governed workflow is:
 
 ```text
 user description
   -> analyze_intent_and_discover_explanation_codes
+  -> catalog-driven parameter card (pending card survives reload)
+  -> typed confirm/discard; confirmed values are stored with provenance
   -> deterministic plan review and explicit user approval
   -> execute_oracle_dwh_shadow_test
   -> shadow-result approval
@@ -193,7 +199,9 @@ user description
   -> persist_and_validate_scenario_in_dwh
 ```
 
-Approval ordering is **not a server-side state machine**. The prompt and tool descriptions instruct the LLM to stop at approval gates; the tools themselves do not verify previous approval or a successful shadow-test record.
+The server validates required parameters independently of the LLM's `ready_for_handoff` value. A pending card is emitted through `parameter_card` SSE and returned by `GET state`; each refused submission is recorded as a `card_refused` workflow event. `param_card_audit` receives one immutable row when a card resolves, with the shown rows, final choices, timestamps, and refusal-attempt count. Shadow and persistence tools use the confirmed intent stored on the current revision and log `intent_arg_mismatch` when their model-supplied argument differs.
+
+P6 creates only the initial revision. Until P6b, confirming a changed card when a revision already has a plan updates that current revision in place and clears its plan, shadow result, approvals, metadata, and stale signature/conflict values. P6b must replace this interim reset with copy-forward into a new revision while retaining history and enforcing its configured cap.
 
 ### SQL generation and shadow testing
 
@@ -223,7 +231,7 @@ validate current revision, pending-card slot, permission, metadata and shadow SQ
 
 P3 pre-allocates `PRD_<8_HEX>` stable keys and P4 stores the first version as `PRD_<8_HEX>_V1`. A committed Oracle deployment followed by a failed SQLite lock update is recovered by retry: the existing row is looked up by unique `THREAD_ID`, and only the workflow lock is completed. Oracle and SQLite cannot share one transaction.
 
-Observe mode does not block on missing plan/result approvals; the receipt records `approval_status: would_block` and which approvals were missing. P5 must switch `workflow.enforcement` to `enforce` when typed approvals are ready. P8 must switch `workflow.conflict_check_required` to `true` when the authoritative conflict gate is implemented.
+P5 enforces plan/result approvals and P6 enforces card confirmation. P6b keeps those gates enforced and replaces the interim in-place reset with revision history. P8 must switch only `workflow.enforcement.conflict_check` to `enforce` and set `workflow.conflict_check_required: true` after the authoritative conflict gate is implemented.
 
 ### Existing-scenario queries
 
