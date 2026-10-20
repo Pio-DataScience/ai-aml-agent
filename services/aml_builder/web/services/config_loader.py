@@ -155,6 +155,15 @@ class RevisionPolicy(BaseModel):
     restore_from_history: str = "reserved"
 
 
+class ContextPolicy(BaseModel):
+    """Controls transient model-context trimming without changing checkpoints."""
+
+    trimming: bool = True
+    keep_latest_per_tool: Literal[True] = True
+    max_tool_payload_chars: int = Field(default=4000, ge=128)
+    keep_latest_turns: int = Field(default=3, ge=0)
+
+
 class WorkflowEnforcement(BaseModel):
     """Independent rollout mode for each workflow gate."""
 
@@ -202,6 +211,7 @@ class PolicyCatalog(CatalogModel):
     dimension_weights: dict[str, int]
     reason_required_for: list[str]
     revisions: RevisionPolicy = Field(default_factory=RevisionPolicy)
+    context: ContextPolicy = Field(default_factory=ContextPolicy)
     filter_check: FilterCheckPolicy = Field(default_factory=FilterCheckPolicy)
     workflow: WorkflowPolicy = Field(default_factory=WorkflowPolicy)
     conflict_check: ConflictCheckPolicy = Field(default_factory=ConflictCheckPolicy)

@@ -9,6 +9,10 @@ Format: `[DATE] TYPE: Description`
 
 - Added per-tool JSON-lines timing metrics and request/thread correlation metadata, and recorded the fake-adapter baseline in `Docs/P10_performance_context_observability.md`.
 
+## [2026-10-20] perf: P10 context projection
+
+- Added configurable model-input trimming for older ToolMessages while preserving current revision artifacts, pending cards, latest per-tool results, and recent turns. The fake context fixture shrank by 60.7% with no material latency change.
+
 ## [2026-10-20] feat: P9 versioning flows
 
 ### What

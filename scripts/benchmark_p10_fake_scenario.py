@@ -51,7 +51,7 @@ async def _one_run(mode: str, run_number: int) -> dict[str, float]:
             return [{"code": search_type}]
 
         retrieval_start = time.perf_counter()
-        if mode == "baseline":
+        if mode in {"baseline", "context", "io"}:
             retrieval_result = [fake_search(item) for item in ("cash", "wire", "card")]
         else:
             from services.aml_builder.web.services.explanation_code_search import (
@@ -75,7 +75,7 @@ async def _one_run(mode: str, run_number: int) -> dict[str, float]:
             return time.perf_counter()
 
         loop_probe = asyncio.create_task(probe_loop())
-        if mode == "baseline":
+        if mode in {"baseline", "context", "retrieval"}:
             time.sleep(0.02)
         else:
             await run_in_io_pool(time.sleep, 0.02)
@@ -98,7 +98,7 @@ async def _one_run(mode: str, run_number: int) -> dict[str, float]:
                 )
             )
         messages.append(HumanMessage(content="latest user turn"))
-        if mode == "baseline":
+        if mode in {"baseline", "io", "retrieval"}:
             context_messages = messages
         else:
             context_messages = build_model_messages(
@@ -134,7 +134,11 @@ async def _run(mode: str, runs: int) -> list[dict[str, float]]:
 def main() -> None:
     """Parse CLI options and print median fake-scenario measurements."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=("baseline", "final"), required=True)
+    parser.add_argument(
+        "--mode",
+        choices=("baseline", "context", "io", "retrieval", "final"),
+        required=True,
+    )
     parser.add_argument("--runs", type=int, default=5)
     args = parser.parse_args()
     rows = asyncio.run(_run(args.mode, max(args.runs, 1)))

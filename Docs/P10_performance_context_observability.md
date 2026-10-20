@@ -26,6 +26,24 @@ responsiveness. The context fixture contains three large historical tool results
 These values describe this local synthetic workload, not production Oracle or model
 latency.
 
+## Optimization measurements
+
+### Context projection
+
+Seven runs with context projection enabled measured 2,267 input characters, down
+from 5,767 (60.7% fewer). Scenario total was 150.652 ms versus the 149.472 ms
+baseline; the 1.180 ms difference is within the synthetic run's timing variation.
+Retrieval remained serial at 61.790 ms and event-loop delay remained 20.641 ms.
+This change improves the measured context-size target without claiming a latency
+improvement.
+
+| Measurement | Baseline | Context projection | Change |
+|---|---:|---:|---:|
+| Model-context input | 5,767 chars | 2,267 chars | −60.7% |
+| Fake scenario total | 149.472 ms | 150.652 ms | +1.180 ms |
+| Three type searches | 61.617 ms | 61.790 ms | +0.173 ms |
+| Event-loop delay | 20.488 ms | 20.641 ms | +0.153 ms |
+
 ## P10 measurement procedure
 
 `scripts/benchmark_p10_fake_scenario.py` runs the same fake scenario in `baseline`

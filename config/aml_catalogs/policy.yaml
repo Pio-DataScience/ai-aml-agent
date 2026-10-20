@@ -40,6 +40,11 @@ revisions:
   evict: oldest_undeployed
   carry_over_user_edited_metadata: true
   restore_from_history: reserved
+context:
+  trimming: true
+  keep_latest_per_tool: true
+  max_tool_payload_chars: 4000
+  keep_latest_turns: 3
 workflow:
   enforcement:
     approvals: enforce
