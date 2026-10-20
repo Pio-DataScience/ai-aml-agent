@@ -60,6 +60,16 @@ work off the event loop without claiming faster overall fake execution.
 | Three serial type searches | 61.617 ms | 63.132 ms | +1.515 ms |
 | Model-context input | 5,767 chars | 5,767 chars | unchanged |
 
+### Explanation-code vector cache invalidation
+
+The cache now fingerprints the filtered explanation-code rows using row count
+plus the maximum available update timestamp. When the table has no recognized
+timestamp column, it uses row count plus a checksum of key text columns. The
+selected basis is logged. A failed fingerprint never returns the in-memory or
+disk cache and forces a rebuild. This is an invalidation correctness change; the
+fake latency harness does not model Oracle catalog reads or embeddings, so no
+latency improvement is claimed for it.
+
 ## P10 measurement procedure
 
 `scripts/benchmark_p10_fake_scenario.py` runs the same fake scenario in `baseline`

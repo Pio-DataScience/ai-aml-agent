@@ -17,6 +17,10 @@ Format: `[DATE] TYPE: Description`
 
 - Added a dedicated bounded worker pool for blocking workflow, sidebar, Oracle, and synchronous tool work; converted the Service B SSE client to async and forwarded request correlation in HTTP headers. The fake event-loop delay fell from 20.488 ms to 0.206 ms.
 
+## [2026-10-20] fix: P10 explanation-code cache invalidation
+
+- Validate cached explanation-code vectors against row count and an available update timestamp, with a read-only checksum fallback. A failed fingerprint rebuilds instead of serving stale vectors.
+
 ## [2026-10-20] feat: P9 versioning flows
 
 ### What

@@ -27,12 +27,102 @@ CACHE_FILE = CACHE_DIR / "explanation_codes_vector_cache.pkl"
 
 _VECTOR_CACHE: Optional[Dict[str, Any]] = None
 
+_UPDATE_COLUMNS = (
+    "UPDATED_AT",
+    "UPDATED_DATE",
+    "UPDATE_DATE",
+    "LAST_UPDATED_AT",
+    "LAST_UPDATE_DATE",
+    "LAST_UPDATE",
+)
+
+
+def _get_vector_cache_key() -> dict[str, Any]:
+    """Read the explanation-catalog version fingerprint without changing data.
+
+    Returns:
+        A row-count/update-time key, or a row-count/checksum fallback.
+
+    Raises:
+        Exception: If the key cannot be read; callers must rebuild instead of
+            returning a possibly stale cached index.
+    """
+    params = {"cc": settings.AML_COUNTRY_CODE, "ic": settings.AML_INST_CODE}
+    _, column_rows = run_readonly(
+        "SELECT COLUMN_NAME, DATA_TYPE FROM USER_TAB_COLUMNS "
+        "WHERE TABLE_NAME = 'PIO_EXPLANATION_CODE'"
+    )
+    column_types = {
+        str(row[0]).upper(): str(row[1]).upper()
+        for row in column_rows
+        if row and row[0]
+    }
+    update_column = next(
+        (column for column in _UPDATE_COLUMNS if column in column_types), None
+    )
+    where = "(COUNTRY_CODE = :cc OR COUNTRY_CODE IS NULL) AND (INST_CODE = :ic OR INST_CODE IS NULL)"
+    if update_column:
+        _, rows = run_readonly(
+            f"SELECT COUNT(*), MAX({update_column}) FROM PIO_EXPLANATION_CODE "
+            f"WHERE EXPLANATION_CODE IS NOT NULL AND {where}",
+            params,
+        )
+        row_count, max_updated_at = rows[0] if rows else (0, None)
+        timestamp = (
+            max_updated_at.isoformat()
+            if hasattr(max_updated_at, "isoformat")
+            else str(max_updated_at) if max_updated_at is not None else None
+        )
+        key = {
+            "basis": f"row_count+max:{update_column}",
+            "row_count": int(row_count or 0),
+            "max_updated_at": timestamp,
+        }
+    else:
+        expressions: list[str] = []
+        for column in ("EXPLANATION_CODE", "DESC_ENG", "DESC_NAT_LAN", "LONG_DES_ENG"):
+            data_type = column_types.get(column, "VARCHAR2")
+            raw = (
+                f"DBMS_LOB.SUBSTR({column}, 1000, 1)"
+                if data_type in {"CLOB", "NCLOB"}
+                else f"SUBSTR(TO_CHAR({column}), 1, 1000)"
+            )
+            expressions.append(f"NVL({raw}, '~')")
+        checksum_expr = " || '|' || ".join(expressions)
+        _, rows = run_readonly(
+            "SELECT COUNT(*), SUM(ORA_HASH(" + checksum_expr + ")) "
+            "FROM PIO_EXPLANATION_CODE "
+            f"WHERE EXPLANATION_CODE IS NOT NULL AND {where}",
+            params,
+        )
+        row_count, checksum = rows[0] if rows else (0, 0)
+        key = {
+            "basis": "row_count+checksum",
+            "row_count": int(row_count or 0),
+            "checksum": int(checksum or 0),
+        }
+    logger.info("[EXPL_SEARCH] Vector cache fingerprint uses %s.", key["basis"])
+    return key
+
 
 def _load_or_build_vector_index() -> Dict[str, Any]:
     """Load or build persistent vector embeddings for PIO_EXPLANATION_CODE filtered by country and institution code."""
     global _VECTOR_CACHE
-    if _VECTOR_CACHE is not None:
+    try:
+        current_key = _get_vector_cache_key()
+    except Exception as exc:
+        logger.warning(
+            "[EXPL_SEARCH] Vector cache fingerprint failed; rebuilding the index. %s",
+            type(exc).__name__,
+        )
+        current_key = None
+    if (
+        _VECTOR_CACHE is not None
+        and current_key is not None
+        and _VECTOR_CACHE.get("cache_key") == current_key
+    ):
         return _VECTOR_CACHE
+    _VECTOR_CACHE = None
 
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     cache_file = CACHE_DIR / f"explanation_codes_vector_cache_{settings.AML_COUNTRY_CODE}_{settings.AML_INST_CODE}.pkl"
@@ -40,13 +130,16 @@ def _load_or_build_vector_index() -> Dict[str, Any]:
     if cache_file.exists():
         try:
             with open(cache_file, "rb") as f:
-                _VECTOR_CACHE = pickle.load(f)
-            logger.info(
-                "[EXPL_SEARCH] Loaded %d explanation codes from vector cache (%s).",
-                len(_VECTOR_CACHE["metadata"]),
-                cache_file.name,
-            )
-            return _VECTOR_CACHE
+                cached = pickle.load(f)
+            if current_key is not None and cached.get("cache_key") == current_key:
+                _VECTOR_CACHE = cached
+                logger.info(
+                    "[EXPL_SEARCH] Loaded %d explanation codes from vector cache (%s).",
+                    len(_VECTOR_CACHE["metadata"]),
+                    cache_file.name,
+                )
+                return _VECTOR_CACHE
+            logger.info("[EXPL_SEARCH] Vector cache key changed or unavailable; rebuilding.")
         except Exception as exc:
             logger.warning("[EXPL_SEARCH] Failed to load vector cache: %s. Rebuilding...", exc)
 
@@ -72,7 +165,8 @@ def _load_or_build_vector_index() -> Dict[str, Any]:
     _, rows = run_readonly(sql, {"cc": settings.AML_COUNTRY_CODE, "ic": settings.AML_INST_CODE})
     if not rows:
         logger.error("[EXPL_SEARCH] No explanation codes found in PIO_EXPLANATION_CODE for CC=%s IC=%s!", settings.AML_COUNTRY_CODE, settings.AML_INST_CODE)
-        return {"embeddings": np.array([]), "metadata": []}
+        _VECTOR_CACHE = {"embeddings": np.array([]), "metadata": [], "cache_key": current_key}
+        return _VECTOR_CACHE
 
     metadata = []
     texts_to_embed = []
@@ -111,6 +205,7 @@ def _load_or_build_vector_index() -> Dict[str, Any]:
     _VECTOR_CACHE = {
         "embeddings": normalized_matrix,
         "metadata": metadata,
+        "cache_key": current_key,
     }
 
     try:
