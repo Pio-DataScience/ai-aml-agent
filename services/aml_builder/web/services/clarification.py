@@ -1072,11 +1072,9 @@ def plain_text(message: str) -> str:
 
 # ─────────────────────────────── data capabilities (balance history) ────────────────────────────────
 
-BALANCE_REFUSAL_EN: Final = ("Balances on this database aren't kept day by day, so I can't compare deposits with the balance. "
-                             "I can compare them with the customer's average deposits instead.")
-BALANCE_REFUSAL_AR: Final = ("الأرصدة في هذه القاعدة غير محفوظة يومياً، لذلك لا أستطيع مقارنة الإيداع بالرصيد. "
-                             "يمكنني مقارنته بمتوسط إيداعات العميل بدلاً من ذلك.")
-ALTERNATIVE_LOOKBACK_DAYS: Final = 90
+BALANCE_REFUSAL_EN: Final = ("Balances on this database aren't kept day by day, so I can't build rules that compare "
+                             "deposits with the account balance.")
+BALANCE_REFUSAL_AR: Final = "الأرصدة في هذه القاعدة غير محفوظة يومياً، لذلك لا أستطيع بناء قواعد تقارن الإيداع برصيد الحساب."
 
 
 def needs_balance(intent: Dict[str, Any]) -> bool:
@@ -1095,42 +1093,29 @@ def needs_balance(intent: Dict[str, Any]) -> bool:
 
 
 def balance_capability_refusal(intent: Dict[str, Any], text: str) -> Optional[Dict[str, Any]]:
-    """The refusal of a balance rule on a database without balance history, with the alternative rule.
+    """The plain refusal of a balance rule on a database without balance history.
 
+    Nothing else is offered: no other rule is suggested, since it would change the meaning of the request.
     Extension point: when a bank's warehouse provides a daily account snapshot (previous-day balance in
     JOD), set DATA_CAPABILITIES[<database>].balance_history = true and balance rules pass this check.
 
     Args:
         intent (Dict[str, Any]): The parsed intent.
-        text (str): The user's request (for the language and the alternative).
+        text (str): The user's request (for the language of the refusal).
 
     Returns:
         Optional[Dict[str, Any]]: The NOT_SUPPORTED tool result, or None when the rule may be built.
     """
     if not needs_balance(intent) or settings.has_capability("balance_history"):
         return None
-    ratio = next((t for t in intent.get("thresholds") or [] if isinstance(t, dict) and t.get("kind") == "ratio"), None)
-    percent = f"{float(ratio['value_from']) * 100:g}" if ratio and ratio.get("value_from") is not None else "50"
-    word = "greater than" if not ratio or str(ratio.get("operator")).startswith(">") else "less than"
     arabic = bool(re.search(r"[؀-ۿ]", text or ""))
-    if arabic:
-        request = (f"إيداعات نقدية {'أكبر' if word == 'greater than' else 'أقل'} من {percent}% من متوسط إيداعات العميل "
-                   f"خلال آخر {ALTERNATIVE_LOOKBACK_DAYS} يوماً")
-    else:
-        request = (f"Flag cash deposits {word} {percent}% of the customer's average deposits over the previous "
-                   f"{ALTERNATIVE_LOOKBACK_DAYS} days")
     return {
         "status": "NOT_SUPPORTED",
         "capability": "balance_history",
         "database": settings.database_name(),
         "user_message": BALANCE_REFUSAL_AR if arabic else BALANCE_REFUSAL_EN,
-        "alternative": {"request": request, "condition": {
-            "type": "ratio", "left": (ratio or {}).get("field") or "deposit_amount", "right": "average_deposit_amount",
-            "operator": (ratio or {}).get("operator") or ">", "factor": float(percent) / 100,
-            "lookback_days": ALTERNATIVE_LOOKBACK_DAYS}},
         "agent_instruction": (
-            "Reply with user_message verbatim, then in one sentence offer the alternative rule (alternative.request). "
-            "Build it ONLY if the user accepts: then call analyze_intent_and_discover_explanation_codes with "
-            "alternative.request as user_prompt. Do not call any other tool now."
+            "Reply with user_message verbatim and nothing else. Do not call any other tool, do not suggest "
+            "another rule and do not ask a follow-up question."
         ),
     }

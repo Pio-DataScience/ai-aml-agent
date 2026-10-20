@@ -22,9 +22,10 @@ Format: `[DATE] TYPE: Description`
   gets `user_message` ("I can't build this rule yet: the value for the account balance is missing ..."). Refusal texts
   pass `plain_text` (no `x < None`); the agent shows `user_message` verbatim.
 - **Balance capability**: `settings.DATA_CAPABILITIES` (`{"OPENBI2": {"balance_history": false}}`) + `has_capability`.
-  A balance rule without balance history returns `NOT_SUPPORTED` with the plain refusal (EN/AR) and the alternative
-  (deposit vs the customer's average deposits over 90 days), built only if the user accepts. Enabling a bank later =
-  set `balance_history: true` for it (extension point: `balance_capability_refusal`).
+  A balance rule without balance history returns `NOT_SUPPORTED` with only the plain refusal, in the user's language
+  ("Balances on this database aren't kept day by day, so I can't build rules that compare deposits with the account
+  balance."). No other rule is suggested and no follow-up question is asked, since that would change the meaning of the
+  request. Enabling a bank later = set `balance_history: true` for it (extension point: `balance_capability_refusal`).
 - Tests: 30 added to `test_clarification.py` (2 existing expectations updated: slot ids; no second LLM parse);
   full suite 240 passed. Live: the original sentence → refusal + alternative; "yes" → plan with one ratio condition.
 

@@ -700,9 +700,9 @@ def test_4_raw_expressions_from_the_sql_service_are_removed() -> None:
     ("flag a cash deposit greater than 50 % of the account balance", cl.BALANCE_REFUSAL_EN),
     ("إيداع نقدي أكبر من ٥٠٪ من الرصيد", cl.BALANCE_REFUSAL_AR),
 ])
-def test_5_on_openbi2_a_balance_rule_is_refused_with_the_alternative(monkeypatch: pytest.MonkeyPatch, text: str,
+def test_5_on_openbi2_a_balance_rule_gets_only_the_plain_refusal(monkeypatch: pytest.MonkeyPatch, text: str,
                                                                       message: str) -> None:
-    """No balance history on OPENBI2: plain refusal in the user's language + the average-deposits alternative."""
+    """No balance history on OPENBI2: only the plain refusal, in the user's language."""
     monkeypatch.setattr(aml_tools.settings, "ACTIVE_DATABASE", "OPENBI2")
     monkeypatch.setattr(aml_tools.settings, "DATA_CAPABILITIES", {"OPENBI2": {"balance_history": False}})
     _fake_intent_llm(monkeypatch, {**VAGUE_INTENT, "detection_logic": "Cash deposits relative to the balance.",
@@ -714,10 +714,10 @@ def test_5_on_openbi2_a_balance_rule_is_refused_with_the_alternative(monkeypatch
 
     assert result["status"] == "NOT_SUPPORTED" and result["capability"] == "balance_history"
     assert result["user_message"] == message and "plan_artifact" not in result
-    alternative = result["alternative"]
-    assert alternative["condition"] == {"type": "ratio", "left": "deposit_amount", "right": "average_deposit_amount",
-                                        "operator": ">", "factor": 0.5, "lookback_days": 90}
-    assert ("50%" in alternative["request"]) and ("90" in alternative["request"])
+    # The refusal has nothing after it: no alternative rule, no follow-up question.
+    assert "alternative" not in result and "questions" not in result
+    assert "average" not in result["user_message"] and "متوسط" not in result["user_message"]
+    assert "do not suggest another rule" in result["agent_instruction"]
 
 
 def test_5_the_capability_is_a_configuration_switch(monkeypatch: pytest.MonkeyPatch) -> None:
