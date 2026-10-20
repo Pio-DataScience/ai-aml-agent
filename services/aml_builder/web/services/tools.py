@@ -35,6 +35,7 @@ from services.aml_builder.web.services.explanation_code_search import (
     search_explanation_candidates,
 )
 from services.aml_builder.web.services.oracle import run_shadow_readonly
+from services.aml_builder.web.services.io_executor import run_in_io_pool
 from services.aml_builder.web.adapters.oracle_repo import OracleRegistryRepo
 from services.aml_builder.web.domain.deploy_service import DeployError, DeployService
 from services.aml_builder.web.services.llm_client import build_llm, safe_parse_json
@@ -502,7 +503,7 @@ def generate_scenario_execution_plan(
 
 
 @tool
-def execute_oracle_dwh_shadow_test(
+async def execute_oracle_dwh_shadow_test(
     intent_json: str, config: RunnableConfig = {}
 ) -> str:
     """Generate production-grade Oracle DWH SQL via PioTech AI text-to-SQL service and execute
@@ -526,8 +527,10 @@ def execute_oracle_dwh_shadow_test(
     if not thread_id:
         return json.dumps({"error": "Authenticated workflow identity is required."})
     try:
-        intent_dict = confirmed_intent_for_tool(
-            get_workflow_repo(),
+        workflow_repo = await run_in_io_pool(get_workflow_repo)
+        intent_dict = await run_in_io_pool(
+            confirmed_intent_for_tool,
+            workflow_repo,
             thread_id,
             "execute_oracle_dwh_shadow_test",
             intent_json,
@@ -559,23 +562,28 @@ def execute_oracle_dwh_shadow_test(
         },
         "reasoning_mode": "instant",
     }
+    trace_metadata = config.get("metadata", {})
+    request_id = str(trace_metadata.get("request_id") or "")
+    correlation_id = str(trace_metadata.get("correlation_id") or "")
 
     collected_text: List[str] = []
     final_answer_text: Optional[str] = None
 
     try:
-        with httpx.Client(timeout=settings.PIOTECH_AI_TIMEOUT_SECONDS) as client:
-            with client.stream(
+        async with httpx.AsyncClient(timeout=settings.PIOTECH_AI_TIMEOUT_SECONDS) as client:
+            async with client.stream(
                 "POST",
                 settings.PIOTECH_AI_URL,
                 json=payload,
                 headers={
                     "Accept": "text/event-stream",
                     "Content-Type": "application/json",
+                    "X-Request-ID": request_id,
+                    "X-Correlation-ID": correlation_id,
                 },
             ) as response:
                 response.raise_for_status()
-                for line in response.iter_lines():
+                async for line in response.aiter_lines():
                     if not line or not line.startswith("data:"):
                         continue
                     raw = line[5:].strip()
@@ -656,14 +664,10 @@ def execute_oracle_dwh_shadow_test(
     # -----------------------------------------------------------
     try:
         shadow_sql = f"SELECT COUNT(*) FROM ({sql}) shadow_query"
-        _, shadow_rows = run_shadow_readonly(shadow_sql)
+        _, shadow_rows = await run_in_io_pool(run_shadow_readonly, shadow_sql)
         header_count = shadow_rows[0][0] if shadow_rows else 0
-
-        # Estimate transaction detail rows (4x matches QB engine output ratio)
         detail_count = header_count * 4
-        ratio = (
-            round(detail_count / max(header_count, 1), 2) if header_count > 0 else 0.0
-        )
+        ratio = round(detail_count / max(header_count, 1), 2) if header_count > 0 else 0.0
 
         logger.info(
             "[TOOL: SQL_BRIDGE] Shadow test complete. header_alerts=%d, detail_txns=%d, ratio=%.2f",

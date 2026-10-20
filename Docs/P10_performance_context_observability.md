@@ -44,6 +44,22 @@ improvement.
 | Three type searches | 61.617 ms | 61.790 ms | +0.173 ms |
 | Event-loop delay | 20.488 ms | 20.641 ms | +0.153 ms |
 
+### Bounded I/O adapters
+
+Seven fake runs with blocking adapter and state-store work moved to the dedicated
+bounded executor kept the context and retrieval behavior unchanged. Scenario total
+was 151.868 ms, three serial fake searches took 63.132 ms, and event-loop delay
+dropped to 0.206 ms from 20.488 ms. The timing change is the targeted benefit; the
+scenario total and serial retrieval did not improve. This change keeps blocking
+work off the event loop without claiming faster overall fake execution.
+
+| Measurement | Baseline | Bounded I/O | Change |
+|---|---:|---:|---:|
+| Event-loop delay | 20.488 ms | 0.206 ms | −99.0% |
+| Fake scenario total | 149.472 ms | 151.868 ms | +2.396 ms |
+| Three serial type searches | 61.617 ms | 63.132 ms | +1.515 ms |
+| Model-context input | 5,767 chars | 5,767 chars | unchanged |
+
 ## P10 measurement procedure
 
 `scripts/benchmark_p10_fake_scenario.py` runs the same fake scenario in `baseline`

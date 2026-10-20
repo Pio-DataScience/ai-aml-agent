@@ -12,6 +12,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage, ToolMessage
 
 from services.aml_builder.web.services.observability import emit_tool_metric
+from services.aml_builder.web.services.io_executor import run_in_io_pool
 from services.aml_builder.web.workflow.context import build_model_messages
 
 
@@ -52,13 +53,17 @@ async def _one_run(mode: str, run_number: int) -> dict[str, float]:
 
         retrieval_start = time.perf_counter()
         if mode in {"baseline", "context", "io"}:
-            retrieval_result = [fake_search(item) for item in ("cash", "wire", "card")]
+            if mode == "io":
+                retrieval_result = [
+                    await run_in_io_pool(fake_search, item)
+                    for item in ("cash", "wire", "card")
+                ]
+            else:
+                retrieval_result = [fake_search(item) for item in ("cash", "wire", "card")]
         else:
             from services.aml_builder.web.services.explanation_code_search import (
                 _run_per_type_searches,
             )
-            from services.aml_builder.web.services.io_executor import run_in_io_pool
-
             retrieval_result = await run_in_io_pool(
                 _run_per_type_searches,
                 ["cash", "wire", "card"],

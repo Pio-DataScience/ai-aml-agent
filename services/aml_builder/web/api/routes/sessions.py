@@ -33,6 +33,7 @@ from services.aml_builder.web.services.session_store import (
 from services.aml_builder.web.services.settings import settings
 from services.aml_builder.web.api.dependencies import Identity, assert_identity_matches, require_identity
 from services.aml_builder.web.domain.policy import authorize
+from services.aml_builder.web.services.io_executor import run_in_io_pool
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +129,7 @@ async def list_user_chats(user_id: str, project_id: Optional[str] = None, identi
     if not authorize(user_id, "chat.read", {"user_id": user_id}, user_email=identity.user_email):
         raise HTTPException(status_code=403, detail="Permission denied.")
     try:
-        sessions = list_chat_sessions(user_id, project_id)
+        sessions = await run_in_io_pool(list_chat_sessions, user_id, project_id)
         chats = [ChatSessionItem(**s) for s in sessions]
         return ChatListResponse(chats=chats)
     except Exception as e:
@@ -146,7 +147,9 @@ async def delete_chat_session(project_id: str, chat_id: str, user_id: str, ident
     if not os.path.exists(settings.APP_STATE_DB_PATH):
         raise HTTPException(status_code=404, detail="Database not found")
 
-    found = soft_delete_chat_session(chat_id, user_id, normalized_project)
+    found = await run_in_io_pool(
+        soft_delete_chat_session, chat_id, user_id, normalized_project
+    )
     if not found:
         raise HTTPException(status_code=404, detail="Chat session not found")
 
@@ -163,7 +166,9 @@ async def rename_chat_session_route(project_id: str, chat_id: str, user_id: str,
     if not os.path.exists(settings.APP_STATE_DB_PATH):
         raise HTTPException(status_code=404, detail="Database not found")
 
-    found = rename_chat_session(chat_id, user_id, normalized_project, request.title)
+    found = await run_in_io_pool(
+        rename_chat_session, chat_id, user_id, normalized_project, request.title
+    )
     if not found:
         raise HTTPException(status_code=404, detail="Chat session not found")
 
@@ -185,7 +190,9 @@ async def toggle_chat_pin_route(project_id: str, chat_id: str, user_id: str, ide
     if not os.path.exists(settings.APP_STATE_DB_PATH):
         raise HTTPException(status_code=404, detail="Database not found")
 
-    new_pin = toggle_chat_pin(chat_id, user_id, normalized_project)
+    new_pin = await run_in_io_pool(
+        toggle_chat_pin, chat_id, user_id, normalized_project
+    )
     if new_pin is None:
         raise HTTPException(status_code=404, detail="Chat session not found")
 

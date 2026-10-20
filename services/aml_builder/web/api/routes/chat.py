@@ -42,6 +42,7 @@ from services.aml_builder.web.services.observability import (
     emit_tool_metric,
     resolve_request_id,
 )
+from services.aml_builder.web.services.io_executor import run_in_io_pool
 
 logger = logging.getLogger(__name__)
 
@@ -119,10 +120,16 @@ async def chat_stream(
     correlation_id = build_correlation_id(thread_id, request_id)
 
     workflow_repo = get_workflow_repo()
-    workflow_repo.get_or_create_workflow(thread_id, project_id, chat_id, user_id)
+    await run_in_io_pool(
+        workflow_repo.get_or_create_workflow,
+        thread_id,
+        project_id,
+        chat_id,
+        user_id,
+    )
 
     first_msg = request.messages[0].content if request.messages else "New Chat"
-    upsert_chat_session(chat_id, user_id, project_id, first_msg)
+    await run_in_io_pool(upsert_chat_session, chat_id, user_id, project_id, first_msg)
 
     logger.info(
         "[API] /chat/stream — user=%s thread=%s messages=%d",
@@ -229,15 +236,19 @@ async def chat_stream(
                                         checker = make_conflict_checker(workflow_repo)
                                         intent = tool_payload.get("enriched_intent")
                                         if isinstance(intent, dict) and has_comparable_core(intent):
-                                            workflow_snapshot = workflow_repo.get_workflow(thread_id)
-                                            tool_payload["conflict_report"] = checker.check_intent(
+                                            workflow_snapshot = await run_in_io_pool(
+                                                workflow_repo.get_workflow, thread_id
+                                            )
+                                            tool_payload["conflict_report"] = await run_in_io_pool(
+                                                checker.check_intent,
                                                 intent,
                                                 thread_id=thread_id,
                                                 scenario_key=workflow_snapshot.scenario_key if workflow_snapshot else None,
                                                 provisional=True,
                                             )
                                     try:
-                                        record_tool_success(
+                                        await run_in_io_pool(
+                                            record_tool_success,
                                             workflow_repo,
                                             thread_id,
                                             tool_name,
@@ -247,7 +258,9 @@ async def chat_stream(
                                         )
                                     except WorkflowConflict as exc:
                                         tool_payload["conflict_report"] = exc.details
-                                        workflow_snapshot = workflow_repo.get_workflow(thread_id)
+                                        workflow_snapshot = await run_in_io_pool(
+                                            workflow_repo.get_workflow, thread_id
+                                        )
                                         tool_payload["parameter_card"] = workflow_snapshot.pending_card if workflow_snapshot else None
                                         tool_payload["card_auto_confirmed"] = False
                                 tool_content = json.dumps(tool_payload, ensure_ascii=False)
@@ -284,9 +297,13 @@ async def chat_stream(
                             # All other ToolMessages are suppressed — raw JSON stays internal
 
                     if tool_round_completed:
-                        current_workflow = workflow_repo.get_workflow(thread_id)
+                        current_workflow = await run_in_io_pool(
+                            workflow_repo.get_workflow, thread_id
+                        )
                         if current_workflow is not None:
-                            current_revision = workflow_repo.current(thread_id)
+                            current_revision = await run_in_io_pool(
+                                workflow_repo.current, thread_id
+                            )
                             yield _sse(
                                 stage_changed_event(
                                     current_workflow.stage,

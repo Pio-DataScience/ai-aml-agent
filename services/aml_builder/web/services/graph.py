@@ -26,6 +26,7 @@ from services.aml_builder.web.domain.policy import authorize
 from services.aml_builder.web.workflow.context import build_model_messages
 from services.aml_builder.web.workflow.runtime import get_workflow_repo
 from services.aml_builder.web.services.config_loader import load_catalogs
+from services.aml_builder.web.services.async_tools import run_sync_tool_in_io_pool
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +140,7 @@ async def get_tool_driven_graph() -> Any:
         ]
         if load_catalogs(settings.CATALOG_DIR).policy.chat_may_deploy:
             tools.append(persist_and_validate_scenario_in_dwh)
+        tools = [run_sync_tool_in_io_pool(tool) for tool in tools]
 
         llm = build_llm()
 

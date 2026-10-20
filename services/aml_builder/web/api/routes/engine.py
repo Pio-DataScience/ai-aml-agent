@@ -13,6 +13,7 @@ from services.aml_builder.web.services.alert_engine import (
     get_active_scenarios,
     run_scenario_alert_engine,
 )
+from services.aml_builder.web.services.io_executor import run_in_io_pool
 
 router = APIRouter(prefix="/engine", tags=["Alert Engine"])
 
@@ -40,8 +41,10 @@ async def trigger_engine_run(request: RunEngineRequest) -> Dict[str, Any]:
             )
 
     try:
-        summary = run_scenario_alert_engine(
-            scenario_id=request.scenario_id, eval_date=eval_date
+        summary = await run_in_io_pool(
+            run_scenario_alert_engine,
+            scenario_id=request.scenario_id,
+            eval_date=eval_date,
         )
         return summary
     except Exception as exc:
@@ -51,7 +54,7 @@ async def trigger_engine_run(request: RunEngineRequest) -> Dict[str, Any]:
 @router.get("/active-scenarios")
 async def list_active_scenarios() -> Dict[str, Any]:
     """List all scenarios currently registered and active for execution."""
-    scenarios = get_active_scenarios()
+    scenarios = await run_in_io_pool(get_active_scenarios)
     return {
         "count": len(scenarios),
         "scenarios": [

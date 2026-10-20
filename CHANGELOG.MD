@@ -13,6 +13,10 @@ Format: `[DATE] TYPE: Description`
 
 - Added configurable model-input trimming for older ToolMessages while preserving current revision artifacts, pending cards, latest per-tool results, and recent turns. The fake context fixture shrank by 60.7% with no material latency change.
 
+## [2026-10-20] perf: P10 bounded I/O adapters
+
+- Added a dedicated bounded worker pool for blocking workflow, sidebar, Oracle, and synchronous tool work; converted the Service B SSE client to async and forwarded request correlation in HTTP headers. The fake event-loop delay fell from 20.488 ms to 0.206 ms.
+
 ## [2026-10-20] feat: P9 versioning flows
 
 ### What

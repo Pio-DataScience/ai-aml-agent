@@ -329,6 +329,7 @@ Operationally important optional groups:
 - Service/logging/auth: `SERVICE_NAME`, `SERVICE_PORT`, `DEBUG`, `SERVICE_AUTH_TOKEN`, `CORS_ALLOWED_ORIGINS`
 - Chat model: `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_MODEL`, `LLM_MODEL_FAST`, `OPENAI_API_KEY`, `LLM_TEMPERATURE`, `LLM_REASONING_EFFORT`
 - Oracle pools: `ORACLE_POOL_MIN`, `ORACLE_POOL_MAX`, and `SHADOW_ORACLE_DSN`, `SHADOW_ORACLE_USER`, `SHADOW_ORACLE_PASSWORD`, `SHADOW_ORACLE_POOL_MIN`, `SHADOW_ORACLE_POOL_MAX`
+- Blocking I/O and type lookup: `IO_WORKERS` (default 4, bounded executor), `RETRIEVAL_CONCURRENCY` (default 3)
 - AML defaults: `AML_COUNTRY_CODE`, `AML_INST_CODE`, `AML_CREATED_BY`
 - Service B: `PIOTECH_AI_URL`, `PIOTECH_AI_TIMEOUT_SECONDS`, `PIOTECH_AI_USER_ID`, `PIOTECH_AI_PROJECT_ID`
 - State: `STATE_DIR`, `CHECKPOINT_DB_PATH`, `APP_STATE_DB_PATH`, `CATALOG_DIR`, `AGENT_RECURSION_LIMIT`
@@ -342,6 +343,7 @@ Important caveats:
 - Environment variables take precedence over `.env`; the generic `DEBUG` name can collide with ambient tooling variables. Any non-boolean value (the verification environment supplied `DEBUG=release`) prevents settings construction and therefore application/test import.
 - LangSmith values loaded from `.env` through `BaseSettings` are copied to the process environment at startup under both `LANGCHAIN_*` and `LANGSMITH_*` names when the corresponding variables are absent, so LangChain's tracing integration can read them. Keys are not logged.
 - `LLM_MAX_TOKENS` is optional and only passed to the model when set; reasoning models use `max_completion_tokens`. `AGENT_RECURSION_LIMIT` (default 25) is authoritative for chat. `MAX_AGENT_ITERATIONS` is retained as a reserved overlapping setting, and `MAX_VALIDATION_RETRIES` remains configurable but unused because no validation retry path exists.
+- Blocking tool, workflow, sidebar, Oracle, and engine work is dispatched through a dedicated bounded `IO_WORKERS` executor. Service B uses an async HTTP SSE client. SQLite adapters open their own connections per operation; the executor does not share connections between threads.
 - Startup validates all four YAML catalogs and fails with the catalog path and validation details when a catalog is invalid. The filter loader allows `TBD` only for dimensions with `status: needs_advisor_input`.
 
 ## 10. Authentication, authorization, and trust boundaries
@@ -426,7 +428,7 @@ Confirmed or directly evidenced concerns:
 - **Generated SQL safety is shallow.** Read-only helpers check only the leading token, and historical date substitution is string-based.
 - **Shadow metrics are partially synthetic.** Detail counts use a fixed 4x heuristic and the reported ratio is not population density.
 - **Schema drift risk.** Tables are created ad hoc only when absent; existing schemas are not migrated or validated for compatible columns.
-- **Blocking work in async routes.** Agent tools, Oracle access, Service B calls, and engine execution can occupy request workers.
+- **Bounded I/O worker saturation.** Blocking adapters and synchronous tools use the dedicated bounded executor, so sustained slow Oracle or state-store calls can exhaust its `IO_WORKERS` capacity and queue work.
 - **Explanation cache staleness.** The persistent cache is not invalidated when Oracle catalog content changes.
 - **Partial failure signaling.** Some registry and initialization functions log and return empty/false results, making infrastructure failure resemble absence of data.
 - **Metadata readiness is weaker than validity.** The catalog's `ready_for_persistence` checks presence only; lookup/static validation can still fail at persistence.

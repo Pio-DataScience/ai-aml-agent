@@ -1,6 +1,7 @@
 """Versioned, typed envelope for agent tool results."""
 
 import json
+import inspect
 from enum import Enum
 from functools import wraps
 from typing import Any, Callable, Dict, Literal, Optional, Type
@@ -270,7 +271,7 @@ def decode_tool_result(content: Any, tool_name: Optional[str] = None) -> ToolRes
     return ToolResult.model_validate(decoded)
 
 
-def typed_tool(function: Callable[..., str]) -> Any:
+def typed_tool(function: Callable[..., Any]) -> Any:
     """Wrap a LangChain tool's JSON result in the common typed envelope.
 
     Args:
@@ -280,10 +281,8 @@ def typed_tool(function: Callable[..., str]) -> Any:
         LangChain tool with the same name and argument contract.
     """
 
-    @wraps(function)
-    def wrapped(*args: Any, **kwargs: Any) -> str:
-        """Guard, run, advance, and encode one workflow-aware tool result."""
-        config = kwargs.get("config", {})
+    def _prepare(config: Any) -> tuple[Any, str | None, str | None]:
+        """Load the current workflow and enforce the shared tool guard."""
         configurable = (
             config.get("configurable", {}) if isinstance(config, dict) else {}
         )
@@ -319,20 +318,30 @@ def typed_tool(function: Callable[..., str]) -> Any:
                 authorized=authorized,
             )
             if not verdict.allowed:
-                return encode_tool_result(
+                blocked = encode_tool_result(
                     function.__name__,
                     {"error": f"{verdict.code.value}: {verdict.message}"},
                     status=ToolStatus.BLOCKED,
                     error_code=ToolErrorCode(verdict.code.value),
                     revision_id=current_revision_id,
                 )
-        raw_result = function(*args, **kwargs)
+                return repo, current_revision_id, blocked
+        return repo, current_revision_id, None
+
+    def _encode_result(
+        raw_result: Any,
+        repo: Any,
+        current_revision_id: str | None,
+        configurable: dict[str, Any],
+    ) -> str:
+        """Advance workflow state and encode a tool payload."""
         try:
             payload = json.loads(raw_result)
         except (json.JSONDecodeError, TypeError):
             payload = {"error": str(raw_result)}
         if not isinstance(payload, dict):
             payload = {"result": payload}
+        thread_id = configurable.get("thread_id")
         if repo is not None and thread_id and "error" not in payload:
             actor = str(configurable.get("user_id", "system"))
             from services.aml_builder.web.workflow.runtime import record_tool_success
@@ -343,5 +352,44 @@ def typed_tool(function: Callable[..., str]) -> Any:
         return encode_tool_result(
             function.__name__, payload, revision_id=current_revision_id
         )
+
+    if inspect.iscoroutinefunction(function):
+        @wraps(function)
+        async def wrapped_async(*args: Any, **kwargs: Any) -> str:
+            """Guard, await, advance, and encode an async workflow-aware tool."""
+            config = kwargs.get("config", {})
+            configurable = (
+                config.get("configurable", {}) if isinstance(config, dict) else {}
+            )
+            from services.aml_builder.web.services.io_executor import run_in_io_pool
+
+            repo, current_revision_id, blocked = await run_in_io_pool(
+                _prepare, config
+            )
+            if blocked is not None:
+                return blocked
+            raw_result = await function(*args, **kwargs)
+            return await run_in_io_pool(
+                _encode_result,
+                raw_result,
+                repo,
+                current_revision_id,
+                configurable,
+            )
+
+        return langchain_tool(wrapped_async)
+
+    @wraps(function)
+    def wrapped(*args: Any, **kwargs: Any) -> str:
+        """Guard, run, advance, and encode one synchronous workflow-aware tool."""
+        config = kwargs.get("config", {})
+        configurable = (
+            config.get("configurable", {}) if isinstance(config, dict) else {}
+        )
+        repo, current_revision_id, blocked = _prepare(config)
+        if blocked is not None:
+            return blocked
+        raw_result = function(*args, **kwargs)
+        return _encode_result(raw_result, repo, current_revision_id, configurable)
 
     return langchain_tool(wrapped)

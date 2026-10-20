@@ -128,6 +128,16 @@ class Settings(BaseSettings):
         default=10,
         description="Maximum connections in shadow Oracle connection pool.",
     )
+    IO_WORKERS: int = Field(
+        default=4,
+        ge=1,
+        description="Maximum workers for blocking adapter and state-store work.",
+    )
+    RETRIEVAL_CONCURRENCY: int = Field(
+        default=3,
+        ge=1,
+        description="Maximum concurrent per-type explanation-code searches.",
+    )
 
     # ─── AML Domain Defaults ──────────────────────────────────────────────────
     AML_COUNTRY_CODE: str = Field(

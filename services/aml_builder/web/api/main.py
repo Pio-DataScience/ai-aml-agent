@@ -19,6 +19,10 @@ from services.aml_builder.web.services.graph import get_tool_driven_graph, close
 from services.aml_builder.web.services.logging_config import setup_logging
 from services.aml_builder.web.services.oracle import close_pool, close_shadow_pool, init_pool, init_shadow_pool
 from services.aml_builder.web.services.session_store import init_session_db
+from services.aml_builder.web.services.io_executor import (
+    close_io_executor,
+    initialize_io_executor,
+)
 from services.aml_builder.web.services.settings import (
     configure_langsmith_environment,
     settings,
@@ -63,6 +67,7 @@ async def lifespan(app: FastAPI):
     configure_langsmith_environment(settings)
     load_catalogs(settings.CATALOG_DIR)
     setup_logging()
+    initialize_io_executor()
     logger.info("[STARTUP] AML Builder service starting. port=%d", settings.SERVICE_PORT)
 
     # Init sessions metadata table
@@ -95,6 +100,7 @@ async def lifespan(app: FastAPI):
     logger.info("[SHUTDOWN] Closing Oracle pools.")
     close_pool()
     close_shadow_pool()
+    close_io_executor()
     logger.info("[SHUTDOWN] AML Builder service stopped.")
 
 
