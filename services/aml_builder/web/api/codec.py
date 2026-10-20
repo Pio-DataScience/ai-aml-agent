@@ -3,7 +3,7 @@
 import json
 from enum import Enum
 from functools import wraps
-from typing import Any, Callable, Dict, Optional, Type
+from typing import Any, Callable, Dict, Literal, Optional, Type
 
 from langchain_core.tools import tool as langchain_tool
 from pydantic import BaseModel, ConfigDict, Field
@@ -40,6 +40,7 @@ class ToolErrorCode(str, Enum):
     SHADOW_NOT_PASSED = "SHADOW_NOT_PASSED"
     HASH_MISMATCH = "HASH_MISMATCH"
     WORKFLOW_CONFLICT = "WORKFLOW_CONFLICT"
+    FILTER_NOT_APPLIED = "FILTER_NOT_APPLIED"
 
 
 class PayloadModel(BaseModel):
@@ -64,6 +65,23 @@ class PlanPayload(PayloadModel):
     plan_conditions: Optional[list[Dict[str, str]]] = None
 
 
+class FilterCheckItem(PayloadModel):
+    """Status for one resolved filter in generated SQL."""
+
+    dimension: Optional[str] = None
+    raw_mention: Optional[str] = None
+    polarity: Optional[str] = None
+    status: Literal["applied", "missing", "mismatch", "unverified"]
+    detail: Optional[str] = None
+
+
+class FilterCheckPayload(PayloadModel):
+    """Aggregate filter-check summary and its per-filter results."""
+
+    validation_success: bool
+    filters: list[FilterCheckItem] = Field(default_factory=list)
+
+
 class ShadowPayload(PayloadModel):
     """SQL generation and shadow-test result."""
 
@@ -72,6 +90,8 @@ class ShadowPayload(PayloadModel):
     transaction_detail_count: Optional[int] = None
     alert_density_ratio: Optional[float] = None
     validation_success: Optional[bool] = None
+    filter_check: Optional[FilterCheckPayload] = None
+    error_code: Optional[str] = None
     error: Optional[str] = None
 
 
@@ -140,6 +160,8 @@ def _infer_error_code(
         tool_name == "execute_oracle_dwh_shadow_test"
         and payload.get("validation_success") is False
     ):
+        if payload.get("error_code") == "FILTER_NOT_APPLIED":
+            return ToolErrorCode.FILTER_NOT_APPLIED
         return ToolErrorCode.SHADOW_FAILED
     if (
         tool_name == "persist_and_validate_scenario_in_dwh"
@@ -157,8 +179,7 @@ def _infer_error_code(
         if "not found" in message:
             return ToolErrorCode.NOT_FOUND
         if any(
-            token in message
-            for token in ("invalid", "required", "unknown query_type")
+            token in message for token in ("invalid", "required", "unknown query_type")
         ):
             return ToolErrorCode.INVALID_INPUT
         if "piotech" in message or "http error" in message:
@@ -204,12 +225,8 @@ def encode_tool_result(
         Indented UTF-8 JSON envelope string.
     """
     validated_payload = _validate_payload(tool_name, payload)
-    inferred_code = error_code or _infer_error_code(
-        tool_name, validated_payload
-    )
-    result_status = status or (
-        ToolStatus.ERROR if inferred_code else ToolStatus.OK
-    )
+    inferred_code = error_code or _infer_error_code(tool_name, validated_payload)
+    result_status = status or (ToolStatus.ERROR if inferred_code else ToolStatus.OK)
     envelope = ToolResult(
         status=result_status,
         error_code=inferred_code,
@@ -219,9 +236,7 @@ def encode_tool_result(
     return envelope.model_dump_json(indent=2, exclude_none=True)
 
 
-def decode_tool_result(
-    content: Any, tool_name: Optional[str] = None
-) -> ToolResult:
+def decode_tool_result(content: Any, tool_name: Optional[str] = None) -> ToolResult:
     """Decode a current envelope or wrap a legacy tool message.
 
     Args:
@@ -265,7 +280,9 @@ def typed_tool(function: Callable[..., str]) -> Any:
     def wrapped(*args: Any, **kwargs: Any) -> str:
         """Guard, run, advance, and encode one workflow-aware tool result."""
         config = kwargs.get("config", {})
-        configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
+        configurable = (
+            config.get("configurable", {}) if isinstance(config, dict) else {}
+        )
         thread_id = configurable.get("thread_id")
         repo = None
         current_revision_id = None

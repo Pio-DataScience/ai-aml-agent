@@ -7,7 +7,7 @@ predictable document regardless of which model produced the intent.
 """
 
 import re
-from typing import Optional
+from typing import Any, Optional
 
 
 def _clean_explanation_checkpoint(checkpoint: Optional[str]) -> Optional[str]:
@@ -41,7 +41,9 @@ def _clean_explanation_checkpoint(checkpoint: Optional[str]) -> Optional[str]:
     return result if result.strip() else None
 
 
-def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]) -> str:
+def build_plan_markdown(
+    intent: dict, explanation_code_checkpoint: Optional[str]
+) -> str:
     """Deterministic markdown renderer that mirrors every AMLIntent field into a plan.
 
     Builds the full Scenario Implementation Plan as a structured markdown document
@@ -62,11 +64,17 @@ def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]
     # STATUS BANNER
     # ─────────────────────────────────────────
     ready = intent.get("ready_for_handoff", True)
-    has_clarifications = bool(intent.get("clarifications") or intent.get("clarification_questions"))
+    has_clarifications = bool(
+        intent.get("clarifications") or intent.get("clarification_questions")
+    )
     if ready and not has_clarifications:
-        lines.append("> ✅ **Status: Ready for Handoff** — All required parameters are captured. Approve this plan to proceed to shadow testing.")
+        lines.append(
+            "> ✅ **Status: Ready for Handoff** — All required parameters are captured. Approve this plan to proceed to shadow testing."
+        )
     else:
-        lines.append("> ⚠️ **Status: Clarification Required** — One or more parameters are ambiguous. Resolve the open questions below before proceeding.")
+        lines.append(
+            "> ⚠️ **Status: Clarification Required** — One or more parameters are ambiguous. Resolve the open questions below before proceeding."
+        )
     lines.append("")
 
     # ─────────────────────────────────────────
@@ -83,7 +91,9 @@ def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]
     tx_types = intent.get("transaction_types")
     tx_type = intent.get("transaction_type")
     if tx_types and isinstance(tx_types, list):
-        lines.append(f"| **Transaction Types** | {', '.join(f'`{t}`' for t in tx_types)} |")
+        lines.append(
+            f"| **Transaction Types** | {', '.join(f'`{t}`' for t in tx_types)} |"
+        )
     elif tx_type:
         lines.append(f"| **Transaction Type** | `{tx_type}` |")
 
@@ -92,7 +102,9 @@ def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]
         lines.append(f"| **Customer Segments** | {', '.join(f'`{s}`' for s in segs)} |")
 
     anchor = intent.get("anchor_date")
-    lines.append(f"| **Evaluation Mode** | {'🕐 Shadow Test — Anchor: `' + anchor + '`' if anchor else '🟢 Production (SYSDATE)'} |")
+    lines.append(
+        f"| **Evaluation Mode** | {'🕐 Shadow Test — Anchor: `' + anchor + '`' if anchor else '🟢 Production (SYSDATE)'} |"
+    )
     lines.append("")
 
     # ─────────────────────────────────────────
@@ -115,10 +127,18 @@ def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]
     lines.append("")
     tw = intent.get("time_window")
     if tw:
-        rolling_label = "Rolling (from SYSDATE)" if tw.get("is_rolling") else "Fixed Calendar Period"
+        rolling_label = (
+            "Rolling (from SYSDATE)"
+            if tw.get("is_rolling")
+            else "Fixed Calendar Period"
+        )
         provenance_tw = tw.get("provenance", "stated")
-        prov_badge = " *(assumed default)*" if provenance_tw == "assumed_default" else ""
-        lines.append(f"- **Window Size:** `{tw.get('value')} {tw.get('unit')}`{prov_badge}")
+        prov_badge = (
+            " *(assumed default)*" if provenance_tw == "assumed_default" else ""
+        )
+        lines.append(
+            f"- **Window Size:** `{tw.get('value')} {tw.get('unit')}`{prov_badge}"
+        )
         lines.append(f"- **Window Type:** {rolling_label}")
     else:
         lines.append("- **Window Size:** — *(not specified)*")
@@ -131,7 +151,9 @@ def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]
         lines.append("| Parameter | Value |")
         lines.append("|---|---|")
         lines.append(f"| **Duration** | `{bw.get('duration')} {bw.get('unit')}` |")
-        lines.append(f"| **Isolates Current Window** | `{bw.get('exclude_current_window', True)}` |")
+        lines.append(
+            f"| **Isolates Current Window** | `{bw.get('exclude_current_window', True)}` |"
+        )
         lines.append(f"| **Offset Days** | `{bw.get('offset_days', '—')}` |")
         if bw.get("description"):
             lines.append(f"| **Description** | {bw.get('description')} |")
@@ -167,24 +189,45 @@ def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]
     thresholds = intent.get("thresholds", [])
     if thresholds:
         detail_thresholds = [t for t in thresholds if t.get("target_scope") == "DETAIL"]
-        aggregate_thresholds = [t for t in thresholds if t.get("target_scope") == "AGGREGATE"]
+        aggregate_thresholds = [
+            t for t in thresholds if t.get("target_scope") == "AGGREGATE"
+        ]
 
         if detail_thresholds:
             lines.append("### 5.1 Detail-Level Filters *(SQL: `WHERE` clause)*")
             lines.append("")
-            has_channels = any(t.get("transaction_type") or t.get("explanation_codes") for t in detail_thresholds)
+            has_channels = any(
+                t.get("transaction_type") or t.get("explanation_codes")
+                for t in detail_thresholds
+            )
             if has_channels:
-                lines.append("| # | Field | Operator | Value | Channel / Codes | Provenance |")
+                lines.append(
+                    "| # | Field | Operator | Value | Channel / Codes | Provenance |"
+                )
                 lines.append("|---|---|---|---|---|---|")
                 for i, t in enumerate(detail_thresholds, 1):
                     val = f"`{t.get('value_from')}`"
                     if t.get("operator") == "BETWEEN" and t.get("value_to") is not None:
                         val = f"`{t.get('value_from')}` — `{t.get('value_to')}`"
                     prov = t.get("provenance", "stated")
-                    prov_label = "✅ Stated" if prov == "stated" else "⚙️ Assumed" if prov == "assumed_default" else "❓ Needs User"
+                    prov_label = (
+                        "✅ Stated"
+                        if prov == "stated"
+                        else (
+                            "⚙️ Assumed"
+                            if prov == "assumed_default"
+                            else "❓ Needs User"
+                        )
+                    )
                     ch = t.get("transaction_type") or "—"
-                    codes_str = f" (`{', '.join(t.get('explanation_codes', []))}`)" if t.get("explanation_codes") else ""
-                    lines.append(f"| {i} | `{t.get('field')}` | `{t.get('operator')}` | {val} | `{ch}`{codes_str} | {prov_label} |")
+                    codes_str = (
+                        f" (`{', '.join(t.get('explanation_codes', []))}`)"
+                        if t.get("explanation_codes")
+                        else ""
+                    )
+                    lines.append(
+                        f"| {i} | `{t.get('field')}` | `{t.get('operator')}` | {val} | `{ch}`{codes_str} | {prov_label} |"
+                    )
             else:
                 lines.append("| # | Field | Operator | Value | Provenance |")
                 lines.append("|---|---|---|---|---|")
@@ -193,26 +236,55 @@ def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]
                     if t.get("operator") == "BETWEEN" and t.get("value_to") is not None:
                         val = f"`{t.get('value_from')}` — `{t.get('value_to')}`"
                     prov = t.get("provenance", "stated")
-                    prov_label = "✅ Stated" if prov == "stated" else "⚙️ Assumed" if prov == "assumed_default" else "❓ Needs User"
-                    lines.append(f"| {i} | `{t.get('field')}` | `{t.get('operator')}` | {val} | {prov_label} |")
+                    prov_label = (
+                        "✅ Stated"
+                        if prov == "stated"
+                        else (
+                            "⚙️ Assumed"
+                            if prov == "assumed_default"
+                            else "❓ Needs User"
+                        )
+                    )
+                    lines.append(
+                        f"| {i} | `{t.get('field')}` | `{t.get('operator')}` | {val} | {prov_label} |"
+                    )
             lines.append("")
 
         if aggregate_thresholds:
             lines.append("### 5.2 Aggregate-Level Conditions *(SQL: `HAVING` clause)*")
             lines.append("")
-            has_channels = any(t.get("transaction_type") or t.get("explanation_codes") for t in aggregate_thresholds)
+            has_channels = any(
+                t.get("transaction_type") or t.get("explanation_codes")
+                for t in aggregate_thresholds
+            )
             if has_channels:
-                lines.append("| # | Field | Operator | Value | Channel / Codes | Provenance |")
+                lines.append(
+                    "| # | Field | Operator | Value | Channel / Codes | Provenance |"
+                )
                 lines.append("|---|---|---|---|---|---|")
                 for i, t in enumerate(aggregate_thresholds, 1):
                     val = f"`{t.get('value_from')}`"
                     if t.get("operator") == "BETWEEN" and t.get("value_to") is not None:
                         val = f"`{t.get('value_from')}` — `{t.get('value_to')}`"
                     prov = t.get("provenance", "stated")
-                    prov_label = "✅ Stated" if prov == "stated" else "⚙️ Assumed" if prov == "assumed_default" else "❓ Needs User"
+                    prov_label = (
+                        "✅ Stated"
+                        if prov == "stated"
+                        else (
+                            "⚙️ Assumed"
+                            if prov == "assumed_default"
+                            else "❓ Needs User"
+                        )
+                    )
                     ch = t.get("transaction_type") or "—"
-                    codes_str = f" (`{', '.join(t.get('explanation_codes', []))}`)" if t.get("explanation_codes") else ""
-                    lines.append(f"| {i} | `{t.get('field')}` | `{t.get('operator')}` | {val} | `{ch}`{codes_str} | {prov_label} |")
+                    codes_str = (
+                        f" (`{', '.join(t.get('explanation_codes', []))}`)"
+                        if t.get("explanation_codes")
+                        else ""
+                    )
+                    lines.append(
+                        f"| {i} | `{t.get('field')}` | `{t.get('operator')}` | {val} | `{ch}`{codes_str} | {prov_label} |"
+                    )
             else:
                 lines.append("| # | Field | Operator | Value | Provenance |")
                 lines.append("|---|---|---|---|---|")
@@ -221,8 +293,18 @@ def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]
                     if t.get("operator") == "BETWEEN" and t.get("value_to") is not None:
                         val = f"`{t.get('value_from')}` — `{t.get('value_to')}`"
                     prov = t.get("provenance", "stated")
-                    prov_label = "✅ Stated" if prov == "stated" else "⚙️ Assumed" if prov == "assumed_default" else "❓ Needs User"
-                    lines.append(f"| {i} | `{t.get('field')}` | `{t.get('operator')}` | {val} | {prov_label} |")
+                    prov_label = (
+                        "✅ Stated"
+                        if prov == "stated"
+                        else (
+                            "⚙️ Assumed"
+                            if prov == "assumed_default"
+                            else "❓ Needs User"
+                        )
+                    )
+                    lines.append(
+                        f"| {i} | `{t.get('field')}` | `{t.get('operator')}` | {val} | {prov_label} |"
+                    )
             lines.append("")
     else:
         lines.append("*No numeric thresholds extracted.*")
@@ -237,7 +319,9 @@ def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]
         lines.append("")
         lines.append("## 6. Behavioral & Semantic Rules")
         lines.append("")
-        lines.append("*Non-numeric rules, state transitions, and behavioral patterns captured from your description.*")
+        lines.append(
+            "*Non-numeric rules, state transitions, and behavioral patterns captured from your description.*"
+        )
         lines.append("")
         lines.append("| # | Type | Subject | Business Rule |")
         lines.append("|---|---|---|---|")
@@ -250,7 +334,9 @@ def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]
                 "TEMPORAL": "⏱️ Temporal",
                 "OTHER": "📌 Other",
             }.get(sc.get("logical_type", "OTHER"), "📌 Other")
-            lines.append(f"| {i} | {type_badge} | `{sc.get('subject', '—')}` | {sc.get('predicate', '—')} |")
+            lines.append(
+                f"| {i} | {type_badge} | `{sc.get('subject', '—')}` | {sc.get('predicate', '—')} |"
+            )
         lines.append("")
 
     # ─────────────────────────────────────────
@@ -277,13 +363,48 @@ def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]
         lines.append("## 8. Explanation Codes")
         lines.append("")
         if expl_codes:
-            lines.append(f"**Selected Codes:** {', '.join(f'`{c}`' for c in expl_codes)}")
+            lines.append(
+                f"**Selected Codes:** {', '.join(f'`{c}`' for c in expl_codes)}"
+            )
             lines.append("")
         if cleaned_checkpoint:
             lines.append("**Discovered Codes (from DWH catalog):**")
             lines.append("")
             lines.append(cleaned_checkpoint)
             lines.append("")
+
+    resolved_filters = [
+        item
+        for item in (intent.get("resolved_filters") or [])
+        if isinstance(item, dict)
+        and item.get("status") == "resolved"
+        and item.get("values")
+    ]
+    if resolved_filters:
+        lines.append("---")
+        lines.append("")
+        lines.append("## Resolved Filters")
+        lines.append("")
+        for item in resolved_filters:
+            target = item.get("target") or {}
+            target_text = (
+                f" ({target.get('table')}.{target.get('column')})"
+                if target.get("table") and target.get("column")
+                else ""
+            )
+            values = ", ".join(f"`{value}`" for value in item.get("values", []))
+            lines.append(
+                f"- **{item.get('dimension')}**{target_text}: {item.get('polarity', 'positive')} — {values}"
+            )
+        if any(item.get("level") == "customer" for item in resolved_filters) and any(
+            _is_transaction_detail_threshold(threshold)
+            for threshold in (intent.get("thresholds") or [])
+        ):
+            lines.append("")
+            lines.append(
+                "> Note: customer-level filters establish the baseline population for transaction-level thresholds."
+            )
+        lines.append("")
 
     # ─────────────────────────────────────────
     # SECTION 9 — APPLIED DEFAULTS
@@ -294,7 +415,9 @@ def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]
         lines.append("")
         lines.append("## 9. Applied Defaults")
         lines.append("")
-        lines.append("*The following parameters were not explicitly stated and were inferred by the system. Please confirm or correct them.*")
+        lines.append(
+            "*The following parameters were not explicitly stated and were inferred by the system. Please confirm or correct them.*"
+        )
         lines.append("")
         for d in applied_defaults:
             lines.append(f"- ⚙️ {d}")
@@ -310,7 +433,9 @@ def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]
         lines.append("")
         lines.append("## 10. ⚠️ Open Clarifications Required")
         lines.append("")
-        lines.append("*The following questions must be answered before this scenario can be built into SQL.*")
+        lines.append(
+            "*The following questions must be answered before this scenario can be built into SQL.*"
+        )
         lines.append("")
         if clarifications:
             for i, c in enumerate(clarifications, 1):
@@ -334,9 +459,11 @@ def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]
     lines.append("## 11. Shadow Testing Scope")
     lines.append("")
     if anchor:
-        lines.append(f"- **Mode:** 🕐 Historical Shadow Test")
+        lines.append("- **Mode:** 🕐 Historical Shadow Test")
         lines.append(f"- **Anchor Date:** `{anchor}`")
-        lines.append(f"- **SQL Temporal Anchor:** `DATE '{anchor}'` *(replaces `TRUNC(SYSDATE)`)*")
+        lines.append(
+            f"- **SQL Temporal Anchor:** `DATE '{anchor}'` *(replaces `TRUNC(SYSDATE)`)*"
+        )
     else:
         lines.append("- **Mode:** 🟢 Production (live data, `TRUNC(SYSDATE)`)")
     exp_min = intent.get("expected_alert_range_min")
@@ -348,7 +475,9 @@ def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]
     return "\n".join(lines)
 
 
-def render_plan(intent: dict, explanation_code_checkpoint: Optional[str] = None) -> dict:
+def render_plan(
+    intent: dict, explanation_code_checkpoint: Optional[str] = None
+) -> dict:
     """Render the plan artifact and condition list through one deterministic entry point.
 
     Args:
@@ -363,10 +492,21 @@ def render_plan(intent: dict, explanation_code_checkpoint: Optional[str] = None)
         plan_conditions.append({"condition": "Time Window Isolation"})
     if intent.get("explanation_codes") or explanation_code_checkpoint:
         plan_conditions.append({"condition": "Explanation Code Match"})
+    if any(
+        isinstance(item, dict)
+        and item.get("status") == "resolved"
+        and item.get("values")
+        for item in (intent.get("resolved_filters") or [])
+    ):
+        plan_conditions.append({"condition": "Resolved Filters"})
     thresholds = intent.get("thresholds", [])
-    if any(t.get("target_scope") == "DETAIL" for t in thresholds if isinstance(t, dict)):
+    if any(
+        t.get("target_scope") == "DETAIL" for t in thresholds if isinstance(t, dict)
+    ):
         plan_conditions.append({"condition": "Detail Threshold Filter (WHERE)"})
-    if any(t.get("target_scope") == "AGGREGATE" for t in thresholds if isinstance(t, dict)):
+    if any(
+        t.get("target_scope") == "AGGREGATE" for t in thresholds if isinstance(t, dict)
+    ):
         plan_conditions.append({"condition": "Aggregate Threshold Breach (HAVING)"})
     if intent.get("baseline_window"):
         plan_conditions.append({"condition": "Historical Baseline Window"})
@@ -378,3 +518,11 @@ def render_plan(intent: dict, explanation_code_checkpoint: Optional[str] = None)
         "plan_artifact": build_plan_markdown(intent, explanation_code_checkpoint),
         "plan_conditions": plan_conditions,
     }
+
+
+def _is_transaction_detail_threshold(threshold: Any) -> bool:
+    """Return whether a detail threshold refers to transaction-level data."""
+    if not isinstance(threshold, dict) or threshold.get("target_scope") != "DETAIL":
+        return False
+    field = str(threshold.get("field") or "").casefold()
+    return "transaction" in field or bool(threshold.get("transaction_type"))

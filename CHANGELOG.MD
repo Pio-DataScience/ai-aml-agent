@@ -5,6 +5,20 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-10-20] feat: P7 filter catalog, resolution, and SQL recheck
+
+### What
+- Added validated filter-dimension catalogs, catalog-driven intent extraction, deterministic lookup/enum/semantic resolution, confidence-ranked card options, and explicit disabled/unknown filter acknowledgement.
+- Stored confirmed filters in revision intent and `params_hash`, displayed them in the plan, and sent resolved filters plus catalog-derived target instructions to Service B without changing Service B.
+- Added an A-side SQLGlot predicate/value check with `FILTER_NOT_APPLIED`, retained generated SQL in failures, and configurable handling for unverified predicates.
+- Extended the existing UI card to resolve, remove, or acknowledge filters.
+
+### Verification
+- P7 and P1 golden-fixture verification and focused regression results are recorded in `Docs/refactor_status.md`.
+- Tests use fake candidates and SQL fixtures; no live LLM, Oracle, or Service B call was made.
+
+---
+
 ## [2026-10-20] feat: P6b revision flow and history
 
 ### What

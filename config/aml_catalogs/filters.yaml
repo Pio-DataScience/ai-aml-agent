@@ -6,9 +6,11 @@ dimensions:
     level: transaction
     target: {table: PIO_TRANSACTIONS, column: EXPL_CODE}
     resolver: semantic
+    value_source: existing_explanation_code_catalog
     match: any_of
     polarity_allowed: false
     required: false
+    resolver_config: {match_threshold: 0.55, ambiguity_margin: 0.05, max_options: 8}
     status: confirmed
   account_status:
     label: Account status

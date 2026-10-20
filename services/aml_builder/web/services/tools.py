@@ -32,6 +32,7 @@ from services.aml_builder.web.services.schemas import AMLIntent
 from services.aml_builder.web.services.explanation_code_search import (
     select_relevant_explanation_codes,
     format_explanation_code_checkpoint,
+    search_explanation_candidates,
 )
 from services.aml_builder.web.services.oracle import run_shadow_readonly
 from services.aml_builder.web.adapters.oracle_repo import OracleRegistryRepo
@@ -47,6 +48,14 @@ from services.aml_builder.web.services.plan_renderer import render_plan
 from services.aml_builder.web.services.prompts.loader import load_prompt
 from services.aml_builder.web.domain.policy import authorize, get_role
 from services.aml_builder.web.services.config_loader import load_catalogs
+from services.aml_builder.web.domain.filter_resolution import (
+    build_filter_prompt_section,
+    build_service_b_intent,
+    resolve_filter_mentions,
+)
+from services.aml_builder.web.domain.filter_applied_check import (
+    check_filter_application,
+)
 from services.aml_builder.web.workflow.runtime import get_workflow_repo
 from services.aml_builder.web.services.scenario_metadata import (
     seed_scenario_metadata,
@@ -82,14 +91,18 @@ def confirmed_intent_for_tool(
     """
     current = repo.current(thread_id)
     if current is None or not current.card_json:
-        raise ValueError("No confirmed scenario intent is stored on the current revision.")
+        raise ValueError(
+            "No confirmed scenario intent is stored on the current revision."
+        )
     try:
         card = json.loads(current.card_json)
     except (json.JSONDecodeError, TypeError) as exc:
         raise ValueError("The current revision intent is invalid.") from exc
     intent = card.get("intent") if isinstance(card, dict) else None
     if not isinstance(intent, dict) or not intent:
-        raise ValueError("No confirmed scenario intent is stored on the current revision.")
+        raise ValueError(
+            "No confirmed scenario intent is stored on the current revision."
+        )
     supplied: Any = supplied_intent
     if isinstance(supplied, str):
         try:
@@ -107,7 +120,11 @@ def confirmed_intent_for_tool(
             "intent_arg_mismatch",
             detail={"tool": tool_name, "revision_id": current.revision_id},
         )
-        logger.warning("%s ignored an LLM intent argument that differed from revision %s", tool_name, current.revision_id)
+        logger.warning(
+            "%s ignored an LLM intent argument that differed from revision %s",
+            tool_name,
+            current.revision_id,
+        )
     return intent
 
 
@@ -126,7 +143,9 @@ def _permission_error(config: RunnableConfig, action: str) -> str | None:
     user_email = str(configurable.get("user_email", "")) or None
     if authorize(user_id, action, user_email=user_email):
         return None
-    return json.dumps({"error": f"PERMISSION_DENIED: action {action} is not allowed for this user."})
+    return json.dumps(
+        {"error": f"PERMISSION_DENIED: action {action} is not allowed for this user."}
+    )
 
 
 @tool
@@ -170,7 +189,10 @@ def analyze_intent_and_discover_explanation_codes(
     )
     llm = build_llm()
 
-    system_instruction = load_prompt("intent_extraction.md")
+    catalogs = load_catalogs(settings.CATALOG_DIR)
+    system_instruction = load_prompt("intent_extraction.md").replace(
+        "{{FILTER_DIMENSIONS}}", build_filter_prompt_section(catalogs.filters)
+    )
     if existing_intent_json:
         system_instruction += f"\n\nExisting Intent Payload:\n{existing_intent_json}\nPreserve existing stated fields."
 
@@ -205,6 +227,10 @@ def analyze_intent_and_discover_explanation_codes(
             intent_dict = intent_dict["intent"]
 
         intent_dict = normalize_intent(intent_dict, user_prompt)
+        raw_filter_mentions = intent_dict.get("filters")
+        if not isinstance(raw_filter_mentions, list):
+            raw_filter_mentions = []
+        intent_dict["filters"] = raw_filter_mentions
         tx_type = intent_dict.get("transaction_type")
         tx_types = intent_dict.get("transaction_types")
 
@@ -247,12 +273,24 @@ def analyze_intent_and_discover_explanation_codes(
                 # Build explanation_codes_by_type partitioning
                 codes_by_type: Dict[str, List[str]] = {}
                 for c in discovered_codes:
-                    tx_key = c.get("channel") or c.get("transaction_type") or (search_types[0] if isinstance(search_types, list) else str(search_types))
-                    codes_by_type.setdefault(tx_key, []).append(str(c.get("code")).strip())
+                    tx_key = (
+                        c.get("channel")
+                        or c.get("transaction_type")
+                        or (
+                            search_types[0]
+                            if isinstance(search_types, list)
+                            else str(search_types)
+                        )
+                    )
+                    codes_by_type.setdefault(tx_key, []).append(
+                        str(c.get("code")).strip()
+                    )
                 intent_dict["explanation_codes_by_type"] = codes_by_type
 
                 # Bind channel-specific explanation codes directly to individual thresholds and semantic conditions
-                bind_channels_and_codes_to_intent(intent_dict, discovered_codes, codes_by_type)
+                bind_channels_and_codes_to_intent(
+                    intent_dict, discovered_codes, codes_by_type
+                )
 
                 logger.info(
                     "[TOOL: INTENT] Vector search discovered %d codes across %d channels: %s",
@@ -273,6 +311,82 @@ def analyze_intent_and_discover_explanation_codes(
                     for condition in conditions:
                         if isinstance(condition, dict):
                             condition["explanation_codes"] = None
+
+        def filter_candidate_provider(
+            dimension_name: str, raw_mention: str, dimension: dict[str, Any]
+        ) -> list[dict[str, Any]]:
+            """Adapt the existing explanation-code index to the filter resolver."""
+            if dimension_name == "explanation_code":
+                source = discovered_codes or search_explanation_candidates(
+                    raw_mention,
+                    min_similarity=float(
+                        (dimension.get("resolver_config") or {}).get(
+                            "match_threshold", 0.55
+                        )
+                    ),
+                    top_k=int(
+                        (dimension.get("resolver_config") or {}).get("max_options", 8)
+                    ),
+                )
+                return [
+                    {
+                        "value": str(candidate.get("code", "")),
+                        "label": str(
+                            candidate.get("desc_eng") or candidate.get("code", "")
+                        ),
+                        "confidence": candidate.get("score", 1.0),
+                    }
+                    for candidate in source
+                    if candidate.get("code")
+                ]
+            source = (dimension.get("resolver_config") or {}).get("candidates", [])
+            return source if isinstance(source, list) else []
+
+        resolved_filters = resolve_filter_mentions(
+            raw_filter_mentions,
+            catalogs.filters,
+            candidate_provider=filter_candidate_provider,
+        )
+        code_row = next(
+            (
+                row
+                for row in resolved_filters
+                if row.get("dimension") == "explanation_code"
+            ),
+            None,
+        )
+        code_values = [str(value) for value in (explicit_codes or []) if value]
+        if not code_values:
+            code_values = [
+                str(candidate.get("code"))
+                for candidate in discovered_codes
+                if candidate.get("code")
+            ]
+        if not code_values and code_row and code_row.get("status") == "resolved":
+            code_values = [str(value) for value in code_row.get("values", [])]
+        if code_values:
+            if code_row is None:
+                raw_code_mention = str(target_types or "selected explanation codes")
+                code_row = {
+                    "dimension": "explanation_code",
+                    "raw_mention": raw_code_mention,
+                    "polarity": "positive",
+                    "level": "transaction",
+                    "status": "resolved",
+                    "confidence": None,
+                    "provenance": "existing_explanation_code_catalog",
+                    "values": list(dict.fromkeys(code_values)),
+                    "options": [],
+                    "target": catalogs.filters.dimensions["explanation_code"].target,
+                    "polarity_allowed": False,
+                }
+                resolved_filters.append(code_row)
+            else:
+                code_row.update(
+                    status="resolved", values=list(dict.fromkeys(code_values))
+                )
+            intent_dict["explanation_codes"] = list(dict.fromkeys(code_values))
+        intent_dict["resolved_filters"] = resolved_filters
 
         intent = AMLIntent(**intent_dict)
 
@@ -385,7 +499,9 @@ def generate_scenario_execution_plan(
 
 
 @tool
-def execute_oracle_dwh_shadow_test(intent_json: str, config: RunnableConfig = {}) -> str:
+def execute_oracle_dwh_shadow_test(
+    intent_json: str, config: RunnableConfig = {}
+) -> str:
     """Generate production-grade Oracle DWH SQL via PioTech AI text-to-SQL service and execute
     a live shadow test against Oracle BI_DWH to compute real alert volume metrics.
 
@@ -408,7 +524,10 @@ def execute_oracle_dwh_shadow_test(intent_json: str, config: RunnableConfig = {}
         return json.dumps({"error": "Authenticated workflow identity is required."})
     try:
         intent_dict = confirmed_intent_for_tool(
-            get_workflow_repo(), thread_id, "execute_oracle_dwh_shadow_test", intent_json
+            get_workflow_repo(),
+            thread_id,
+            "execute_oracle_dwh_shadow_test",
+            intent_json,
         )
     except ValueError as exc:
         return json.dumps({"error": str(exc)})
@@ -420,8 +539,10 @@ def execute_oracle_dwh_shadow_test(intent_json: str, config: RunnableConfig = {}
     # -----------------------------------------------------------
     # Step 2: Call PioTech AI text-to-SQL SSE service
     # -----------------------------------------------------------
+    catalogs = load_catalogs(settings.CATALOG_DIR)
+    service_intent = build_service_b_intent(intent_dict, catalogs.filters)
     payload_content = json.dumps(
-        {"request_type": "AML_SCENARIO_GENERATION", "intent": intent_dict},
+        {"request_type": "AML_SCENARIO_GENERATION", "intent": service_intent},
         indent=2,
         ensure_ascii=False,
     )
@@ -494,6 +615,39 @@ def execute_oracle_dwh_shadow_test(intent_json: str, config: RunnableConfig = {}
         len(sql),
     )
 
+    filter_policy = load_catalogs(settings.CATALOG_DIR).policy.filter_check.unverifiable
+    requested_types = intent_dict.get("transaction_types") or intent_dict.get(
+        "transaction_type"
+    )
+    transaction_scope = (
+        "SPECIFIC"
+        if specific_transaction_types(requested_types)
+        else "ALL" if requested_types else None
+    )
+    filter_check = check_filter_application(
+        sql,
+        service_intent.get("resolved_filters", []),
+        unverifiable=filter_policy,
+        transaction_scope=transaction_scope,
+    )
+    if not filter_check["validation_success"]:
+        return json.dumps(
+            {
+                "raw_sql": sql,
+                "validation_success": False,
+                "error_code": "FILTER_NOT_APPLIED",
+                "error": "One or more resolved filters were not verified in the generated SQL.",
+                "filter_check": filter_check,
+                "dropped_filters": [
+                    item
+                    for item in filter_check["filters"]
+                    if item["status"] in {"missing", "mismatch", "unverified"}
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
     # -----------------------------------------------------------
     # Step 4: Execute shadow test — wrap in COUNT query for volume metrics
     # -----------------------------------------------------------
@@ -521,6 +675,7 @@ def execute_oracle_dwh_shadow_test(intent_json: str, config: RunnableConfig = {}
                 "transaction_detail_count": detail_count,
                 "alert_density_ratio": ratio,
                 "validation_success": True,
+                "filter_check": filter_check,
             },
             ensure_ascii=False,
             indent=2,
@@ -535,6 +690,7 @@ def execute_oracle_dwh_shadow_test(intent_json: str, config: RunnableConfig = {}
                 "transaction_detail_count": None,
                 "alert_density_ratio": None,
                 "validation_success": False,
+                "filter_check": filter_check,
                 "error": str(exc),
             },
             ensure_ascii=False,
@@ -543,7 +699,9 @@ def execute_oracle_dwh_shadow_test(intent_json: str, config: RunnableConfig = {}
 
 
 @tool
-def prepare_scenario_metadata_for_persistence(metadata_json: str, config: RunnableConfig = {}) -> str:
+def prepare_scenario_metadata_for_persistence(
+    metadata_json: str, config: RunnableConfig = {}
+) -> str:
     """Build the live PIO_AML_AGENT_SCENARIOS governance field catalog for the side panel / chat fallback.
 
     Call this ONLY after the user has approved the shadow test results and before calling
@@ -637,12 +795,21 @@ def persist_and_validate_scenario_in_dwh(
         thread_id = str(configurable.get("thread_id") or "")
         if not thread_id:
             raise ValueError("Authenticated workflow identity is required.")
-        intent_dict = confirmed_intent_for_tool(
-            get_workflow_repo(), thread_id, "persist_and_validate_scenario_in_dwh", intent_json
+        confirmed_intent_for_tool(
+            get_workflow_repo(),
+            thread_id,
+            "persist_and_validate_scenario_in_dwh",
+            intent_json,
         )
     except ValueError as exc:
         logger.error("[TOOL: PERSISTER] Confirmed intent unavailable: %s", exc)
-        return json.dumps({"write_success": False, "error_code": "PARAMS_UNCONFIRMED", "error": str(exc)})
+        return json.dumps(
+            {
+                "write_success": False,
+                "error_code": "PARAMS_UNCONFIRMED",
+                "error": str(exc),
+            }
+        )
 
     try:
         metadata_dict = json.loads(metadata_json) if metadata_json else {}
@@ -654,19 +821,33 @@ def persist_and_validate_scenario_in_dwh(
     thread_id = str(configurable.get("thread_id") or "")
     actor_id = str(configurable.get("user_id") or "")
     if not thread_id or not actor_id:
-        return json.dumps({"write_success": False, "error_code": "PERMISSION_DENIED", "error": "Authenticated workflow identity is required."})
+        return json.dumps(
+            {
+                "write_success": False,
+                "error_code": "PERMISSION_DENIED",
+                "error": "Authenticated workflow identity is required.",
+            }
+        )
     workflow_repo = get_workflow_repo()
     workflow = workflow_repo.get_workflow(thread_id)
     revision = workflow_repo.current(thread_id) if workflow else None
     if revision is None:
-        return json.dumps({"write_success": False, "error_code": "STAGE_NOT_ALLOWED", "error": "No current workflow revision is available."})
+        return json.dumps(
+            {
+                "write_success": False,
+                "error_code": "STAGE_NOT_ALLOWED",
+                "error": "No current workflow revision is available.",
+            }
+        )
     policy = load_catalogs(settings.CATALOG_DIR).policy
     actor_email = str(configurable.get("user_email") or "") or None
     service = DeployService(
         oracle_repo=OracleRegistryRepo(),
         workflow_repo=workflow_repo,
         metadata_validator=validate_scenario_metadata,
-        authorizer=lambda user_id, action: authorize(user_id, action, user_email=actor_email),
+        authorizer=lambda user_id, action: authorize(
+            user_id, action, user_email=actor_email
+        ),
         enforcement=policy.workflow.enforcement.model_dump(),
         conflict_check_required=policy.workflow.conflict_check_required,
         numeric_created_by_default=settings.AML_CREATED_BY,
@@ -682,31 +863,42 @@ def persist_and_validate_scenario_in_dwh(
         )
     except (DeployError, RuntimeError) as exc:
         logger.warning("[TOOL: PERSISTER] Deployment refused: %s", exc)
-        return json.dumps({
-            "write_success": False,
-            "error_code": getattr(exc, "code", "DEPLOY_FAILED"),
-            "error": str(exc),
-            "validation_errors": getattr(exc, "details", None),
-        }, ensure_ascii=False)
+        return json.dumps(
+            {
+                "write_success": False,
+                "error_code": getattr(exc, "code", "DEPLOY_FAILED"),
+                "error": str(exc),
+                "validation_errors": getattr(exc, "details", None),
+            },
+            ensure_ascii=False,
+        )
 
-    logger.info("[TOOL: PERSISTER] Scenario persisted. SCENARIO_ID=%s", result.scenario_id)
-    return json.dumps({
-        "scenario_id": result.scenario_id,
-        "scenario_name": result.scenario_name,
-        "write_success": True,
-        "write_verification": {
-            "production_scenarios_table": "PIO_AML_AGENT_PRODUCTION_SCENARIOS",
-            "scenario_metadata_table": "PIO_AML_AGENT_SCENARIOS",
-            "is_active": 1,
+    logger.info(
+        "[TOOL: PERSISTER] Scenario persisted. SCENARIO_ID=%s", result.scenario_id
+    )
+    return json.dumps(
+        {
+            "scenario_id": result.scenario_id,
+            "scenario_name": result.scenario_name,
+            "write_success": True,
+            "write_verification": {
+                "production_scenarios_table": "PIO_AML_AGENT_PRODUCTION_SCENARIOS",
+                "scenario_metadata_table": "PIO_AML_AGENT_SCENARIOS",
+                "is_active": 1,
+            },
+            "receipt": result.receipt,
+            "idempotent_retry": result.repeated,
         },
-        "receipt": result.receipt,
-        "idempotent_retry": result.repeated,
-    }, ensure_ascii=False, indent=2)
+        ensure_ascii=False,
+        indent=2,
+    )
 
 
 @tool
 def query_production_scenario_registry(
-    query_type: Literal["semantic_search", "get_statistics", "get_alert_metrics", "get_scenario_detail"],
+    query_type: Literal[
+        "semantic_search", "get_statistics", "get_alert_metrics", "get_scenario_detail"
+    ],
     search_text: Optional[str] = None,
     scenario_id: Optional[str] = None,
     date_from: Optional[str] = None,
@@ -759,7 +951,11 @@ def query_production_scenario_registry(
     try:
         if query_type == "semantic_search":
             if not search_text:
-                return json.dumps({"error": "search_text is required for query_type='semantic_search'."})
+                return json.dumps(
+                    {
+                        "error": "search_text is required for query_type='semantic_search'."
+                    }
+                )
             result: Any = search_scenarios_semantic(search_text, limit=limit or 5)
 
         elif query_type == "get_statistics":
@@ -776,7 +972,11 @@ def query_production_scenario_registry(
 
         elif query_type == "get_scenario_detail":
             if not scenario_id:
-                return json.dumps({"error": "scenario_id is required for query_type='get_scenario_detail'."})
+                return json.dumps(
+                    {
+                        "error": "scenario_id is required for query_type='get_scenario_detail'."
+                    }
+                )
             detail = get_scenario_full_details(scenario_id)
             result = (
                 detail
@@ -793,5 +993,7 @@ def query_production_scenario_registry(
         logger.warning("[TOOL: REGISTRY] Invalid input: %s", exc)
         return json.dumps({"error": str(exc)})
     except Exception as exc:
-        logger.error("[TOOL: REGISTRY] query_type=%s failed: %s", query_type, exc, exc_info=True)
+        logger.error(
+            "[TOOL: REGISTRY] query_type=%s failed: %s", query_type, exc, exc_info=True
+        )
         return json.dumps({"error": str(exc)})

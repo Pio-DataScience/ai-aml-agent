@@ -16,6 +16,9 @@ Output ONLY a valid JSON object matching AMLIntent schema with mandatory root ke
 - anchor_date (str or null): YYYY-MM-DD date or null
 - explanation_codes (list of str or null)
 - explanation_codes_by_type (dict of str -> list of str, or null)
+- filters (list of objects with dimension, raw_mention, and polarity)
+
+{{FILTER_DIMENSIONS}}
 
 [CORE EXTRACTION LAWS]
 

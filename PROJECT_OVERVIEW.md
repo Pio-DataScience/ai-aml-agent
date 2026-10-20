@@ -18,7 +18,7 @@ The application has four practical layers:
 
 1. **HTTP interface:** FastAPI startup and routes under `services/aml_builder/web/api/` expose chat/SSE, workflow state and revision reads, typed approval actions, authenticated UI copy, session history and sidebar operations, direct deployment, alert-engine execution, and health.
 2. **Agent orchestration:** `services/aml_builder/web/services/graph.py:get_tool_driven_graph` builds one process-level ReAct agent with six tools, an `AsyncSqliteSaver`, and a pre-model hook that adds current workflow context and stubs superseded tool results in model input. Tool selection remains LLM-driven; deterministic workflow state and guards are enforced per policy gate. P5 enforces approvals and P6 enforces parameter-card confirmation; P6b creates copied-forward revisions after a plan exists; P8 remains responsible for conflict-check enforcement.
-3. **Domain and integration services:** pure intent normalization, code binding, metadata rules, window conversion, SQL extraction, hashing, and deterministic deployment orchestration live under `web/domain/`. Oracle registry-v2 operations live under `web/adapters/oracle_repo.py`; Oracle-backed metadata lookups, plan rendering, explanation-code search, registry analytics, external text-to-SQL calls, and alert processing remain under `web/services/`.
+3. **Domain and integration services:** pure intent normalization, catalog-driven filter resolution, SQL filter verification, code binding, metadata rules, window conversion, SQL extraction, hashing, and deterministic deployment orchestration live under `web/domain/`. Oracle registry-v2 operations live under `web/adapters/oracle_repo.py`; Oracle-backed metadata lookups, plan rendering, explanation-code search, registry analytics, external text-to-SQL calls, and alert processing remain under `web/services/`.
 4. **Persistence:** SQLite stores LangGraph checkpoints in `STATE_DIR/checkpoints.sqlite`; workflow, revision, card-audit, workflow-event, and composite-key chat-sidebar data live in `STATE_DIR/app_state.sqlite`. Oracle stores source/lookups, scenario definitions and governance records, and generated alerts.
 
 The service is synchronous at several integration boundaries despite async HTTP routes: Oracle helpers, OpenAI/LangChain invocations inside tools, the `httpx.Client` call to the text-to-SQL service, and alert-engine execution are synchronous. FastAPI engine routes invoke that work directly rather than enqueueing it.
@@ -41,6 +41,8 @@ The service is synchronous at several integration boundaries despite async HTTP 
 | `services/aml_builder/web/workflow/` | Typed workflow records, stage transitions, SQLite repositories, atomic card-confirmation copy-forward, revision history/eviction, stage guards, and transient model context. |
 | `services/aml_builder/web/services/tools.py` | Agent-facing intent, plan, shadow-test, metadata, persistence, and registry-query tools. |
 | `services/aml_builder/web/domain/intent_normalize.py` | Pure intent normalization with default provenance and `applied_defaults` entries. |
+| `services/aml_builder/web/domain/filter_resolution.py` | Catalog-driven dimension resolution, advisor prompt section, and Service B filter payload assembly. |
+| `services/aml_builder/web/domain/filter_applied_check.py` | SQLGlot-based comparison of generated SQL predicates with confirmed filter values. |
 | `services/aml_builder/web/domain/code_binding.py` | Pure transaction-scope selection and explanation-code binding. |
 | `services/aml_builder/web/domain/sql_extract.py` | Pure extraction of SQL from response text; `services/sql_extraction.py` remains a compatibility export. |
 | `services/aml_builder/web/domain/metadata_rules.py` | Pure metadata seeding, normalization, and validation rules; Oracle lookups stay in the service adapter. |
@@ -50,7 +52,7 @@ The service is synchronous at several integration boundaries despite async HTTP 
 | `services/aml_builder/web/domain/deploy_service.py` | Hard deployment guards, per-gate approval enforcement, shared deploy-blocker calculation, idempotent retry recovery, and receipt construction. |
 | `services/aml_builder/web/adapters/oracle_repo.py` | Create-if-missing registry-v2 schema and transactional version, metadata, parent-status, and audit writes. |
 | `services/aml_builder/web/services/schemas.py` | `AMLIntent` domain contract plus chat and SSE Pydantic models. |
-| `services/aml_builder/web/services/plan_renderer.py` | Deterministic 11-section Markdown plan renderer. |
+| `services/aml_builder/web/services/plan_renderer.py` | Deterministic Markdown plan renderer, including resolved filters. |
 | `services/aml_builder/web/services/explanation_code_search.py` | Oracle-backed explanation-code embedding cache, similarity search, and LLM reranking. |
 | `services/aml_builder/web/services/scenario_metadata.py` | Governance field registry, defaults, live lookup options, normalization, and validation. |
 | `services/aml_builder/web/services/production_registry.py` | Read-only compatibility access; legacy in-place writes are disabled in favor of `DeployService`. |
@@ -132,7 +134,7 @@ The chat stream emits `thinking`, `tool_call`, `content`, `stage_changed`, selec
 
 ### `AMLIntent`
 
-`services/aml_builder/web/services/schemas.py:AMLIntent` is the main handoff contract between intent extraction, plan rendering, and external SQL generation. Important nested models are `Threshold`, `TimeWindow`, `BaselineWindow`, `AggregationProfile`, `SemanticCondition`, and `Clarification`.
+`services/aml_builder/web/services/schemas.py:AMLIntent` is the main handoff contract between intent extraction, plan rendering, and external SQL generation. It carries raw `filters` mentions and confirmed `resolved_filters` on the revision. Important nested models are `Threshold`, `TimeWindow`, `BaselineWindow`, `AggregationProfile`, `SemanticCondition`, `Clarification`, and `FilterMention`.
 
 Rules implemented in code or runtime prompts include:
 
@@ -148,6 +150,14 @@ Rules implemented in code or runtime prompts include:
 `explanation_code_search.py` reads `PIO_EXPLANATION_CODE` for configured country/institution values (including rows whose tenant columns are null), embeds the catalog with `OpenAIEmbeddings`, and caches normalized vectors both in-process and in `artifacts/explanation_codes_vector_cache_<country>_<institution>.pkl`. Discovery runs only for specific transaction types; `ANY`/`ALL` and unspecified types skip the search so they do not create an `EXPL_CODE` restriction. Query embeddings rank by cosine similarity using a 70% relative cutoff with an absolute floor; the fast chat model reranks candidates. If reranking fails, vector candidates are returned.
 
 The cache has no TTL or source-data invalidation. Changing explanation-code rows without deleting/rebuilding the cache can therefore leave discovery stale.
+
+### Filter resolution and SQL recheck
+
+`config/aml_catalogs/filters.yaml` defines business dimensions and their physical targets. The enabled `explanation_code` dimension uses the existing explanation-code index and continues to populate the legacy `explanation_codes` fields. `account_status` and `customer_profession` remain loaded but disabled until their sources and target columns are confirmed. The extraction prompt receives dimension names and support status from the catalog; it does not receive column names.
+
+`domain/filter_resolution.py` produces ordered candidate options and confidence values. Ambiguous, unresolved, lookup-failed, disabled, and unknown dimensions go through the existing typed parameter-card confirmation flow. Confirmed filter selections are stored with the revision intent and included in `params_hash`. The Service B request includes only resolved filters plus catalog-generated target/join instructions; Service B itself is unchanged.
+
+After SQL extraction, `domain/filter_applied_check.py` parses Oracle SQL with the pinned `sqlglot` dependency and compares filter predicates and value sets. Missing or mismatched filters return `FILTER_NOT_APPLIED`, preserve `raw_sql`, and keep result approval blocked. Unextractable predicates follow `policy.yaml:filter_check.unverifiable` (`warn` by default, or `fail`). `ANY`/`ALL` transaction scope skips the explanation-code predicate check.
 
 ### Governance metadata
 
@@ -203,6 +213,8 @@ The server validates required parameters independently of the LLM's `ready_for_h
 
 P6 creates the initial revision. Once a plan exists, P6b confirms changed cards by copying the confirmed intent and newly rendered plan into a new current revision; the prior trio remains in history unchanged apart from its lifecycle fields. The operation atomically updates revision history, applies tombstone eviction, writes the card audit, clears the pending card, and advances the workflow pointer. Planless revisions are updated in place. A new revision starts without shadow results, approvals, signatures, or conflict data. Metadata is re-seeded and edited fields are revalidated before carry-over. Conflict enforcement remains observe-only for P8. The `[ACTION] card_confirmed revision N` chat acknowledgement bypasses LangGraph so it is not added to the checkpoint.
 
+P7 includes resolved filters in the card-confirmed revision and its parameter hash. P8 builds each scenario signature from that revision's resolved filters.
+
 ### SQL generation and shadow testing
 
 `tools.py:execute_oracle_dwh_shadow_test` sends an `AML_SCENARIO_GENERATION` intent payload to `PIOTECH_AI_URL` using HTTP SSE. It prefers a `final_answer` event and otherwise concatenates `content` events, then `sql_extraction.py:extract_sql` extracts the last plausible `SELECT`/`WITH` query.
@@ -214,6 +226,8 @@ SELECT COUNT(*) FROM (<generated SQL>) shadow_query
 ```
 
 through `run_shadow_readonly`. `header_alert_count` is the returned row count. `transaction_detail_count` is not measured; it is `header_alert_count * 4`, so `alert_density_ratio` is effectively 4.0 for every nonzero result. On execution failure, the tool still returns the generated `raw_sql` with `validation_success: false`.
+
+Before the count query, the A-side filter check verifies each resolved dimension against its target column and value set. Failed checks skip the Oracle count query and return the SQL with per-filter status details.
 
 ### Scenario deployment (P4)
 

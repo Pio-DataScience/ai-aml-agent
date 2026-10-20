@@ -46,6 +46,8 @@ workflow:
     card_confirmation: enforce
     conflict_check: observe
   conflict_check_required: false
+filter_check:
+  unverifiable: warn
 card_audit:
   store: sqlite
   retention: permanent

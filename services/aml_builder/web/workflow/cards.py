@@ -53,13 +53,19 @@ def prepare_card(
     base_stage = previous_card.get("base_stage") or workflow.stage
     base_intent = _intent_from_revision(current)
     intent = _merge_intent(base_intent, incoming) if base_intent else incoming
-    rows = build_param_rows(intent, catalogs.params, base_intent=base_intent)
+    rows = build_param_rows(
+        intent,
+        catalogs.params,
+        base_intent=base_intent,
+        filters_catalog=catalogs.filters,
+    )
     request_id = uuid.uuid4().hex
     card = {
         "request_id": request_id,
         "rows": rows,
         "intent": intent,
-        "metadata": payload.get("scenario_metadata") or _metadata_from_revision(current),
+        "metadata": payload.get("scenario_metadata")
+        or _metadata_from_revision(current),
         "metadata_from_analysis": isinstance(payload.get("scenario_metadata"), dict),
         "explanation_code_checkpoint": payload.get("explanation_code_checkpoint"),
         "base_revision_id": current.revision_id if current else None,
@@ -67,36 +73,55 @@ def prepare_card(
         "created_by": actor,
         "created_at": None,
     }
-    if ready_for_handoff(rows, catalogs.params) and catalogs.params.skip_card_when_complete:
+    if (
+        ready_for_handoff(rows, catalogs.params)
+        and catalogs.params.skip_card_when_complete
+    ):
         resolved_values: dict[str, Any] = {}
         for row in rows:
-            if row.get("read_only") or row["key"] not in catalogs.params.params:
+            if row.get("read_only"):
                 continue
             value = row.get("value")
             choice = "provided"
             if row["status"] in {"defaulted", "inferred"}:
                 value = row.get("recommended_value")
                 choice = "accepted_default"
-            resolved_values[row["key"]] = {
-                "value": value,
-                "choice": choice,
-                "provenance": row.get("provenance"),
-            }
+            if row.get("kind") == "filter" and row.get("status") == "resolved":
+                resolved_values[row["key"]] = {
+                    "value": value,
+                    "choice": "provided",
+                    "provenance": row.get("provenance"),
+                }
+            elif row["key"] in catalogs.params.params:
+                resolved_values[row["key"]] = {
+                    "value": value,
+                    "choice": choice,
+                    "provenance": row.get("provenance"),
+                }
         for row in rows:
             if row.get("key", "").startswith("threshold#") and not row.get("read_only"):
                 resolved_values[row["key"]] = {
-                    "value": row.get("value"), "choice": "provided",
+                    "value": row.get("value"),
+                    "choice": "provided",
                     "provenance": row.get("provenance"),
                 }
         repo.set_pending_card(thread_id, card)
         commit_confirmed_card(
-            repo, thread_id, request_id, resolved_values,
-            actor=actor, role="system", source="system", outcome="auto_confirmed",
+            repo,
+            thread_id,
+            request_id,
+            resolved_values,
+            actor=actor,
+            role="system",
+            source="system",
+            outcome="auto_confirmed",
             resolved_rows=resolved_card_rows(rows, resolved_values),
         )
         return {}
     repo.set_pending_card(thread_id, card)
-    repo.set_stage(thread_id, "PARAMS_PENDING", actor=actor, action="parameter_card_pending")
+    repo.set_stage(
+        thread_id, "PARAMS_PENDING", actor=actor, action="parameter_card_pending"
+    )
     return repo.get_workflow(thread_id).pending_card or card
 
 
@@ -132,10 +157,14 @@ def commit_confirmed_card(
     prior = repo.get_card_confirmation(request_id)
     if prior is not None:
         if prior.get("confirmation_hash") != confirmation_hash:
-            raise WorkflowConflict("This card was already confirmed with different values", "CARD_STALE")
+            raise WorkflowConflict(
+                "This card was already confirmed with different values", "CARD_STALE"
+            )
         prior_revision = repo.get_revision(prior.get("revision_id"))
         if prior_revision is None:
-            raise WorkflowConflict("The confirmed revision is no longer available", "CARD_STALE")
+            raise WorkflowConflict(
+                "The confirmed revision is no longer available", "CARD_STALE"
+            )
         carry_over = prior.get("carry_over") or {"kept": [], "dropped": []}
         return {
             "revision_id": prior_revision.revision_id,
@@ -151,12 +180,14 @@ def commit_confirmed_card(
         raise WorkflowConflict("The parameter card request is stale", "CARD_STALE")
     current = repo.current(thread_id)
     if card.get("base_revision_id") != (current.revision_id if current else None):
-        raise WorkflowConflict("The card was shown for a revision that is no longer current", "CARD_STALE")
+        raise WorkflowConflict(
+            "The card was shown for a revision that is no longer current", "CARD_STALE"
+        )
     confirmed_intent = apply_confirmed_params(card.get("intent") or {}, values)
-    rendered = render_plan(
-        confirmed_intent, card.get("explanation_code_checkpoint")
+    rendered = render_plan(confirmed_intent, card.get("explanation_code_checkpoint"))
+    metadata, edited_keys, carry_over = _carry_forward_metadata(
+        current, card, confirmed_intent
     )
-    metadata, edited_keys, carry_over = _carry_forward_metadata(current, card, confirmed_intent)
     stored_card = {
         "intent": confirmed_intent,
         "metadata": metadata,
@@ -214,10 +245,14 @@ def _carry_forward_metadata(
                 previous_card = {}
             if not previous_metadata and isinstance(previous_card, dict):
                 stored_metadata = previous_card.get("metadata")
-                previous_metadata = stored_metadata if isinstance(stored_metadata, dict) else {}
+                previous_metadata = (
+                    stored_metadata if isinstance(stored_metadata, dict) else {}
+                )
             if isinstance(previous_card, dict):
                 stored_intent = previous_card.get("intent")
-                previous_intent = stored_intent if isinstance(stored_intent, dict) else {}
+                previous_intent = (
+                    stored_intent if isinstance(stored_intent, dict) else {}
+                )
                 edited = previous_card.get("metadata_user_edited")
                 if isinstance(edited, list):
                     previous_user_edited = [str(key) for key in edited]
@@ -229,15 +264,22 @@ def _carry_forward_metadata(
 
     previous_seeded = seed_scenario_metadata(previous_intent, {})
     inferred_edits = [
-        key for key, value in previous_metadata.items()
+        key
+        for key, value in previous_metadata.items()
         if key in previous_seeded and value != previous_seeded[key]
     ]
     previous_user_edited = sorted(set(previous_user_edited or []) | set(inferred_edits))
     valid_fields = {spec.name for spec in SCENARIO_METADATA_FIELDS}
-    keys = [key for key in previous_user_edited if key in previous_metadata and key in valid_fields]
+    keys = [
+        key
+        for key in previous_user_edited
+        if key in previous_metadata and key in valid_fields
+    ]
     seeded = seed_scenario_metadata(intent, {})
     if card.get("metadata_from_analysis") and isinstance(card.get("metadata"), dict):
-        seeded.update({key: value for key, value in card["metadata"].items() if value is not None})
+        seeded.update(
+            {key: value for key, value in card["metadata"].items() if value is not None}
+        )
     carried = {key: previous_metadata[key] for key in keys}
     candidate = {**seeded, **carried}
     kept = list(keys)
@@ -291,7 +333,9 @@ def resolved_card_rows(
         if isinstance(submitted, dict) and "value" in submitted:
             snapshot["choice"] = submitted.get("choice", "user_input")
             snapshot["final_value"] = submitted.get("value")
-            snapshot["provenance"] = submitted.get("provenance") or snapshot.get("provenance")
+            snapshot["provenance"] = submitted.get("provenance") or snapshot.get(
+                "provenance"
+            )
         elif submitted is not None:
             snapshot["choice"] = "user_input"
             snapshot["final_value"] = submitted
@@ -303,6 +347,9 @@ def _merge_intent(base: dict[str, Any], incoming: dict[str, Any]) -> dict[str, A
     """Keep the latest stored fields when a fresh extraction omits them."""
     merged = dict(base)
     for key, value in incoming.items():
+        if key in {"filters", "resolved_filters"}:
+            merged[key] = value
+            continue
         if value is None or value == [] or value == {}:
             continue
         if key in {"aggregation"} and isinstance(value, dict):
@@ -310,4 +357,3 @@ def _merge_intent(base: dict[str, Any], incoming: dict[str, Any]) -> dict[str, A
         else:
             merged[key] = value
     return merged
-

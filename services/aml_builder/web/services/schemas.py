@@ -66,7 +66,9 @@ class Threshold(BaseModel):
                 return v_clean
         return v
 
-    provenance: Literal["stated", "assumed_default", "needs_user", "default", "inferred", "user_input"] = Field(
+    provenance: Literal[
+        "stated", "assumed_default", "needs_user", "default", "inferred", "user_input"
+    ] = Field(
         default="stated",
         description=(
             "Where this value came from: 'stated' (user gave it), "
@@ -124,7 +126,9 @@ class TimeWindow(BaseModel):
         default=True,
         description="True = rolling from SYSDATE. False = fixed calendar period.",
     )
-    provenance: Literal["stated", "assumed_default", "needs_user", "default", "inferred", "user_input"] = Field(
+    provenance: Literal[
+        "stated", "assumed_default", "needs_user", "default", "inferred", "user_input"
+    ] = Field(
         default="stated",
         description="stated | assumed_default | needs_user (see Threshold.provenance).",
     )
@@ -167,7 +171,9 @@ class BaselineWindow(BaseModel):
     duration: int = Field(
         ..., description="Duration of historical baseline window in units."
     )
-    provenance: Literal["stated", "assumed_default", "needs_user", "default", "inferred", "user_input"] = Field(
+    provenance: Literal[
+        "stated", "assumed_default", "needs_user", "default", "inferred", "user_input"
+    ] = Field(
         default="stated",
         description="Where the baseline window value came from.",
     )
@@ -212,9 +218,9 @@ class AggregationProfile(BaseModel):
         default=None, description="sum | count | count distinct | max | None."
     )
     grain: str = Field(..., description="Evaluation grain, plain English.")
-    provenance: Literal["stated", "assumed_default", "needs_user", "default", "inferred", "user_input"] = Field(
-        default="stated"
-    )
+    provenance: Literal[
+        "stated", "assumed_default", "needs_user", "default", "inferred", "user_input"
+    ] = Field(default="stated")
 
 
 class SemanticCondition(BaseModel):
@@ -254,9 +260,9 @@ class SemanticCondition(BaseModel):
         default=None,
         description="Specific compliance explanation codes bound directly to this semantic condition.",
     )
-    provenance: Literal["stated", "assumed_default", "needs_user", "default", "inferred", "user_input"] = Field(
-        default="stated"
-    )
+    provenance: Literal[
+        "stated", "assumed_default", "needs_user", "default", "inferred", "user_input"
+    ] = Field(default="stated")
 
 
 class Clarification(BaseModel):
@@ -279,6 +285,16 @@ class Clarification(BaseModel):
     why_it_matters: str = Field(...)
     question: str = Field(..., description="Business-phrased. Never technical.")
     options: Optional[List[str]] = Field(default=None)
+
+
+class FilterMention(BaseModel):
+    """One advisor-extracted business filter dimension."""
+
+    dimension: str = Field(
+        ..., description="Catalog dimension key or an unsupported dimension name."
+    )
+    raw_mention: str = Field(..., description="The user's original filter phrase.")
+    polarity: Literal["positive", "negative"] = "positive"
 
 
 class AMLIntent(BaseModel):
@@ -324,6 +340,14 @@ class AMLIntent(BaseModel):
     explanation_codes_by_type: Optional[Dict[str, List[str]]] = Field(
         default=None,
         description="Discovered explanation codes partitioned/mapped by transaction type name e.g. {'OUTWARD TRANSFER': ['1414'], 'CASH DEPOSIT': ['110']}.",
+    )
+    filters: List[FilterMention] = Field(
+        default_factory=list,
+        description="Business filter dimensions extracted from the user's request.",
+    )
+    resolved_filters: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Catalog-resolved filters carried with the current scenario revision.",
     )
     detection_logic: str = Field(
         ..., description="Plain English description of the detection logic."
@@ -418,16 +442,26 @@ class AMLIntent(BaseModel):
             tx_type = data.get("transaction_type")
             tx_types = data.get("transaction_types")
             if isinstance(tx_type, list):
-                data["transaction_types"] = [str(x).strip() for x in tx_type if str(x).strip()]
+                data["transaction_types"] = [
+                    str(x).strip() for x in tx_type if str(x).strip()
+                ]
                 data["transaction_type"] = ", ".join(data["transaction_types"])
             elif isinstance(tx_types, list) and tx_types:
-                data["transaction_types"] = [str(x).strip() for x in tx_types if str(x).strip()]
+                data["transaction_types"] = [
+                    str(x).strip() for x in tx_types if str(x).strip()
+                ]
                 if not tx_type:
                     data["transaction_type"] = ", ".join(data["transaction_types"])
             elif isinstance(tx_type, str) and tx_type.strip():
                 # Split comma/semicolon/OR/AND separated phrases if multiple types listed in single string
                 parts = re.split(r"[,;]|\b(?:or|and)\b", tx_type, flags=re.IGNORECASE)
-                cleaned = [p.strip() for p in parts if p.strip() and len(p.strip()) > 2 and p.strip().lower() not in ("or", "and")]
+                cleaned = [
+                    p.strip()
+                    for p in parts
+                    if p.strip()
+                    and len(p.strip()) > 2
+                    and p.strip().lower() not in ("or", "and")
+                ]
                 if len(cleaned) > 1 and not tx_types:
                     data["transaction_types"] = cleaned
         return data
@@ -553,9 +587,7 @@ class SSEEvent(BaseModel):
     status: Optional[str] = Field(
         default=None, description="Status string (thinking events)."
     )
-    data: Optional[Any] = Field(
-        default=None, description="Structured event payload."
-    )
+    data: Optional[Any] = Field(default=None, description="Structured event payload.")
 
 
 class ChatHistoryResponse(BaseModel):

@@ -54,15 +54,32 @@ class ParamDefinition(BaseModel):
     status: CatalogStatus
 
 
+class FilterResolverConfig(BaseModel):
+    """Tuning and static inputs for a filter dimension resolver."""
+
+    model_config = ConfigDict(extra="allow")
+
+    match_threshold: float | None = Field(default=None, ge=0, le=1)
+    ambiguity_margin: float | None = Field(default=None, ge=0, le=1)
+    max_options: int | None = Field(default=None, ge=1)
+    options: list[Any] | None = None
+    candidates: list[dict[str, Any]] | None = None
+
+
 class FilterDimension(BaseModel):
     """One configurable filter dimension."""
 
     model_config = ConfigDict(extra="allow")
 
     label: str
-    level: str
+    level: Literal["customer", "account", "transaction"]
     target: dict[str, Any]
-    resolver: str
+    resolver: Literal["lookup", "enum", "semantic"]
+    value_source: str | None = None
+    match: Literal["any_of", "all_of"] | None = None
+    polarity_allowed: bool | None = None
+    required: bool | None = None
+    resolver_config: FilterResolverConfig = Field(default_factory=FilterResolverConfig)
     status: Literal["confirmed", "needs_advisor_input"]
 
     @model_validator(mode="after")
@@ -75,12 +92,51 @@ class FilterDimension(BaseModel):
         Raises:
             ValueError: If an enabled dimension contains a TBD value.
         """
-        if self.status != "needs_advisor_input" and _contains_tbd(
-            self.model_dump(mode="python")
+        if self.status == "needs_advisor_input":
+            return self
+        if not self.label.strip():
+            raise ValueError("Enabled filter dimensions require a non-empty label")
+        table = self.target.get("table")
+        column = self.target.get("column")
+        if (
+            not isinstance(table, str)
+            or not table.strip()
+            or not isinstance(column, str)
+            or not column.strip()
         ):
+            raise ValueError(
+                "Enabled filter dimensions require target table and column"
+            )
+        if _contains_tbd(self.target):
+            raise ValueError("Enabled filter target table and column cannot be TBD")
+        if _contains_tbd(self.model_dump(mode="python")):
             raise ValueError(
                 "TBD values are allowed only when status is needs_advisor_input"
             )
+        if (
+            not self.value_source
+            or not self.value_source.strip()
+            or self.match is None
+            or self.polarity_allowed is None
+            or self.required is None
+        ):
+            raise ValueError(
+                "Enabled filter dimensions require value_source, match, polarity_allowed, and required"
+            )
+        if self.resolver in {"lookup", "semantic"}:
+            if any(
+                getattr(self.resolver_config, key) is None
+                for key in ("match_threshold", "ambiguity_margin", "max_options")
+            ):
+                raise ValueError(
+                    "Enabled lookup and semantic dimensions require resolver_config thresholds"
+                )
+        if self.resolver == "enum" and not (
+            self.resolver_config.options
+            or self.model_extra
+            and self.model_extra.get("options")
+        ):
+            raise ValueError("Enabled enum dimensions require static options")
         return self
 
 
@@ -114,6 +170,12 @@ class WorkflowPolicy(BaseModel):
     conflict_check_required: bool = False
 
 
+class FilterCheckPolicy(BaseModel):
+    """Policy for predicates whose SQL values cannot be extracted safely."""
+
+    unverifiable: Literal["warn", "fail"] = "warn"
+
+
 class PolicyCatalog(CatalogModel):
     """Authorization and conflict policy catalog."""
 
@@ -131,6 +193,7 @@ class PolicyCatalog(CatalogModel):
     dimension_weights: dict[str, int]
     reason_required_for: list[str]
     revisions: RevisionPolicy = Field(default_factory=RevisionPolicy)
+    filter_check: FilterCheckPolicy = Field(default_factory=FilterCheckPolicy)
     workflow: WorkflowPolicy = Field(default_factory=WorkflowPolicy)
 
 
@@ -145,8 +208,12 @@ class UiCopyCatalog(BaseModel):
     locked_composer_placeholder: str
     conflict_block: str
     conflict_warn: str
-    card_pending_notice: str = "Confirm or discard the parameters card before continuing."
-    card_stale_notice: str = "This card was replaced by a newer one. Showing the latest."
+    card_pending_notice: str = (
+        "Confirm or discard the parameters card before continuing."
+    )
+    card_stale_notice: str = (
+        "This card was replaced by a newer one. Showing the latest."
+    )
     revision_badge: str = "Revision {rev_no}"
     proceed_button: str = "Proceed"
     approve_result_button: str = "Approve result"
