@@ -93,6 +93,8 @@ class ShadowPayload(PayloadModel):
     raw_sql: Optional[str] = None
     header_alert_count: Optional[int] = None
     transaction_detail_count: Optional[int] = None
+    detail_count_is_estimate: Optional[bool] = None
+    detail_count_basis: Optional[str] = None
     alert_density_ratio: Optional[float] = None
     validation_success: Optional[bool] = None
     filter_check: Optional[FilterCheckPayload] = None

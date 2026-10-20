@@ -74,12 +74,18 @@ disk cache and forces a rebuild. This is an invalidation correctness change; the
 fake latency harness does not model Oracle catalog reads or embeddings, so no
 latency improvement is claimed for it.
 
+### Shadow detail-count provenance
+
+Successful shadow responses now add `detail_count_is_estimate: true` and
+`detail_count_basis: "header_count*4"`. Existing numeric header/detail counts
+and ratio remain unchanged. The UI uses the flag to show “Transaction Detail
+Count (estimated)”. Real detail counts remain outside P10 scope.
+
 ## P10 measurement procedure
 
 `scripts/benchmark_p10_fake_scenario.py` runs the same fake scenario in `baseline`
-and `final` modes. The final report will record the measured result after each
-optimization commit. An optimization that does not improve the relevant measured
-dimension, or adds unacceptable risk, will be reverted and recorded here.
+and `final` modes. Each optimization was measured independently above; the final
+mode combines context projection, bounded I/O, and concurrent retrieval.
 
 ### Per-type explanation-code retrieval
 
@@ -98,6 +104,26 @@ configured limit, and a failure test verifies one type can report
 | Fake scenario total | 149.472 ms | 102.108 ms | −31.7% |
 | Event-loop delay | 20.488 ms | 20.537 ms | +0.049 ms |
 | Model-context input | 5,767 chars | 5,767 chars | unchanged |
+
+## Final combined fake run
+
+Seven final-mode runs measured 120.073 ms scenario total, 26.672 ms for the three
+type searches, 0.244 ms event-loop delay during blocking fake work, and 2,267
+model-context characters. Compared with baseline, these are 19.7% lower total
+time, 56.7% lower retrieval time, 98.8% lower event-loop delay, and 60.7% fewer
+context characters. The five-stage mean was 13.699 ms versus 13.188 ms at
+baseline; the synthetic stage delays are within run variation and were not an
+optimization target. The vector-cache fingerprint is a freshness correctness
+change; its latency is not represented by this Oracle-free harness. No measured
+optimization was reverted.
+
+| Measurement | Baseline | Final | Change |
+|---|---:|---:|---:|
+| Fake scenario total | 149.472 ms | 120.073 ms | −19.7% |
+| Mean of five fake stages | 13.188 ms | 13.699 ms | +0.511 ms |
+| Three type searches | 61.617 ms | 26.672 ms | −56.7% |
+| Event-loop delay | 20.488 ms | 0.244 ms | −98.8% |
+| Model-context input | 5,767 chars | 2,267 chars | −60.7% |
 
 ## Runtime metrics
 

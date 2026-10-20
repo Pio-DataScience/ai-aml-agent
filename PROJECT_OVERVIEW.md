@@ -197,6 +197,11 @@ POST /chat/stream
   -> persist conversation in checkpoints and workflow state in app_state.sqlite
 ```
 
+Service A accepts or generates `X-Request-ID`, returns it on the SSE response,
+and forwards it to Service B as an HTTP header. Tool-call metrics are JSON-lines
+records on `aml.metrics`; trace metadata carries both the workflow thread ID and
+the request correlation ID when LangSmith tracing is enabled.
+
 P5 enforces typed plan/result approvals and P6 enforces card confirmation in `config/aml_catalogs/policy.yaml`. The conflict-check gate remains in `observe` for P8. Observe mode appends `would_block` workflow events for ordinary stage/stale-card verdicts and still allows the tool to continue; successful tools advance the stored stage. `CHAT_LOCKED_DEPLOYED` and `PERMISSION_DENIED` always block.
 
 The intended prompt-governed workflow is:
@@ -427,7 +432,7 @@ Confirmed or directly evidenced concerns:
 - **Alert sequence concurrency.** `_get_next_seq` uses `MAX(SEQ)+1`; concurrent runs can select the same value despite the module's PK-safety claim.
 - **Engine reruns are not idempotent.** Re-executing a scenario/date creates additional headers/details with new sequence values; no deduplication/run ledger is present.
 - **Generated SQL safety is shallow.** Read-only helpers check only the leading token, and historical date substitution is string-based.
-- **Shadow metrics are partially synthetic.** Detail counts use a fixed 4x heuristic and the reported ratio is not population density.
+- **Shadow metrics are partially synthetic.** Detail counts use a fixed 4x heuristic and the reported ratio is not population density; successful responses now mark the detail count with `detail_count_is_estimate` and `detail_count_basis`.
 - **Schema drift risk.** Tables are created ad hoc only when absent; existing schemas are not migrated or validated for compatible columns.
 - **Bounded I/O worker saturation.** Blocking adapters and synchronous tools use the dedicated bounded executor, so sustained slow Oracle or state-store calls can exhaust its `IO_WORKERS` capacity and queue work.
 - **Explanation cache staleness.** The persistent cache is not invalidated when Oracle catalog content changes.

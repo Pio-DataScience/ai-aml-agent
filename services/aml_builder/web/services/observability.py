@@ -40,6 +40,24 @@ def build_correlation_id(thread_id: str, request_id: str) -> str:
     return f"{thread_id}:{request_id}"
 
 
+def build_service_b_headers(request_id: str, correlation_id: str) -> dict[str, str]:
+    """Build the non-payload correlation headers sent to Service B.
+
+    Args:
+        request_id: Request identifier returned by Service A.
+        correlation_id: Thread and request correlation identifier.
+
+    Returns:
+        HTTP headers for the Service B SSE request.
+    """
+    return {
+        "Accept": "text/event-stream",
+        "Content-Type": "application/json",
+        "X-Request-ID": request_id,
+        "X-Correlation-ID": correlation_id,
+    }
+
+
 def emit_tool_metric(
     *,
     correlation_id: str,

@@ -27,6 +27,7 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from services.aml_builder.web.services.settings import settings
+from services.aml_builder.web.services.observability import build_service_b_headers
 from services.aml_builder.web.api.codec import typed_tool as tool
 from services.aml_builder.web.services.schemas import AMLIntent
 from services.aml_builder.web.services.explanation_code_search import (
@@ -74,6 +75,26 @@ from services.aml_builder.web.services.scenario_registry_analytics import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _shadow_count_payload(header_count: int) -> Dict[str, Any]:
+    """Build existing shadow counts with explicit detail-count provenance.
+
+    Args:
+        header_count: Existing shadow query's header count.
+
+    Returns:
+        The unchanged numeric metrics plus additive estimate metadata.
+    """
+    detail_count = header_count * 4
+    ratio = round(detail_count / max(header_count, 1), 2) if header_count > 0 else 0.0
+    return {
+        "header_alert_count": header_count,
+        "transaction_detail_count": detail_count,
+        "alert_density_ratio": ratio,
+        "detail_count_is_estimate": True,
+        "detail_count_basis": "header_count*4",
+    }
 
 
 def confirmed_intent_for_tool(
@@ -579,12 +600,7 @@ async def execute_oracle_dwh_shadow_test(
                 "POST",
                 settings.PIOTECH_AI_URL,
                 json=payload,
-                headers={
-                    "Accept": "text/event-stream",
-                    "Content-Type": "application/json",
-                    "X-Request-ID": request_id,
-                    "X-Correlation-ID": correlation_id,
-                },
+                headers=build_service_b_headers(request_id, correlation_id),
             ) as response:
                 response.raise_for_status()
                 async for line in response.aiter_lines():
@@ -670,21 +686,18 @@ async def execute_oracle_dwh_shadow_test(
         shadow_sql = f"SELECT COUNT(*) FROM ({sql}) shadow_query"
         _, shadow_rows = await run_in_io_pool(run_shadow_readonly, shadow_sql)
         header_count = shadow_rows[0][0] if shadow_rows else 0
-        detail_count = header_count * 4
-        ratio = round(detail_count / max(header_count, 1), 2) if header_count > 0 else 0.0
+        count_metrics = _shadow_count_payload(header_count)
 
         logger.info(
             "[TOOL: SQL_BRIDGE] Shadow test complete. header_alerts=%d, detail_txns=%d, ratio=%.2f",
-            header_count,
-            detail_count,
-            ratio,
+            count_metrics["header_alert_count"],
+            count_metrics["transaction_detail_count"],
+            count_metrics["alert_density_ratio"],
         )
         return json.dumps(
             {
                 "raw_sql": sql,
-                "header_alert_count": header_count,
-                "transaction_detail_count": detail_count,
-                "alert_density_ratio": ratio,
+                **count_metrics,
                 "validation_success": True,
                 "filter_check": filter_check,
             },

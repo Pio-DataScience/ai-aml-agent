@@ -25,6 +25,14 @@ Format: `[DATE] TYPE: Description`
 
 - Run independent transaction-type searches concurrently with bounded concurrency, preserve input order, and return per-type `lookup_failed` status when one lookup fails. Fake search time fell by 62.4%.
 
+## [2026-10-20] feat: P10 shadow estimate provenance
+
+- Added `detail_count_is_estimate` and `detail_count_basis` to successful shadow results without changing count values; the UI labels the detail count as estimated when the flag is true.
+
+## [2026-10-20] fix: preserve protected context messages
+
+- Keep the latest per-tool result and other protected messages intact even when their revision is superseded; older superseded results remain one-line stubs.
+
 ## [2026-10-20] feat: P9 versioning flows
 
 ### What
