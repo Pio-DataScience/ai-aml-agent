@@ -9,10 +9,11 @@ expect: tool_call, content, plan_artifact, scenario_result, done.
 import json
 import logging
 import re
+import time
 import uuid
 from typing import AsyncIterator
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
@@ -36,6 +37,11 @@ from services.aml_builder.web.services.conflict_check import (
     has_comparable_core,
     make_conflict_checker,
 )
+from services.aml_builder.web.services.observability import (
+    build_correlation_id,
+    emit_tool_metric,
+    resolve_request_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +51,7 @@ router = APIRouter(tags=["Chat"])
 @router.post("/chat/stream")
 async def chat_stream(
     request: ChatRequest,
+    http_request: Request,
     identity: Identity = Depends(require_identity),
 ) -> StreamingResponse:
     """Stream a chat response from the AML Scenario Agent.
@@ -69,6 +76,7 @@ async def chat_stream(
     Returns:
         StreamingResponse: An SSE stream of JSON-encoded events.
     """
+    request_id = resolve_request_id(http_request.headers.get("x-request-id"))
     metadata = request.metadata
     assert_identity_matches(
         identity,
@@ -103,10 +111,12 @@ async def chat_stream(
                 "Cache-Control": "no-cache",
                 "X-Accel-Buffering": "no",
                 "Connection": "keep-alive",
+                "X-Request-ID": request_id,
             },
         )
 
     thread_id = f"{project_id}_{chat_id}_{user_id}"
+    correlation_id = build_correlation_id(thread_id, request_id)
 
     workflow_repo = get_workflow_repo()
     workflow_repo.get_or_create_workflow(thread_id, project_id, chat_id, user_id)
@@ -131,8 +141,14 @@ async def chat_stream(
         },
         "recursion_limit": settings.AGENT_RECURSION_LIMIT,
     }
+    trace_metadata = {
+        "thread_id": thread_id,
+        "correlation_id": correlation_id,
+        "request_id": request_id,
+    }
     if metadata.get("action_message") is True:
-        config["metadata"] = {"action_message": True}
+        trace_metadata["action_message"] = True
+    config["metadata"] = trace_metadata
     user_msg = request.messages[-1].content if request.messages else ""
     if request.metadata_json:
         metadata_str = json.dumps(request.metadata_json, ensure_ascii=False)
@@ -153,6 +169,8 @@ async def chat_stream(
         # Running map of tool_call_id -> tool_name so ToolMessages can be
         # routed by which tool produced them.
         tool_call_id_to_name: dict = {}
+        tool_call_started_at: dict[str, float] = {}
+        tool_token_usage: dict[str, dict[str, object]] = {}
 
         try:
             yield _sse(SSEEvent(type="thinking", status="Analyzing your request..."))
@@ -173,6 +191,10 @@ async def chat_stream(
                                     t_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
                                     if t_id and t_name:
                                         tool_call_id_to_name[t_id] = t_name
+                                        tool_call_started_at[t_id] = time.perf_counter()
+                                        usage = getattr(m, "usage_metadata", None)
+                                        if isinstance(usage, dict):
+                                            tool_token_usage[t_id] = usage
                                     yield _sse(SSEEvent(type="tool_call", tool=t_name))
                                 continue
 
@@ -187,8 +209,19 @@ async def chat_stream(
                             tool_call_id = getattr(m, "tool_call_id", None)
                             tool_name = tool_call_id_to_name.get(tool_call_id, "")
                             tool_content = getattr(m, "content", "{}")
+                            started_at = tool_call_started_at.pop(tool_call_id, None)
+                            metric_status = "error"
+                            metric_error_code = "INTERNAL_ERROR"
+                            metric_revision_id = None
                             try:
                                 decoded_tool = decode_tool_result(tool_content, tool_name)
+                                metric_status = decoded_tool.status.value
+                                metric_error_code = (
+                                    decoded_tool.error_code.value
+                                    if decoded_tool.error_code
+                                    else None
+                                )
+                                metric_revision_id = decoded_tool.revision_id
                                 tool_payload = dict(decoded_tool.payload)
                                 if decoded_tool.status.value == "ok":
                                     checker = None
@@ -220,6 +253,17 @@ async def chat_stream(
                                 tool_content = json.dumps(tool_payload, ensure_ascii=False)
                             except (ValueError, TypeError):
                                 pass
+                            if started_at is not None:
+                                emit_tool_metric(
+                                    correlation_id=correlation_id,
+                                    thread_id=thread_id,
+                                    revision_id=metric_revision_id,
+                                    tool=tool_name or "unknown_tool",
+                                    duration_ms=(time.perf_counter() - started_at) * 1000,
+                                    status=metric_status,
+                                    error_code=metric_error_code,
+                                    token_usage=tool_token_usage.pop(tool_call_id, None),
+                                )
 
                             try:
                                 mapped_events = map_tool_result_to_sse(
@@ -264,5 +308,6 @@ async def chat_stream(
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
             "Connection": "keep-alive",
+            "X-Request-ID": request_id,
         },
     )

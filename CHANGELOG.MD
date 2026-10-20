@@ -5,6 +5,10 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-10-20] feat: P10 baseline observability
+
+- Added per-tool JSON-lines timing metrics and request/thread correlation metadata, and recorded the fake-adapter baseline in `Docs/P10_performance_context_observability.md`.
+
 ## [2026-10-20] feat: P9 versioning flows
 
 ### What

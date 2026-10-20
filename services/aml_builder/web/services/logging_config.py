@@ -46,6 +46,7 @@ def get_logging_config() -> Dict[str, Any]:
         "disable_existing_loggers": False,
         "formatters": {
             "default": formatter if formatter_class else formatter,
+            "metrics_jsonl": {"format": "%(message)s"},
         },
         "handlers": {
             "console": {
@@ -62,7 +63,22 @@ def get_logging_config() -> Dict[str, Any]:
                 "formatter": "default",
                 "level": log_level,
                 "encoding": "utf-8",
-            }
+            },
+            "metrics_console": {
+                "class": "logging.StreamHandler",
+                "stream": "ext://sys.stdout",
+                "formatter": "metrics_jsonl",
+                "level": "INFO",
+            },
+            "metrics_file": {
+                "class": "logging.handlers.RotatingFileHandler",
+                "filename": "logs/metrics.jsonl",
+                "maxBytes": 10485760,
+                "backupCount": 5,
+                "formatter": "metrics_jsonl",
+                "level": "INFO",
+                "encoding": "utf-8",
+            },
         },
         "root": {
             "handlers": ["console", "file"],
@@ -76,6 +92,11 @@ def get_logging_config() -> Dict[str, Any]:
             "langchain": {"level": "WARNING"},
             "langgraph": {"level": "INFO"},
             "openai": {"level": "WARNING"},
+            "aml.metrics": {
+                "handlers": ["metrics_console", "metrics_file"],
+                "level": "INFO",
+                "propagate": False,
+            },
         },
     }
 
