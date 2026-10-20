@@ -31,7 +31,7 @@ Format: `[DATE] TYPE: Description`
 
 ## [2026-10-20] fix: preserve protected context messages
 
-- Keep the latest per-tool result and other protected messages intact even when their revision is superseded; older superseded results remain one-line stubs.
+- Keep the latest per-tool result and other protected messages intact even when their revision is superseded; older superseded results remain one-line stubs, including in tool-only checkpoint history without human turns.
 
 ## [2026-10-20] ci: P10 offline checks
 

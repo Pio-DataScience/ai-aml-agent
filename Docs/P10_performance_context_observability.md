@@ -47,6 +47,9 @@ improvement.
 Superseded-revision stubs apply only to messages outside the never-trim list;
 the latest tool result, current-revision artifacts, pending card, and recent
 turns stay intact even if an item is marked superseded.
+When checkpoint history has no human messages, it has no identifiable recent
+user turns; named latest-per-tool results remain protected and legacy
+superseded tool-only entries retain their revision stubs.
 
 ### Bounded I/O adapters
 

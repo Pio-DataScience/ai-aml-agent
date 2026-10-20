@@ -74,6 +74,19 @@ def test_projection_can_be_disabled() -> None:
     assert result[-1].content == source.content
 
 
+def test_superseded_tool_only_history_still_gets_revision_stub() -> None:
+    """A history with no human turn does not classify every tool result as recent."""
+    source = _tool("", "rev-old", {"data": "old result"}, "legacy-tool")
+    result = build_model_messages(
+        [source],
+        current_revision={"revision_id": "rev-current", "rev_no": 2, "stage": "PLAN_PENDING"},
+        superseded={"rev-old": 2},
+        context_policy={"trimming": True, "keep_latest_turns": 3},
+    )
+    projected = next(message for message in result if isinstance(message, ToolMessage))
+    assert "[superseded by revision 2]" in projected.content
+
+
 def test_repository_context_policy_enables_trimming_and_keeps_latest_per_tool() -> None:
     """The shipped catalog enables trimming with the protected-latest invariant."""
     from services.aml_builder.web.services.config_loader import load_catalogs

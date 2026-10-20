@@ -41,7 +41,7 @@ def build_model_messages(
         index for index, message in enumerate(messages) if getattr(message, "type", None) == "human"
     ]
     recent_start = 0
-    if keep_latest_turns == 0:
+    if keep_latest_turns == 0 or not human_indexes:
         recent_start = len(messages)
     elif len(human_indexes) > keep_latest_turns:
         recent_start = human_indexes[-keep_latest_turns]
