@@ -14,6 +14,11 @@ from services.aml_builder.web.domain.param_gaps import (
 )
 from services.aml_builder.web.services.config_loader import load_catalogs
 from services.aml_builder.web.services.plan_renderer import render_plan
+from services.aml_builder.web.services.scenario_metadata import (
+    SCENARIO_METADATA_FIELDS,
+    seed_scenario_metadata,
+    validate_scenario_metadata,
+)
 from services.aml_builder.web.services.settings import settings
 from services.aml_builder.web.workflow.repo import WorkflowRepo, WorkflowConflict
 
@@ -55,6 +60,7 @@ def prepare_card(
         "rows": rows,
         "intent": intent,
         "metadata": payload.get("scenario_metadata") or _metadata_from_revision(current),
+        "metadata_from_analysis": isinstance(payload.get("scenario_metadata"), dict),
         "explanation_code_checkpoint": payload.get("explanation_code_checkpoint"),
         "base_revision_id": current.revision_id if current else None,
         "base_stage": base_stage,
@@ -105,8 +111,9 @@ def commit_confirmed_card(
     source: str,
     outcome: str = "confirmed",
     resolved_rows: list[dict[str, Any]] | None = None,
-) -> str:
-    """Apply confirmed values, render the plan, reset the current draft, and audit.
+    confirmation_hash: str | None = None,
+) -> dict[str, Any]:
+    """Apply a confirmed card atomically and deterministically render its plan.
 
     Args:
         repo: Workflow repository for this chat.
@@ -119,70 +126,136 @@ def commit_confirmed_card(
         outcome: Final card outcome.
 
     Returns:
-        Current revision ID.
+        Confirmation result including revision ID and metadata carry-over report.
     """
+    confirmation_hash = confirmation_hash or stable_hash(values)
+    prior = repo.get_card_confirmation(request_id)
+    if prior is not None:
+        if prior.get("confirmation_hash") != confirmation_hash:
+            raise WorkflowConflict("This card was already confirmed with different values", "CARD_STALE")
+        prior_revision = repo.get_revision(prior.get("revision_id"))
+        if prior_revision is None:
+            raise WorkflowConflict("The confirmed revision is no longer available", "CARD_STALE")
+        carry_over = prior.get("carry_over") or {"kept": [], "dropped": []}
+        return {
+            "revision_id": prior_revision.revision_id,
+            "revision": prior_revision,
+            "carry_over": carry_over,
+            "already_confirmed": True,
+            "history_count": repo.history_count(thread_id),
+            "action_message": f"[ACTION] card_confirmed revision {prior_revision.rev_no}",
+        }
     workflow = repo.get_workflow(thread_id)
     card = workflow.pending_card if workflow else None
     if card is None or card.get("request_id") != request_id:
         raise WorkflowConflict("The parameter card request is stale", "CARD_STALE")
     current = repo.current(thread_id)
     if card.get("base_revision_id") != (current.revision_id if current else None):
-        raise WorkflowConflict("The card was shown for a different revision", "REVISION_STALE")
+        raise WorkflowConflict("The card was shown for a revision that is no longer current", "CARD_STALE")
     confirmed_intent = apply_confirmed_params(card.get("intent") or {}, values)
     rendered = render_plan(
         confirmed_intent, card.get("explanation_code_checkpoint")
     )
+    metadata, edited_keys, carry_over = _carry_forward_metadata(current, card, confirmed_intent)
     stored_card = {
         "intent": confirmed_intent,
-        "metadata": card.get("metadata") or {},
+        "metadata": metadata,
+        "metadata_user_edited": edited_keys,
         "explanation_code_checkpoint": card.get("explanation_code_checkpoint"),
         "confirmed_request_id": request_id,
     }
-    changes = {
-        "card_json": stored_card,
-        "params_hash": stable_hash(confirmed_intent),
-        "plan_md": rendered["plan_artifact"],
-        "plan_hash": stable_hash(rendered["plan_artifact"]),
-        "plan_approved_at": None,
-        "plan_approved_by": None,
-        "shadow_json": None,
-        "sql_hash": None,
-        "result_approved_at": None,
-        "result_approved_by": None,
-        "metadata_json": None,
-        "metadata_hash": None,
-        "conflict_json": None,
-        "signature_json": None,
-        "signature_hash": None,
-        "stage": "PLAN_PENDING",
-    }
-    if current is None:
-        revision = repo.create_revision(
-            thread_id, card=stored_card, stage="INTAKE", created_by=actor
-        )
-        current_workflow = repo.get_workflow(thread_id)
-        revision = repo.update_revision(
-            revision.revision_id,
-            expected_version=current_workflow.version,
-            **changes,
-        )
-    else:
-        revision = repo.update_revision(
-            current.revision_id,
-            expected_version=workflow.version,
-            **changes,
-        )
-    repo.resolve_pending_card(
+    revision, already_confirmed = repo.confirm_card_revision(
         thread_id,
         request_id,
-        outcome=outcome,
+        base_revision_id=card.get("base_revision_id"),
+        stored_card=stored_card,
+        plan_md=rendered["plan_artifact"],
+        plan_hash=stable_hash(rendered["plan_artifact"]),
+        params_hash=stable_hash(confirmed_intent),
+        metadata=metadata,
+        metadata_hash=stable_hash(metadata),
+        carry_over=carry_over,
         actor=actor,
         role=role,
         source=source,
-        revision_id=revision.revision_id,
-        resolved_rows=resolved_rows,
+        outcome=outcome,
+        confirmation_hash=confirmation_hash,
+        resolved_rows=resolved_rows or resolved_card_rows(card.get("rows", []), values),
     )
-    return revision.revision_id
+    return {
+        "revision_id": revision.revision_id,
+        "revision": revision,
+        "carry_over": carry_over,
+        "already_confirmed": already_confirmed,
+        "history_count": repo.history_count(thread_id),
+        "action_message": f"[ACTION] card_confirmed revision {revision.rev_no}",
+    }
+
+
+def _carry_forward_metadata(
+    current: Any, card: dict[str, Any], intent: dict[str, Any]
+) -> tuple[dict[str, Any], list[str], dict[str, list[str]]]:
+    """Re-seed metadata and carry forward only edited values that still validate."""
+    previous_metadata: dict[str, Any] = {}
+    previous_intent: dict[str, Any] = {}
+    previous_user_edited: list[str] | None = None
+    if current is not None:
+        if current.metadata_json:
+            try:
+                previous_metadata = json.loads(current.metadata_json)
+            except (json.JSONDecodeError, TypeError):
+                previous_metadata = {}
+            if not isinstance(previous_metadata, dict):
+                previous_metadata = {}
+        if current.card_json:
+            try:
+                previous_card = json.loads(current.card_json)
+            except (json.JSONDecodeError, TypeError):
+                previous_card = {}
+            if not previous_metadata and isinstance(previous_card, dict):
+                stored_metadata = previous_card.get("metadata")
+                previous_metadata = stored_metadata if isinstance(stored_metadata, dict) else {}
+            if isinstance(previous_card, dict):
+                stored_intent = previous_card.get("intent")
+                previous_intent = stored_intent if isinstance(stored_intent, dict) else {}
+                edited = previous_card.get("metadata_user_edited")
+                if isinstance(edited, list):
+                    previous_user_edited = [str(key) for key in edited]
+    else:
+        card_metadata = card.get("metadata")
+        previous_metadata = card_metadata if isinstance(card_metadata, dict) else {}
+        card_intent = card.get("intent")
+        previous_intent = card_intent if isinstance(card_intent, dict) else {}
+
+    previous_seeded = seed_scenario_metadata(previous_intent, {})
+    inferred_edits = [
+        key for key, value in previous_metadata.items()
+        if key in previous_seeded and value != previous_seeded[key]
+    ]
+    previous_user_edited = sorted(set(previous_user_edited or []) | set(inferred_edits))
+    valid_fields = {spec.name for spec in SCENARIO_METADATA_FIELDS}
+    keys = [key for key in previous_user_edited if key in previous_metadata and key in valid_fields]
+    seeded = seed_scenario_metadata(intent, {})
+    if card.get("metadata_from_analysis") and isinstance(card.get("metadata"), dict):
+        seeded.update({key: value for key, value in card["metadata"].items() if value is not None})
+    carried = {key: previous_metadata[key] for key in keys}
+    candidate = {**seeded, **carried}
+    kept = list(keys)
+    dropped: list[str] = []
+    while kept:
+        _, problems = validate_scenario_metadata(candidate)
+        invalid = [key for key in kept if any(key in problem for problem in problems)]
+        if not invalid:
+            break
+        for key in invalid:
+            if key in seeded:
+                candidate[key] = seeded[key]
+            else:
+                candidate.pop(key, None)
+            carried.pop(key, None)
+            kept.remove(key)
+            dropped.append(key)
+    return candidate, sorted(kept), {"kept": sorted(kept), "dropped": sorted(dropped)}
 
 
 def _intent_from_revision(revision: Any) -> dict[str, Any] | None:

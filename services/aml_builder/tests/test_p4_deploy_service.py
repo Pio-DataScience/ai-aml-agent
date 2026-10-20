@@ -147,6 +147,15 @@ def test_deploy_hard_guards(mutation, code):
     assert error.value.code == code
 
 
+def test_deploy_rejects_stale_revision_before_registry_write():
+    service, _workflow_repo, oracle, command = _fixture()
+    command["revision_id"] = "stale-revision"
+    with pytest.raises(DeployError) as error:
+        service.deploy(**command)
+    assert error.value.code == "REVISION_STALE"
+    assert oracle.calls == 0
+
+
 def test_enforce_mode_requires_approvals_but_observe_records_would_block():
     service, workflow_repo, oracle, command = _fixture(enforcement="enforce")
     workflow_repo.revision = replace(

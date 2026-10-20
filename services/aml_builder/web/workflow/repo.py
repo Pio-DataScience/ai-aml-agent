@@ -375,6 +375,232 @@ class WorkflowRepo:
         finally:
             connection.close()
 
+    def confirm_card_revision(
+        self,
+        thread_id: str,
+        request_id: str,
+        *,
+        base_revision_id: str | None,
+        stored_card: dict[str, Any],
+        plan_md: str,
+        plan_hash: str,
+        params_hash: str,
+        metadata: dict[str, Any],
+        metadata_hash: str,
+        carry_over: dict[str, list[str]],
+        actor: str,
+        role: str,
+        source: str,
+        outcome: str,
+        confirmation_hash: str,
+        resolved_rows: list[dict[str, Any]],
+    ) -> tuple[Revision, bool]:
+        """Atomically apply a confirmed card and return its current revision.
+
+        A confirmed card copies forward only after the current revision has a
+        plan. Planless drafts are updated in place. The old revision's trio
+        payload is retained unchanged when it moves to history.
+
+        Args:
+            thread_id: Owning workflow thread.
+            request_id: Exact pending-card request being confirmed.
+            base_revision_id: Current revision when the card was shown.
+            stored_card: Confirmed intent and metadata stored on the new revision.
+            plan_md: Deterministically rendered plan for confirmed intent.
+            plan_hash: Stable hash of the plan.
+            params_hash: Stable hash of confirmed parameters.
+            metadata: Revalidated metadata carried into this revision.
+            metadata_hash: Stable hash of carried metadata.
+            carry_over: Edited metadata fields retained or dropped during revalidation.
+            actor: Authenticated user ID.
+            role: Resolved policy role.
+            source: Typed action source.
+            outcome: Card resolution outcome, normally ``confirmed``.
+            confirmation_hash: Hash of the submitted values for idempotency.
+            resolved_rows: Immutable resolved card rows for the audit snapshot.
+
+        Returns:
+            The resulting revision and whether an earlier identical confirm
+            already committed.
+
+        Raises:
+            WorkflowConflict: The card is stale, the chat is locked, or a
+                conflicting confirmation used the same request ID.
+        """
+        self.initialize()
+        connection = self._connect()
+        revision_id: str | None = None
+        already_confirmed = False
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            audit = connection.execute(
+                "SELECT revision_id FROM param_card_audit WHERE request_id=?",
+                (request_id,),
+            ).fetchone()
+            if audit is not None:
+                event = connection.execute(
+                    "SELECT detail_json FROM workflow_events WHERE thread_id=? AND action IN ('card_confirmed','card_auto_confirmed') ORDER BY id DESC",
+                    (thread_id,),
+                ).fetchall()
+                confirmation = next(
+                    (
+                        json.loads(row["detail_json"])
+                        for row in event
+                        if json.loads(row["detail_json"]).get("request_id") == request_id
+                    ),
+                    {},
+                )
+                if confirmation.get("confirmation_hash") != confirmation_hash:
+                    raise WorkflowConflict(
+                        "This card was already confirmed with different values.",
+                        "CARD_STALE",
+                    )
+                revision_id = audit["revision_id"]
+                already_confirmed = True
+                connection.commit()
+            else:
+                workflow = connection.execute(
+                    "SELECT * FROM scenario_workflow WHERE thread_id=?", (thread_id,)
+                ).fetchone()
+                if workflow is None:
+                    raise KeyError(f"Workflow not found: {thread_id}")
+                if workflow["locked"]:
+                    raise WorkflowConflict(
+                        "A deployed workflow cannot confirm another card.",
+                        "CHAT_LOCKED_DEPLOYED",
+                    )
+                pending = (
+                    json.loads(workflow["pending_card_json"])
+                    if workflow["pending_card_json"]
+                    else None
+                )
+                if pending is None or pending.get("request_id") != request_id:
+                    raise WorkflowConflict("The parameter card is stale.", "CARD_STALE")
+                current_row = self._revision_by_id(
+                    connection, workflow["current_revision_id"]
+                )
+                current = self._revision(current_row) if current_row else None
+                current_id = current.revision_id if current else None
+                if current_id != base_revision_id or pending.get("base_revision_id") != current_id:
+                    raise WorkflowConflict(
+                        "The card was shown for a revision that is no longer current.",
+                        "CARD_STALE",
+                    )
+                now = _now()
+                new_revision_created = False
+                if current is None:
+                    new_revision_created = True
+                    revision_id = uuid.uuid4().hex
+                    rev_no = connection.execute(
+                        "SELECT COALESCE(MAX(rev_no), 0) + 1 FROM scenario_revision WHERE thread_id=?",
+                        (thread_id,),
+                    ).fetchone()[0]
+                    connection.execute(
+                        """INSERT INTO scenario_revision
+                        (revision_id,thread_id,rev_no,status,stage,card_json,params_hash,
+                         plan_md,plan_hash,metadata_json,metadata_hash,created_at,created_by)
+                        VALUES(?,?,?,'current','PLAN_PENDING',?,?,?,?,?,?,?,?)""",
+                        (revision_id, thread_id, rev_no, json.dumps(stored_card, ensure_ascii=False),
+                         params_hash, plan_md, plan_hash, json.dumps(metadata, ensure_ascii=False),
+                         metadata_hash, now, actor),
+                    )
+                elif current.plan_md:
+                    new_revision_created = True
+                    revision_id = uuid.uuid4().hex
+                    rev_no = connection.execute(
+                        "SELECT COALESCE(MAX(rev_no), 0) + 1 FROM scenario_revision WHERE thread_id=?",
+                        (thread_id,),
+                    ).fetchone()[0]
+                    connection.execute(
+                        """UPDATE scenario_revision SET status='history',superseded_at=?,
+                        superseded_by_revision_id=?,version=version+1 WHERE revision_id=? AND status='current'""",
+                        (now, revision_id, current.revision_id),
+                    )
+                    connection.execute(
+                        """INSERT INTO scenario_revision
+                        (revision_id,thread_id,rev_no,status,stage,parent_revision_id,card_json,
+                         params_hash,plan_md,plan_hash,metadata_json,metadata_hash,created_at,created_by)
+                        VALUES(?,?,?,'current','PLAN_PENDING',?,?,?,?,?,?,?,?,?)""",
+                        (revision_id, thread_id, rev_no, current.revision_id,
+                         json.dumps(stored_card, ensure_ascii=False), params_hash, plan_md,
+                         plan_hash, json.dumps(metadata, ensure_ascii=False), metadata_hash,
+                         now, actor),
+                    )
+                else:
+                    revision_id = current.revision_id
+                    connection.execute(
+                        """UPDATE scenario_revision SET card_json=?,params_hash=?,plan_md=?,plan_hash=?,
+                        plan_approved_at=NULL,plan_approved_by=NULL,shadow_json=NULL,sql_hash=NULL,
+                        result_approved_at=NULL,result_approved_by=NULL,metadata_json=?,metadata_hash=?,
+                        conflict_json=NULL,signature_json=NULL,signature_hash=NULL,stage='PLAN_PENDING',
+                        version=version+1 WHERE revision_id=? AND status='current'""",
+                        (json.dumps(stored_card, ensure_ascii=False), params_hash, plan_md, plan_hash,
+                         json.dumps(metadata, ensure_ascii=False), metadata_hash, revision_id),
+                    )
+                if new_revision_created:
+                    self._event(
+                        connection, thread_id, actor, "revision_created",
+                        current.stage if current else workflow["stage"], "PLAN_PENDING",
+                        {"revision_id": revision_id, "rev_no": rev_no,
+                         "parent_revision_id": current.revision_id if current else None},
+                    )
+                self._evict_on_connection(connection, thread_id)
+                self._insert_card_audit(
+                    connection, pending, thread_id, outcome, actor, role, source,
+                    revision_id, rows_override=resolved_rows,
+                )
+                connection.execute(
+                    """UPDATE scenario_workflow SET current_revision_id=?,stage='PLAN_PENDING',
+                    pending_card_json=NULL,version=version+1,updated_at=? WHERE thread_id=?""",
+                    (revision_id, now, thread_id),
+                )
+                self._event(
+                    connection, thread_id, actor,
+                    "card_auto_confirmed" if outcome == "auto_confirmed" else "card_confirmed",
+                    workflow["stage"],
+                    "PLAN_PENDING", {"request_id": request_id, "revision_id": revision_id,
+                    "confirmation_hash": confirmation_hash, "carry_over": carry_over},
+                )
+                connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+        revision = self.get_revision(revision_id)
+        if revision is None:
+            raise KeyError(revision_id)
+        return revision, already_confirmed
+
+    def get_card_confirmation(self, request_id: str) -> dict[str, Any] | None:
+        """Return the committed revision ID and submitted-value hash for a card."""
+        self.initialize()
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT revision_id FROM param_card_audit WHERE request_id=? AND outcome IN ('confirmed','auto_confirmed')",
+                (request_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            events = connection.execute(
+                "SELECT detail_json FROM workflow_events WHERE action IN ('card_confirmed','card_auto_confirmed') ORDER BY id DESC"
+            ).fetchall()
+        for event in events:
+            detail = json.loads(event["detail_json"])
+            if detail.get("request_id") == request_id:
+                return {"revision_id": row["revision_id"], **detail}
+        return {"revision_id": row["revision_id"]}
+
+    def history_count(self, thread_id: str) -> int:
+        """Count retained undeployed history revisions for a chat."""
+        self.initialize()
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT COUNT(*) FROM scenario_revision WHERE thread_id=? AND status='history'",
+                (thread_id,),
+            ).fetchone()
+        return int(row[0])
+
     def supersede_to_history(self, thread_id: str, new_revision_id: str) -> None:
         """Mark the former current revision as history before selecting a new current one."""
         connection = self._connect()
@@ -791,6 +1017,8 @@ class WorkflowRepo:
                 "SELECT COUNT(*) FROM workflow_events WHERE thread_id=? AND action='card_refused' AND json_extract(detail_json,'$.request_id')=?",
                 (thread_id, request_id),
             ).fetchone()[0]
+        if outcome == "confirmed":
+            attempts += 1
         connection.execute(
             """INSERT INTO param_card_audit
             (request_id,thread_id,revision_id,user_id,user_role,source,shown_at,resolved_at,outcome,rows_json,attempts)

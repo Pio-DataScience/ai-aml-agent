@@ -8,7 +8,9 @@ expect: tool_call, content, plan_artifact, scenario_result, done.
 
 import json
 import logging
+import re
 import uuid
+from typing import AsyncIterator
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -73,6 +75,29 @@ async def chat_stream(
     project_id = identity.project_id
     if not project_id or project_id in ("0", "None"):
         project_id = "no_project"
+
+    action_text = request.messages[-1].content if request.messages else ""
+    action_match = re.fullmatch(r"\[ACTION\] card_confirmed revision (\d+)", action_text)
+    if metadata.get("action_message") is True and action_match:
+        revision_number = action_match.group(1)
+
+        async def action_acknowledgement() -> AsyncIterator[str]:
+            """Acknowledge a typed card action without touching workflow persistence."""
+            acknowledgement = (
+                f"Parameters confirmed. Revision {revision_number} is ready for plan review."
+            )
+            yield f"data: {SSEEvent(type='content', text=acknowledgement).model_dump_json()}\n\n"
+            yield f"data: {SSEEvent(type='done').model_dump_json()}\n\n"
+
+        return StreamingResponse(
+            action_acknowledgement(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "Connection": "keep-alive",
+            },
+        )
 
     thread_id = f"{project_id}_{chat_id}_{user_id}"
 

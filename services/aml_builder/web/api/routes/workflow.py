@@ -20,6 +20,7 @@ from services.aml_builder.web.services.settings import settings
 from services.aml_builder.web.domain.deploy_service import deployment_blockers
 from services.aml_builder.web.domain.policy import get_role
 from services.aml_builder.web.domain.param_gaps import validate_confirmed_values
+from services.aml_builder.web.domain.hashing import stable_hash
 from services.aml_builder.web.workflow.cards import commit_confirmed_card, resolved_card_rows
 
 router = APIRouter(tags=["Workflow"])
@@ -154,6 +155,30 @@ def confirm_params(
     repo: WorkflowRepo = Depends(get_workflow_repo),
 ) -> dict[str, Any]:
     """Resolve the exact pending card, persist a confirmed revision, and render its plan."""
+    existing_workflow = _owned_workflow(project_id, chat_id, user_id, identity, repo)
+    if not authorize(identity.user_id, "scenario.create", {"user_id": existing_workflow.user_id}, user_email=identity.user_email):
+        raise HTTPException(status_code=403, detail={"error_code": "PERMISSION_DENIED", "message": "Permission denied."})
+    prior = repo.get_card_confirmation(request.request_id)
+    request_hash = stable_hash({
+        "values": request.values,
+        "accept_defaults": request.accept_defaults,
+    })
+    if prior is not None:
+        if prior.get("confirmation_hash") != request_hash:
+            raise HTTPException(status_code=409, detail={"error_code": "CARD_STALE", "message": "This card was already confirmed with different values."})
+        revision = repo.get_revision(prior.get("revision_id"))
+        if revision is None:
+            raise HTTPException(status_code=409, detail={"error_code": "CARD_STALE", "message": "The confirmed revision is no longer available."})
+        response = get_workflow_state(project_id, chat_id, user_id, identity, repo, include_current_revision=True)
+        response.update({
+            "revision_summary": revision.payload_free_summary(),
+            "plan_md": revision.plan_md,
+            "stage_changed": {"revision_id": revision.revision_id, "stage": revision.stage},
+            "carry_over": prior.get("carry_over") or {"kept": [], "dropped": []},
+            "history_count": repo.history_count(existing_workflow.thread_id),
+            "action_message": f"[ACTION] card_confirmed revision {revision.rev_no}",
+        })
+        return response
     workflow_row = _require_card_action(
         project_id, chat_id, user_id, request.request_id, "confirm_params", identity, repo
     )
@@ -180,18 +205,29 @@ def confirm_params(
             "reasons": invalid,
         })
     try:
-        commit_confirmed_card(
+        result = commit_confirmed_card(
             repo, workflow_row.thread_id, request.request_id, values,
             actor=identity.user_id,
             role=get_role(identity.user_id, identity.user_email),
             source=request.source,
             resolved_rows=resolved_card_rows(card.get("rows", []), values),
+            confirmation_hash=request_hash,
         )
     except WorkflowConflict as exc:
         raise HTTPException(status_code=409, detail={"error_code": exc.code, "message": str(exc)}) from exc
-    return get_workflow_state(
+    response = get_workflow_state(
         project_id, chat_id, user_id, identity, repo, include_current_revision=True
     )
+    revision = result["revision"]
+    response.update({
+        "revision_summary": revision.payload_free_summary(),
+        "plan_md": revision.plan_md,
+        "stage_changed": {"revision_id": revision.revision_id, "stage": revision.stage},
+        "carry_over": result["carry_over"],
+        "history_count": result["history_count"],
+        "action_message": result["action_message"],
+    })
+    return response
 
 
 @router.post("/workflow/{project_id}/{chat_id}/{user_id}/actions/discard_card")

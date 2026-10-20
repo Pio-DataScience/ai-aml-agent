@@ -12,7 +12,7 @@ Confirmation applies explicit values to the stored intent, records provenance, c
 
 Incomplete submissions return 422 `PARAMS_INCOMPLETE` with `missing[]` and `unresolved[]`. Out-of-range and all-time values return 422 `PARAMS_INVALID` with reasons. Refusals append `card_refused` workflow events; they do not write an audit row. `param_card_audit` is inserted once when a card resolves as `confirmed`, `auto_confirmed`, `discarded`, or `superseded`. It snapshots the shown rows, choices, user/role/source, shown and resolved timestamps, revision ID, and refusal-attempt count. Audit rows are not updated or evicted.
 
-P6 creates the first revision only. Until P6b, confirmation after a plan exists updates the current revision in place and clears the plan, shadow result, approvals, governance metadata, signature, and conflict data. This interim reset prevents stale artifacts from being deployed after parameter changes; P6b will replace it with a new revision and retained history.
+P6 creates the first revision. P6b now creates a new revision when a confirmed card changes parameters after a plan exists. It copies the confirmed card, revalidated edited governance metadata, and newly rendered plan; the previous trio remains in capped history. A planless current revision is still updated in place. See [P6b revision flow](P6b_revision_flow.md) for the atomic write, eviction, retry, and response behavior.
 
 ## API and configuration
 

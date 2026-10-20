@@ -17,7 +17,7 @@ Primary implementation evidence: `services/aml_builder/web/api/main.py`, `servic
 The application has four practical layers:
 
 1. **HTTP interface:** FastAPI startup and routes under `services/aml_builder/web/api/` expose chat/SSE, workflow state and revision reads, typed approval actions, authenticated UI copy, session history and sidebar operations, direct deployment, alert-engine execution, and health.
-2. **Agent orchestration:** `services/aml_builder/web/services/graph.py:get_tool_driven_graph` builds one process-level ReAct agent with six tools, an `AsyncSqliteSaver`, and a pre-model hook that adds current workflow context and stubs superseded tool results in model input. Tool selection remains LLM-driven; deterministic workflow state and guards are enforced per policy gate. P5 enforces approvals and P6 enforces parameter-card confirmation; P8 remains responsible for conflict-check enforcement.
+2. **Agent orchestration:** `services/aml_builder/web/services/graph.py:get_tool_driven_graph` builds one process-level ReAct agent with six tools, an `AsyncSqliteSaver`, and a pre-model hook that adds current workflow context and stubs superseded tool results in model input. Tool selection remains LLM-driven; deterministic workflow state and guards are enforced per policy gate. P5 enforces approvals and P6 enforces parameter-card confirmation; P6b creates copied-forward revisions after a plan exists; P8 remains responsible for conflict-check enforcement.
 3. **Domain and integration services:** pure intent normalization, code binding, metadata rules, window conversion, SQL extraction, hashing, and deterministic deployment orchestration live under `web/domain/`. Oracle registry-v2 operations live under `web/adapters/oracle_repo.py`; Oracle-backed metadata lookups, plan rendering, explanation-code search, registry analytics, external text-to-SQL calls, and alert processing remain under `web/services/`.
 4. **Persistence:** SQLite stores LangGraph checkpoints in `STATE_DIR/checkpoints.sqlite`; workflow, revision, card-audit, workflow-event, and composite-key chat-sidebar data live in `STATE_DIR/app_state.sqlite`. Oracle stores source/lookups, scenario definitions and governance records, and generated alerts.
 
@@ -30,7 +30,7 @@ The service is synchronous at several integration boundaries despite async HTTP 
 | `services/aml_builder/web/api/main.py` | FastAPI app, required service-token startup check, configured CORS, router registration, `/health`. |
 | `services/aml_builder/web/api/dependencies.py` | Validates BFF service-token/identity headers and rejects body/path ID mismatches. |
 | `services/aml_builder/web/api/routes/me.py` | `GET /me/permissions` returns the caller's YAML policy role and allowed actions. |
-| `services/aml_builder/web/api/routes/chat.py` | `POST /chat/stream`; converts graph messages and selected tool results to SSE events. |
+| `services/aml_builder/web/api/routes/chat.py` | `POST /chat/stream`; converts graph messages and selected tool results to SSE events. Card-confirmation acknowledgements return a short SSE response without invoking LangGraph or writing a checkpoint. |
 | `services/aml_builder/web/api/routes/workflow.py` | Own-chat workflow state, revision summaries/details, hash-bound approval actions, and authenticated UI-copy endpoint. |
 | `services/aml_builder/web/api/routes/sessions.py` | Checkpoint-backed conversation-text reconstruction and sidebar list/rename/pin/soft-delete endpoints; current artifacts come from workflow state. |
 | `services/aml_builder/web/api/routes/deploy.py` | Direct side-panel deployment from the current typed workflow revision through `DeployService`; returns the deployment receipt. |
@@ -38,7 +38,7 @@ The service is synchronous at several integration boundaries despite async HTTP 
 | `services/aml_builder/web/api/sse_mapper.py` | Maps decoded tool results to the existing UI-visible SSE events. |
 | `services/aml_builder/web/api/routes/engine.py` | Synchronous alert-engine trigger and active-scenario listing. |
 | `services/aml_builder/web/services/graph.py` | ReAct graph/checkpointer singleton lifecycle and six-tool registration. |
-| `services/aml_builder/web/workflow/` | Typed workflow records, stage transitions, SQLite repositories, revision history/eviction, stage guards, and transient model context. |
+| `services/aml_builder/web/workflow/` | Typed workflow records, stage transitions, SQLite repositories, atomic card-confirmation copy-forward, revision history/eviction, stage guards, and transient model context. |
 | `services/aml_builder/web/services/tools.py` | Agent-facing intent, plan, shadow-test, metadata, persistence, and registry-query tools. |
 | `services/aml_builder/web/domain/intent_normalize.py` | Pure intent normalization with default provenance and `applied_defaults` entries. |
 | `services/aml_builder/web/domain/code_binding.py` | Pure transaction-scope selection and explanation-code binding. |
@@ -110,7 +110,7 @@ $env:PYTHONPATH = "services\aml_builder"
 | `GET /workflow/{project_id}/{chat_id}/{user_id}/state` | Returns current stage, pending-card slot, revision summaries, `can_deploy` and typed blockers; `include_current_revision=true` includes the current payload. |
 | `POST /workflow/{project_id}/{chat_id}/{user_id}/actions/approve_plan` | Approves the current plan only when `revision_id` and `expected_hash` match. Requires `scenario.create`. |
 | `POST /workflow/{project_id}/{chat_id}/{user_id}/actions/approve_result` | Approves the successful shadow result only when `revision_id` and `expected_hash` match. Requires `scenario.create`. |
-| `POST /workflow/{project_id}/{chat_id}/{user_id}/actions/confirm_params` | Validates explicit values/default choices for the exact pending card, stores the confirmed intent and deterministic plan, and resolves the card audit. Requires `scenario.create`. |
+| `POST /workflow/{project_id}/{chat_id}/{user_id}/actions/confirm_params` | Validates explicit values/default choices for the exact pending card, atomically creates or updates the current revision, renders its plan, resolves the card audit, and returns revision/action details. Requires `scenario.create`. |
 | `POST /workflow/{project_id}/{chat_id}/{user_id}/actions/discard_card` | Discards and audits the exact pending card. Requires `scenario.create`. |
 | `GET /ui/copy` | Returns the authenticated YAML UI-copy catalog. |
 | `GET /workflow/{project_id}/{chat_id}/{user_id}/revisions` | Lists current, historical, and evicted revision summaries without payloads. |
@@ -201,7 +201,7 @@ user description
 
 The server validates required parameters independently of the LLM's `ready_for_handoff` value. A pending card is emitted through `parameter_card` SSE and returned by `GET state`; each refused submission is recorded as a `card_refused` workflow event. `param_card_audit` receives one immutable row when a card resolves, with the shown rows, final choices, timestamps, and refusal-attempt count. Shadow and persistence tools use the confirmed intent stored on the current revision and log `intent_arg_mismatch` when their model-supplied argument differs.
 
-P6 creates only the initial revision. Until P6b, confirming a changed card when a revision already has a plan updates that current revision in place and clears its plan, shadow result, approvals, metadata, and stale signature/conflict values. P6b must replace this interim reset with copy-forward into a new revision while retaining history and enforcing its configured cap.
+P6 creates the initial revision. Once a plan exists, P6b confirms changed cards by copying the confirmed intent and newly rendered plan into a new current revision; the prior trio remains in history unchanged apart from its lifecycle fields. The operation atomically updates revision history, applies tombstone eviction, writes the card audit, clears the pending card, and advances the workflow pointer. Planless revisions are updated in place. A new revision starts without shadow results, approvals, signatures, or conflict data. Metadata is re-seeded and edited fields are revalidated before carry-over. Conflict enforcement remains observe-only for P8. The `[ACTION] card_confirmed revision N` chat acknowledgement bypasses LangGraph so it is not added to the checkpoint.
 
 ### SQL generation and shadow testing
 
@@ -231,7 +231,7 @@ validate current revision, pending-card slot, permission, metadata and shadow SQ
 
 P3 pre-allocates `PRD_<8_HEX>` stable keys and P4 stores the first version as `PRD_<8_HEX>_V1`. A committed Oracle deployment followed by a failed SQLite lock update is recovered by retry: the existing row is looked up by unique `THREAD_ID`, and only the workflow lock is completed. Oracle and SQLite cannot share one transaction.
 
-P5 enforces plan/result approvals and P6 enforces card confirmation. P6b keeps those gates enforced and replaces the interim in-place reset with revision history. P8 must switch only `workflow.enforcement.conflict_check` to `enforce` and set `workflow.conflict_check_required: true` after the authoritative conflict gate is implemented.
+P5 enforces plan/result approvals and P6 enforces card confirmation. P6b keeps those gates enforced and adds bounded revision history. P8 must switch only `workflow.enforcement.conflict_check` to `enforce` and set `workflow.conflict_check_required: true` after the authoritative conflict gate is implemented.
 
 ### Existing-scenario queries
 

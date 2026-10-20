@@ -5,6 +5,18 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-10-20] feat: P6b revision flow and history
+
+### What
+- Added atomic card-confirmation copy-forward after plan creation, preserving the prior trio in capped history and retaining planless in-place updates.
+- Added idempotent confirmation retries, stale-base conflicts, metadata re-seeding/revalidation with kept/dropped carry-over reporting, and tombstone eviction.
+- Returned revision, plan, stage-change, history, carry-over, and action-message details; the UI now refreshes the plan/shadow/badge and relays the action acknowledgement.
+- Kept card acknowledgements out of LangGraph checkpoints and left conflict enforcement observe-only for P8.
+
+### Verification
+- Focused backend and UI verification is recorded in `Docs/refactor_status.md`.
+- Tests use SQLite and metadata fakes; no live LLM, Oracle, or Service B call was made.
+
 ## [2026-10-20] feat: P6 parameter confirmation card
 
 ### What
