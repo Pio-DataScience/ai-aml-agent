@@ -38,7 +38,10 @@ def test_direct_route_uses_current_revision_and_returns_extra_receipt(monkeypatc
         "load_catalogs",
         lambda _path: SimpleNamespace(
             policy=SimpleNamespace(
-                workflow=SimpleNamespace(enforcement="observe", conflict_check_required=False)
+                workflow=SimpleNamespace(
+                    enforcement=SimpleNamespace(model_dump=lambda: {"approvals": "observe", "card_confirmation": "observe", "conflict_check": "observe"}),
+                    conflict_check_required=False,
+                )
             )
         ),
     )

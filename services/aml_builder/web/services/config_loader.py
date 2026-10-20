@@ -73,10 +73,18 @@ class RevisionPolicy(BaseModel):
     restore_from_history: str = "reserved"
 
 
-class WorkflowPolicy(BaseModel):
-    """Workflow enforcement mode used during staged rollout."""
+class WorkflowEnforcement(BaseModel):
+    """Independent rollout mode for each workflow gate."""
 
-    enforcement: Literal["observe", "enforce"] = "observe"
+    approvals: Literal["observe", "enforce"] = "observe"
+    card_confirmation: Literal["observe", "enforce"] = "observe"
+    conflict_check: Literal["observe", "enforce"] = "observe"
+
+
+class WorkflowPolicy(BaseModel):
+    """Workflow enforcement modes used during staged rollout."""
+
+    enforcement: WorkflowEnforcement = Field(default_factory=WorkflowEnforcement)
     conflict_check_required: bool = False
 
 
@@ -111,6 +119,12 @@ class UiCopyCatalog(BaseModel):
     locked_composer_placeholder: str
     conflict_block: str
     conflict_warn: str
+    card_pending_notice: str = "Confirm or discard the parameters card before continuing."
+    card_stale_notice: str = "This card was replaced by a newer one. Showing the latest."
+    revision_badge: str = "Revision {rev_no}"
+    proceed_button: str = "Proceed"
+    approve_result_button: str = "Approve result"
+    params_incomplete: str = "These values are still needed: {missing}."
 
 
 @dataclass(frozen=True)

@@ -72,7 +72,9 @@ def workflow_pre_model_hook(
     user_id = str(configurable.get("user_id", ""))
     user_email = str(configurable.get("user_email", "")) or None
     chat_may_deploy = load_catalogs(settings.CATALOG_DIR).policy.chat_may_deploy
-    if repo.enforcement == "observe" and not workflow.locked:
+    gate_modes = repo.enforcement if isinstance(repo.enforcement, dict) else {"card_confirmation": repo.enforcement, "conflict_check": repo.enforcement}
+    observe_tools = gate_modes.get("card_confirmation", "observe") == "observe" or gate_modes.get("conflict_check", "observe") == "observe"
+    if observe_tools and not workflow.locked:
         allowed_actions = [
             name
             for name, permission in action_permissions.items()
@@ -101,7 +103,7 @@ def workflow_pre_model_hook(
         current_revision=summary,
         superseded=repo.list_superseded_revision_numbers(str(thread_id)),
         allowed_actions=allowed_actions,
-        enforcement=repo.enforcement,
+        enforcement="observe" if observe_tools else "enforce",
     )
     return {"llm_input_messages": projected}
 

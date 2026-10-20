@@ -116,4 +116,8 @@ def test_section_six_catalog_drafts_load_from_repository() -> None:
     assert catalogs.filters.dimensions["account_status"].status == "needs_advisor_input"
     assert catalogs.filters.dimensions["explanation_code"].status == "confirmed"
     assert catalogs.policy.revisions.history_cap == 5
-    assert catalogs.policy.workflow.enforcement == "observe"
+    assert catalogs.policy.workflow.enforcement.model_dump() == {
+        "approvals": "enforce",
+        "card_confirmation": "observe",
+        "conflict_check": "observe",
+    }

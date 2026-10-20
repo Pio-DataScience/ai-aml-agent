@@ -41,7 +41,10 @@ revisions:
   carry_over_user_edited_metadata: true
   restore_from_history: reserved
 workflow:
-  enforcement: observe
+  enforcement:
+    approvals: enforce
+    card_confirmation: observe
+    conflict_check: observe
   conflict_check_required: false
 card_audit:
   store: sqlite

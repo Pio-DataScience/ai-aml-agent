@@ -12,7 +12,7 @@ def get_workflow_repo() -> WorkflowRepo:
     return WorkflowRepo(
         settings.APP_STATE_DB_PATH,
         history_cap=policy.revisions.history_cap,
-        enforcement=policy.workflow.enforcement,
+        enforcement=policy.workflow.enforcement.model_dump(),
     )
 
 
@@ -34,11 +34,30 @@ def record_tool_success(
                 "metadata": payload.get("scenario_metadata"),
             },
         )
+        workflow = repo.get_workflow(thread_id)
+        if workflow and workflow.stage != "PLAN_PENDING":
+            repo.set_stage(thread_id, "PLAN_PENDING", actor=actor, action="intent_ready_for_plan")
+            revision = repo.current(thread_id) or revision
         return revision.revision_id
-    stage_by_tool = {
-        "generate_scenario_execution_plan": "PLAN_PENDING",
-        "prepare_scenario_metadata_for_persistence": "METADATA_READY",
-    }
+    if tool_name in {"generate_scenario_execution_plan", "prepare_scenario_metadata_for_persistence"}:
+        current = repo.current(thread_id)
+        workflow = repo.get_workflow(thread_id)
+        if current and workflow:
+            changes: dict[str, object] = {}
+            if tool_name == "generate_scenario_execution_plan":
+                plan = str(payload.get("plan_artifact") or "")
+                changes["stage"] = "PLAN_PENDING"
+                if plan:
+                    changes.update(plan_md=plan, plan_hash=stable_hash(plan))
+            else:
+                changes["stage"] = "METADATA_READY"
+                metadata = payload.get("metadata")
+                if isinstance(metadata, dict):
+                    changes.update(metadata_json=metadata, metadata_hash=stable_hash(metadata))
+            if changes:
+                repo.update_revision(current.revision_id, expected_version=workflow.version, **changes)
+                return current.revision_id
+    stage_by_tool: dict[str, str] = {}
     if tool_name == "execute_oracle_dwh_shadow_test":
         current = repo.current(thread_id)
         workflow = repo.get_workflow(thread_id)

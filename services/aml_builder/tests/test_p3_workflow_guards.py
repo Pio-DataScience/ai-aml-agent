@@ -78,7 +78,7 @@ def test_stale_revision_and_request_ids_are_typed(tmp_path: Path) -> None:
         (
             "analyze_intent_and_discover_explanation_codes",
             {"enriched_intent": {"x": 1}},
-            "INTAKE",
+            "PLAN_PENDING",
         ),
         ("generate_scenario_execution_plan", {"plan_artifact": "plan"}, "PLAN_PENDING"),
         (

@@ -645,7 +645,7 @@ def persist_and_validate_scenario_in_dwh(
         workflow_repo=workflow_repo,
         metadata_validator=validate_scenario_metadata,
         authorizer=lambda user_id, action: authorize(user_id, action, user_email=actor_email),
-        enforcement=policy.workflow.enforcement,
+        enforcement=policy.workflow.enforcement.model_dump(),
         conflict_check_required=policy.workflow.conflict_check_required,
         numeric_created_by_default=settings.AML_CREATED_BY,
     )

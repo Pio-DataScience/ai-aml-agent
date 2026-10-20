@@ -78,7 +78,7 @@ async def deploy_scenario(
         authorizer=lambda user_id, action: authorize(
             user_id, action, user_email=identity.user_email
         ),
-        enforcement=catalogs.policy.workflow.enforcement,
+        enforcement=catalogs.policy.workflow.enforcement.model_dump(),
         conflict_check_required=catalogs.policy.workflow.conflict_check_required,
         numeric_created_by_default=settings.AML_CREATED_BY,
     )

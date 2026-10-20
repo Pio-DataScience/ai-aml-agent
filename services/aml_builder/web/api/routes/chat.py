@@ -99,6 +99,8 @@ async def chat_stream(
         },
         "recursion_limit": settings.AGENT_RECURSION_LIMIT,
     }
+    if metadata.get("action_message") is True:
+        config["metadata"] = {"action_message": True}
     user_msg = request.messages[-1].content if request.messages else ""
     if request.metadata_json:
         metadata_str = json.dumps(request.metadata_json, ensure_ascii=False)

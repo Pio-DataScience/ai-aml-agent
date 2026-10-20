@@ -7,7 +7,6 @@ tool-call/tool-result message pairs into their parent assistant turn).
 Sidebar CRUD (list/rename/pin/delete) operates on the session_store table.
 """
 
-import json
 import logging
 import os
 from typing import Optional
@@ -25,7 +24,6 @@ from services.aml_builder.web.services.schemas import (
     RenameChatResponse,
     TogglePinResponse,
 )
-from services.aml_builder.web.api.codec import decode_tool_result
 from services.aml_builder.web.services.session_store import (
     list_chat_sessions,
     rename_chat_session,
@@ -39,6 +37,10 @@ from services.aml_builder.web.domain.policy import authorize
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Session"])
+
+
+def _ignore_history_tool_message(chat_messages: list[ChatMessage], _message: object) -> None:
+    """Keep old ToolMessage artifacts out of chat history reconstruction."""
 
 
 def _normalize_project(project_id: str) -> str:
@@ -69,10 +71,6 @@ async def get_chat_history(project_id: str, chat_id: str, user_id: str, identity
 
         if state and state.values:
             messages_data = state.values.get("messages", [])
-            tool_call_id_to_name = {}
-            pending_plan_artifact = None
-            pending_scenario_result = None
-            pending_metadata_catalog = None
 
             for msg in messages_data:
                 msg_class = msg.__class__.__name__
@@ -81,11 +79,6 @@ async def get_chat_history(project_id: str, chat_id: str, user_id: str, identity
                     chat_messages.append(ChatMessage(role="user", content=content))
                 elif msg_class == "AIMessage":
                     if hasattr(msg, "tool_calls") and msg.tool_calls:
-                        for tc in msg.tool_calls:
-                            tc_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
-                            tc_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", None)
-                            if tc_id and tc_name:
-                                tool_call_id_to_name[tc_id] = tc_name
                         continue
 
                     content = msg.content if hasattr(msg, "content") else ""
@@ -99,17 +92,6 @@ async def get_chat_history(project_id: str, chat_id: str, user_id: str, identity
                         esc_rep = msg.additional_kwargs.get("escalation_report")
                         val_res = msg.additional_kwargs.get("validation_result")
                         meta_cat = msg.additional_kwargs.get("scenario_metadata_catalog")
-
-                    # Fallback to pending artifacts extracted from preceding ToolMessages
-                    if not plan_art and pending_plan_artifact:
-                        plan_art = pending_plan_artifact
-                        pending_plan_artifact = None
-                    if not val_res and pending_scenario_result:
-                        val_res = pending_scenario_result
-                        pending_scenario_result = None
-                    if not meta_cat and pending_metadata_catalog:
-                        meta_cat = pending_metadata_catalog
-                        pending_metadata_catalog = None
 
                     # Skip if message is entirely empty (no text and no artifacts)
                     if not content.strip() and not (plan_art or val_res or esc_rep or meta_cat):
@@ -125,28 +107,7 @@ async def get_chat_history(project_id: str, chat_id: str, user_id: str, identity
                         timestamp=msg.additional_kwargs.get("timestamp") if hasattr(msg, "additional_kwargs") else None
                     ))
                 elif msg_class == "ToolMessage" or getattr(msg, "type", None) == "tool":
-                    tool_call_id = getattr(msg, "tool_call_id", None)
-                    tool_name = tool_call_id_to_name.get(tool_call_id, "") or getattr(msg, "name", "")
-                    content_raw = getattr(msg, "content", "")
-                    if content_raw:
-                        try:
-                            result = decode_tool_result(content_raw, tool_name)
-                            payload = result.payload
-                            if isinstance(payload, dict):
-                                if tool_name == "generate_scenario_execution_plan" or "plan_artifact" in payload:
-                                    if payload.get("plan_artifact"):
-                                        pending_plan_artifact = payload.get("plan_artifact")
-                                elif tool_name == "prepare_scenario_metadata_for_persistence" or "fields" in payload:
-                                    pending_metadata_catalog = payload
-                                elif tool_name == "analyze_intent_and_discover_explanation_codes" and "scenario_metadata" in payload:
-                                    # Lazy build catalog from seeded metadata if not yet explicitly prepared
-                                    if not pending_metadata_catalog:
-                                        from services.aml_builder.web.services.scenario_metadata import build_metadata_catalog
-                                        pending_metadata_catalog = build_metadata_catalog(payload["scenario_metadata"])
-                                elif tool_name in ("persist_and_validate_scenario_in_dwh", "execute_oracle_dwh_shadow_test") or "write_success" in payload or "header_alert_count" in payload:
-                                    pending_scenario_result = payload
-                        except (json.JSONDecodeError, TypeError, ValueError):
-                            pass
+                    _ignore_history_tool_message(chat_messages, msg)
 
         logger.info("[HISTORY] Retrieved %d conversation-level messages.", len(chat_messages))
         return ChatHistoryResponse(

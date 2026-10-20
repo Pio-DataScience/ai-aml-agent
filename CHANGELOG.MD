@@ -5,6 +5,17 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-10-20] feat: P5 server-driven workflow state and approvals
+
+### What
+- Added typed, hash-bound plan and result approvals, per-gate enforcement policy, deployment blockers in workflow state, and authenticated UI-copy retrieval.
+- Made current-revision artifacts authoritative for UI state and stopped rebuilding artifacts from old ToolMessages in chat history.
+- Updated the UI to refresh server workflow state after SSE stage changes and typed actions; approval/deployment/lock state is never set locally.
+
+### Verification
+- Added offline coverage for approval guards, idempotency and audit details, the intent-to-deploy guard flow, ordinary “approved” chat text, deployment readiness, and history artifact omission.
+- Manual UI steps are documented in `Docs/P5_ui_server_state_approvals.md` for inclusion in the PR description.
+
 ## [2026-10-19] feat: P4 registry v2 and DeployService
 
 ### What

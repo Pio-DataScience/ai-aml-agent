@@ -33,6 +33,38 @@ class _NotRunConflictGate:
         return {"status": "not_run", "acknowledgements": []}
 
 
+def deployment_blockers(
+    workflow: Any, revision: Any, *, user_can_create: bool,
+    approval_enforcement: str = "enforce",
+) -> list[str]:
+    """Return typed deploy blockers shared by the state API and DeployService."""
+    blockers: list[str] = []
+    if not user_can_create:
+        blockers.append("PERMISSION_DENIED")
+    if workflow is None or revision is None:
+        return blockers + ["STAGE_NOT_ALLOWED"]
+    if workflow.locked:
+        blockers.append("CHAT_LOCKED_DEPLOYED")
+    if workflow.pending_card:
+        blockers.append("CARD_PENDING")
+    if workflow.current_revision_id != revision.revision_id:
+        blockers.append("REVISION_STALE")
+    if workflow.stage != "METADATA_READY" or revision.stage != "METADATA_READY":
+        blockers.append("STAGE_NOT_ALLOWED")
+    shadow = _json_value(revision.shadow_json) or {}
+    sql = shadow.get("raw_sql")
+    if not shadow.get("validation_success"):
+        blockers.append("SHADOW_NOT_PASSED")
+    elif not sql or not revision.sql_hash or shadow.get("sql_hash") != revision.sql_hash or stable_hash_sql(sql) != revision.sql_hash:
+        blockers.append("HASH_MISMATCH")
+    if approval_enforcement == "enforce":
+        if not revision.plan_approved_at:
+            blockers.append("PLAN_NOT_APPROVED")
+        if not revision.result_approved_at:
+            blockers.append("RESULT_NOT_APPROVED")
+    return blockers
+
+
 @dataclass(frozen=True)
 class DeploymentResult:
     """Committed version and its immutable deployment receipt."""
@@ -54,7 +86,7 @@ class DeployService:
         metadata_validator: Callable[[dict[str, Any]], tuple[bool, list[str]]],
         authorizer: Callable[[str, str], bool],
         conflict_gate: ConflictGate | None = None,
-        enforcement: str | None = None,
+        enforcement: str | dict[str, str] | None = None,
         conflict_check_required: bool = False,
         numeric_created_by_default: int | None = None,
     ) -> None:
@@ -65,6 +97,11 @@ class DeployService:
         self.authorizer = authorizer
         self.conflict_gate = conflict_gate or _NotRunConflictGate()
         self.enforcement = enforcement or getattr(workflow_repo, "enforcement", "observe")
+        self.approval_enforcement = (
+            self.enforcement.get("approvals", "observe")
+            if isinstance(self.enforcement, dict)
+            else self.enforcement
+        )
         self.conflict_check_required = conflict_check_required
         self.numeric_created_by_default = _numeric_user(
             settings.AML_CREATED_BY if numeric_created_by_default is None else numeric_created_by_default,
@@ -134,6 +171,22 @@ class DeployService:
             if existing is None or existing.get("scenario_id") != selected_scenario_id or existing.get("revision_id") != revision_id:
                 raise DeployError("CHAT_LOCKED_DEPLOYED", "This chat is locked after deployment.")
             return self._repeat_existing(existing)
+        blockers = deployment_blockers(
+            workflow, revision, user_can_create=True,
+            approval_enforcement=self.approval_enforcement,
+        )
+        if blockers:
+            code = blockers[0]
+            messages = {
+                "CARD_PENDING": "Confirm or discard the pending parameter card first.",
+                "REVISION_STALE": "The supplied revision is no longer current.",
+                "STAGE_NOT_ALLOWED": "Deployment requires METADATA_READY.",
+                "SHADOW_NOT_PASSED": "The current revision has no successful shadow test.",
+                "HASH_MISMATCH": "The current shadow SQL hash does not match the SQL being deployed.",
+                "PLAN_NOT_APPROVED": "The current plan has not been approved.",
+                "RESULT_NOT_APPROVED": "The current shadow result has not been approved.",
+            }
+            raise DeployError(code, messages.get(code, "Deployment is blocked by workflow state."))
         if revision.stage != "METADATA_READY" or workflow.stage != "METADATA_READY":
             raise DeployError("STAGE_NOT_ALLOWED", "Deployment requires METADATA_READY.")
 
@@ -158,7 +211,7 @@ class DeployService:
         if not revision.result_approved_at:
             missing_approvals.append("result")
         if missing_approvals:
-            if self.enforcement == "enforce":
+            if self.approval_enforcement == "enforce":
                 code = "PLAN_NOT_APPROVED" if "plan" in missing_approvals else "RESULT_NOT_APPROVED"
                 raise DeployError(code, f"Missing approval(s): {', '.join(missing_approvals)}.")
             approval_status = "would_block"

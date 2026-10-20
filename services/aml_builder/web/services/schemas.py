@@ -511,7 +511,7 @@ class ChatRequest(BaseModel):
     )
     metadata: Dict[str, Any] = Field(
         default_factory=dict,
-        description="Routing metadata: user_id, project_id, chat_id.",
+        description="Routing metadata: user_id, project_id, chat_id, and optional action_message trace flag.",
     )
     metadata_json: Optional[Dict[str, Any]] = Field(
         default=None,

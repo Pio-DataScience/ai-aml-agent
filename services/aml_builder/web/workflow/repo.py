@@ -16,6 +16,10 @@ from services.aml_builder.web.workflow.models import Revision, WorkflowRow
 class WorkflowConflict(RuntimeError):
     """Raised when a workflow write uses a stale optimistic-lock version."""
 
+    def __init__(self, message: str, code: str = "REVISION_STALE") -> None:
+        super().__init__(message)
+        self.code = code
+
 
 def _now() -> str:
     """Return a timezone-aware UTC timestamp in ISO format."""
@@ -30,7 +34,7 @@ class WorkflowRepo:
         path: Path | str,
         *,
         history_cap: int = 5,
-        enforcement: str = "observe",
+        enforcement: str | dict[str, str] = "observe",
         busy_timeout_ms: int = 10000,
     ) -> None:
         """Configure a repository instance.
@@ -43,8 +47,10 @@ class WorkflowRepo:
         """
         if history_cap < 0:
             raise ValueError("history_cap must be non-negative")
-        if enforcement not in {"observe", "enforce"}:
+        if isinstance(enforcement, str) and enforcement not in {"observe", "enforce"}:
             raise ValueError("enforcement must be 'observe' or 'enforce'")
+        if isinstance(enforcement, dict) and any(value not in {"observe", "enforce"} for value in enforcement.values()):
+            raise ValueError("each enforcement gate must be 'observe' or 'enforce'")
         self.path = Path(path)
         self.history_cap = history_cap
         self.enforcement = enforcement
@@ -533,6 +539,44 @@ class WorkflowRepo:
                 new_stage,
                 {"revision_id": revision_id, "fields": sorted(changes)},
             )
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+        return self.get_revision(revision_id)
+
+    def approve_revision(
+        self, thread_id: str, revision_id: str, *, approval: str, actor: str,
+        role: str, expected_hash: str,
+    ) -> Revision:
+        """Record one typed approval atomically; same-hash retries are idempotent."""
+        column = "plan_hash" if approval == "plan" else "sql_hash"
+        approved_at = "plan_approved_at" if approval == "plan" else "result_approved_at"
+        approved_by = "plan_approved_by" if approval == "plan" else "result_approved_by"
+        next_stage = "PLAN_APPROVED" if approval == "plan" else "RESULT_APPROVED"
+        action = "approve_plan" if approval == "plan" else "approve_result"
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            workflow = connection.execute("SELECT stage,current_revision_id,version FROM scenario_workflow WHERE thread_id=?", (thread_id,)).fetchone()
+            row = connection.execute("SELECT * FROM scenario_revision WHERE revision_id=? AND thread_id=?", (revision_id, thread_id)).fetchone()
+            if workflow is None or row is None or workflow["current_revision_id"] != revision_id:
+                raise WorkflowConflict("The supplied revision is no longer current", "REVISION_STALE")
+            required_stage = "PLAN_PENDING" if approval == "plan" else "SHADOW_PASSED"
+            if workflow["stage"] != required_stage:
+                raise WorkflowConflict(f"Approval requires {required_stage}.", "STAGE_NOT_ALLOWED")
+            if row[approved_at]:
+                if row[column] != expected_hash:
+                    raise WorkflowConflict("The approval hash does not match the approved artifact")
+                connection.commit()
+                return self.get_revision(revision_id)
+            if row[column] != expected_hash:
+                raise ValueError("The expected hash does not match the current artifact")
+            connection.execute(f"UPDATE scenario_revision SET {approved_at}=?,{approved_by}=?,stage=?,version=version+1 WHERE revision_id=?", (_now(), actor, next_stage, revision_id))
+            connection.execute("UPDATE scenario_workflow SET stage=?,version=version+1,updated_at=? WHERE thread_id=?", (next_stage, _now(), thread_id))
+            self._event(connection, thread_id, actor, action, workflow["stage"], next_stage, {"revision_id": revision_id, "actor_role": role, "expected_hash": expected_hash})
             connection.commit()
         except Exception:
             connection.rollback()

@@ -16,8 +16,8 @@ Primary implementation evidence: `services/aml_builder/web/api/main.py`, `servic
 
 The application has four practical layers:
 
-1. **HTTP interface:** FastAPI startup and routes under `services/aml_builder/web/api/` expose chat/SSE, workflow state and revision reads, session history and sidebar operations, direct deployment, alert-engine execution, and health.
-2. **Agent orchestration:** `services/aml_builder/web/services/graph.py:get_tool_driven_graph` builds one process-level ReAct agent with six tools, an `AsyncSqliteSaver`, and a pre-model hook that adds current workflow context and stubs superseded tool results in model input. Tool selection remains LLM-driven; P3 adds a deterministic workflow store and configurable observe/enforce guards around tool calls.
+1. **HTTP interface:** FastAPI startup and routes under `services/aml_builder/web/api/` expose chat/SSE, workflow state and revision reads, typed approval actions, authenticated UI copy, session history and sidebar operations, direct deployment, alert-engine execution, and health.
+2. **Agent orchestration:** `services/aml_builder/web/services/graph.py:get_tool_driven_graph` builds one process-level ReAct agent with six tools, an `AsyncSqliteSaver`, and a pre-model hook that adds current workflow context and stubs superseded tool results in model input. Tool selection remains LLM-driven; deterministic workflow state and guards are enforced per policy gate. P5 enforces approvals while P6 and P8 are expected to enable card-confirmation and conflict-check enforcement respectively.
 3. **Domain and integration services:** pure intent normalization, code binding, metadata rules, window conversion, SQL extraction, hashing, and deterministic deployment orchestration live under `web/domain/`. Oracle registry-v2 operations live under `web/adapters/oracle_repo.py`; Oracle-backed metadata lookups, plan rendering, explanation-code search, registry analytics, external text-to-SQL calls, and alert processing remain under `web/services/`.
 4. **Persistence:** SQLite stores LangGraph checkpoints in `STATE_DIR/checkpoints.sqlite`; workflow, revision, card-audit, workflow-event, and composite-key chat-sidebar data live in `STATE_DIR/app_state.sqlite`. Oracle stores source/lookups, scenario definitions and governance records, and generated alerts.
 
@@ -31,8 +31,8 @@ The service is synchronous at several integration boundaries despite async HTTP 
 | `services/aml_builder/web/api/dependencies.py` | Validates BFF service-token/identity headers and rejects body/path ID mismatches. |
 | `services/aml_builder/web/api/routes/me.py` | `GET /me/permissions` returns the caller's YAML policy role and allowed actions. |
 | `services/aml_builder/web/api/routes/chat.py` | `POST /chat/stream`; converts graph messages and selected tool results to SSE events. |
-| `services/aml_builder/web/api/routes/workflow.py` | Own-chat workflow state, revision summaries, and revision detail endpoints. |
-| `services/aml_builder/web/api/routes/sessions.py` | Checkpoint-backed history reconstruction and sidebar list/rename/pin/soft-delete endpoints. |
+| `services/aml_builder/web/api/routes/workflow.py` | Own-chat workflow state, revision summaries/details, hash-bound approval actions, and authenticated UI-copy endpoint. |
+| `services/aml_builder/web/api/routes/sessions.py` | Checkpoint-backed conversation-text reconstruction and sidebar list/rename/pin/soft-delete endpoints; current artifacts come from workflow state. |
 | `services/aml_builder/web/api/routes/deploy.py` | Direct side-panel deployment from the current typed workflow revision through `DeployService`; returns the deployment receipt. |
 | `services/aml_builder/web/api/codec.py` | Versioned tool-result envelope, per-tool payload models, and legacy checkpoint decoding. |
 | `services/aml_builder/web/api/sse_mapper.py` | Maps decoded tool results to the existing UI-visible SSE events. |
@@ -47,7 +47,7 @@ The service is synchronous at several integration boundaries despite async HTTP 
 | `services/aml_builder/web/domain/window.py` | Shared pure time-window conversion used by the tool and deploy route. |
 | `services/aml_builder/web/domain/hashing.py` | Canonical SQL normalization and stable JSON SHA-256 hashing. |
 | `services/aml_builder/web/domain/policy.py` | YAML-backed role lookup, action authorization, and own-chat read scope. |
-| `services/aml_builder/web/domain/deploy_service.py` | Hard deployment guards, observe/enforce approval behavior, idempotent retry recovery, and receipt construction. |
+| `services/aml_builder/web/domain/deploy_service.py` | Hard deployment guards, per-gate approval enforcement, shared deploy-blocker calculation, idempotent retry recovery, and receipt construction. |
 | `services/aml_builder/web/adapters/oracle_repo.py` | Create-if-missing registry-v2 schema and transactional version, metadata, parent-status, and audit writes. |
 | `services/aml_builder/web/services/schemas.py` | `AMLIntent` domain contract plus chat and SSE Pydantic models. |
 | `services/aml_builder/web/services/plan_renderer.py` | Deterministic 11-section Markdown plan renderer. |
@@ -107,10 +107,13 @@ $env:PYTHONPATH = "services\aml_builder"
 | `GET /health` | Returns static service/version health data. |
 | `GET /me/permissions` | Requires BFF identity headers; returns policy role and allowed actions. |
 | `POST /chat/stream` | Runs the ReAct graph and streams SSE. |
-| `GET /workflow/{project_id}/{chat_id}/{user_id}/state` | Returns current stage, current revision summary, pending-card slot, and history summaries without payloads. |
+| `GET /workflow/{project_id}/{chat_id}/{user_id}/state` | Returns current stage, pending-card slot, revision summaries, `can_deploy` and typed blockers; `include_current_revision=true` includes the current payload. |
+| `POST /workflow/{project_id}/{chat_id}/{user_id}/actions/approve_plan` | Approves the current plan only when `revision_id` and `expected_hash` match. Requires `scenario.create`. |
+| `POST /workflow/{project_id}/{chat_id}/{user_id}/actions/approve_result` | Approves the successful shadow result only when `revision_id` and `expected_hash` match. Requires `scenario.create`. |
+| `GET /ui/copy` | Returns the authenticated YAML UI-copy catalog. |
 | `GET /workflow/{project_id}/{chat_id}/{user_id}/revisions` | Lists current, historical, and evicted revision summaries without payloads. |
 | `GET /workflow/{project_id}/{chat_id}/{user_id}/revisions/{revision_id}` | Returns one full revision after checking chat ownership. |
-| `GET /chat/{project_id}/{chat_id}/{user_id}/history` | Reconstructs user/assistant turns and artifacts from the graph checkpoint. |
+| `GET /chat/{project_id}/{chat_id}/{user_id}/history` | Reconstructs user/assistant text from the graph checkpoint; artifacts are read from the current workflow revision. |
 | `GET /chats/user/{user_id}/list` | Lists non-deleted sidebar sessions, optionally filtered by project query parameter. |
 | `DELETE /chat/{project_id}/{chat_id}/{user_id}` | Soft-deletes sidebar metadata only. |
 | `PUT /chat/{project_id}/{chat_id}/{user_id}/rename` | Renames sidebar metadata. |
