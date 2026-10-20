@@ -14,7 +14,7 @@ def test_direct_route_uses_current_revision_and_returns_extra_receipt(monkeypatc
 
     class FakeWorkflowRepo:
         def get_workflow(self, _thread_id):
-            return object()
+            return SimpleNamespace(parent_scenario_id="PRD_ABCDEF12_V1", parent_version=1)
 
         def current(self, _thread_id):
             return SimpleNamespace(revision_id="rev-current")
@@ -55,6 +55,7 @@ def test_direct_route_uses_current_revision_and_returns_extra_receipt(monkeypatc
         project_id="project",
         metadata_json={"COUNTRY_CODE": 1},
         revision_id="rev-current",
+        change_reason="Approved revised threshold",
     )
     coroutine = deploy_route.deploy_scenario(request, Identity("user", "", "project"))
     try:
@@ -64,6 +65,9 @@ def test_direct_route_uses_current_revision_and_returns_extra_receipt(monkeypatc
 
     assert calls["deploy"]["thread_id"] == "project_chat_user"
     assert calls["deploy"]["revision_id"] == "rev-current"
+    assert calls["deploy"]["parent_scenario_id"] == "PRD_ABCDEF12_V1"
+    assert calls["deploy"]["parent_version"] == 1
+    assert calls["deploy"]["change_reason"] == "Approved revised threshold"
     assert response.success is True
     assert response.scenario_id == "PRD_ABCDEF12_V1"
     assert response.receipt == {"revision_id": "rev-current"}

@@ -68,6 +68,8 @@ from services.aml_builder.web.services.scenario_registry_analytics import (
     get_registry_statistics,
     get_alert_telemetry,
     get_scenario_full_details,
+    list_scenario_versions,
+    compare_scenario_versions,
 )
 
 logger = logging.getLogger(__name__)
@@ -900,10 +902,12 @@ def persist_and_validate_scenario_in_dwh(
 @tool
 def query_production_scenario_registry(
     query_type: Literal[
-        "semantic_search", "get_statistics", "get_alert_metrics", "get_scenario_detail"
+        "semantic_search", "get_statistics", "get_alert_metrics", "get_scenario_detail",
+        "list_versions", "compare_versions",
     ],
     search_text: Optional[str] = None,
     scenario_id: Optional[str] = None,
+    compare_to_scenario_id: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     customer_number: Optional[str] = None,
@@ -931,6 +935,9 @@ def query_production_scenario_registry(
         `date_to` ('YYYY-MM-DD').
       - 'get_scenario_detail': Full record for one scenario — requires `scenario_id`
         (e.g. 'PRD_50FC063C').
+      - 'list_versions': All versions for the key containing `scenario_id`, newest first.
+      - 'compare_versions': Deterministic stored-JSON diff between `scenario_id` and
+        `compare_to_scenario_id` (both versions must share a stable key).
 
     Args:
         query_type (str): Which of the 4 modes to run.
@@ -986,6 +993,16 @@ def query_production_scenario_registry(
                 if detail is not None
                 else {"error": f"No scenario found with scenario_id='{scenario_id}'."}
             )
+
+        elif query_type == "list_versions":
+            if not scenario_id:
+                return json.dumps({"error": "scenario_id is required for query_type='list_versions'."})
+            result = list_scenario_versions(scenario_id)
+
+        elif query_type == "compare_versions":
+            if not scenario_id or not compare_to_scenario_id:
+                return json.dumps({"error": "scenario_id and compare_to_scenario_id are required for query_type='compare_versions'."})
+            result = compare_scenario_versions(scenario_id, compare_to_scenario_id)
 
         else:
             return json.dumps({"error": f"Unknown query_type: '{query_type}'."})

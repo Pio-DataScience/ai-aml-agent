@@ -44,6 +44,7 @@ class ConflictChecker:
         scenario_key: str | None = None,
         revision_id: str | None = None,
         provisional: bool = False,
+        exclude_scenario_ids: set[str] | None = None,
     ) -> dict[str, Any]:
         """Build and compare an intent signature, returning an unavailable result on read failure.
 
@@ -65,6 +66,7 @@ class ConflictChecker:
             scenario_key=scenario_key,
             revision_id=revision_id,
             provisional=provisional,
+            exclude_scenario_ids=exclude_scenario_ids,
         )
 
     def check(
@@ -73,6 +75,7 @@ class ConflictChecker:
         revision_id: str,
         *,
         scenario_key: str | None = None,
+        exclude_scenario_ids: set[str] | None = None,
     ) -> dict[str, Any]:
         """Implement the deployment conflict-gate protocol from stored revision state.
 
@@ -106,6 +109,7 @@ class ConflictChecker:
             scenario_key=scenario_key or workflow.scenario_key,
             revision_id=revision_id,
             provisional=False,
+            exclude_scenario_ids=exclude_scenario_ids,
         )
 
     def check_signature(
@@ -117,6 +121,7 @@ class ConflictChecker:
         scenario_key: str | None = None,
         revision_id: str | None = None,
         provisional: bool = False,
+        exclude_scenario_ids: set[str] | None = None,
     ) -> dict[str, Any]:
         """Compare a canonical signature with live active registry rows.
 
@@ -143,6 +148,8 @@ class ConflictChecker:
             row_thread = str(row.get("thread_id") or "")
             row_key = str(row.get("scenario_key") or "")
             scenario_id = str(row.get("scenario_id") or "")
+            if scenario_id in (exclude_scenario_ids or set()):
+                continue
             if thread_id and row_thread == thread_id:
                 continue
             existing = _parse_signature(row.get("signature_json"))

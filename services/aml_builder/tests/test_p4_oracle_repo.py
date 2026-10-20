@@ -101,7 +101,9 @@ def test_application_adapter_source_has_no_forbidden_schema_or_row_removal_sql()
     source_paths = [
         *((web_root / "adapters").glob("*.py")),
         web_root / "domain" / "deploy_service.py",
+        web_root / "domain" / "versioning_service.py",
         web_root / "api" / "routes" / "deploy.py",
+        web_root / "api" / "routes" / "workflow.py",
     ]
     for prohibited in ("DELETE FROM", "DROP TABLE", "DROP INDEX", "TRUNCATE", "ALTER TABLE"):
         for source_path in source_paths:

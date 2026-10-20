@@ -32,6 +32,7 @@ class DeployRequest(BaseModel):
     project_id: str = Field(..., description="Trusted BFF project ID.")
     metadata_json: Dict[str, Any] = Field(..., description="Officer governance metadata JSON.")
     revision_id: Optional[str] = Field(None, description="Current revision shown for deployment.")
+    change_reason: Optional[str] = Field(None, min_length=5, max_length=500)
 
 
 class DeployResponse(BaseModel):
@@ -92,6 +93,9 @@ async def deploy_scenario(
             actor_id=identity.user_id,
             actor_role=authorize_role(identity),
             metadata=request.metadata_json,
+            parent_scenario_id=workflow.parent_scenario_id,
+            parent_version=workflow.parent_version,
+            change_reason=request.change_reason,
         )
     except (DeployError, RegistrySchemaError, RuntimeError) as exc:
         code = getattr(exc, "code", "DEPLOY_FAILED")
@@ -101,6 +105,7 @@ async def deploy_scenario(
             "REVISION_STALE", "CARD_PENDING", "CHAT_LOCKED_DEPLOYED",
             "DUPLICATE_ACTIVE_SIGNATURE", "REGISTRY_SCHEMA_INCOMPATIBLE",
             "CONFLICT_BLOCKED", "CONFLICT_ACK_REQUIRED", "CONFLICT_CHECK_UNAVAILABLE",
+            "REVISE_STALE", "IDENTICAL_TO_PARENT", "VERSION_STALE",
         }:
             http_status = status.HTTP_409_CONFLICT
         else:

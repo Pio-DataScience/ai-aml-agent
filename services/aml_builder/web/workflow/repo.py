@@ -278,7 +278,83 @@ class WorkflowRepo:
             ),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
+            parent_scenario_id=row["parent_scenario_id"],
+            parent_version=row["parent_version"],
         )
+
+    def find_open_child_chat(
+        self, parent_scenario_id: str, parent_version: int, user_id: str
+    ) -> dict[str, Any] | None:
+        """Return this user's undeployed child workflow for the exact parent."""
+        self.initialize()
+        with self._connection() as connection:
+            row = connection.execute(
+                """SELECT chat_id,project_id,user_id,parent_scenario_id,parent_version
+                FROM scenario_workflow WHERE parent_scenario_id=? AND parent_version=?
+                AND user_id=? AND locked=0 ORDER BY created_at LIMIT 1""",
+                (parent_scenario_id, parent_version, user_id),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def create_version_chat(
+        self,
+        *,
+        project_id: str,
+        chat_id: str,
+        user_id: str,
+        scenario_key: str,
+        scenario_id: str,
+        parent_scenario_id: str,
+        parent_version: int,
+        stage: str,
+        pending_card: dict[str, Any],
+        title: str,
+        actor: str,
+    ) -> dict[str, Any]:
+        """Atomically create a new version chat, its pending card, and sidebar row."""
+        self.initialize()
+        thread_id = f"{project_id}_{chat_id}_{user_id}"
+        now = _now()
+        card = dict(pending_card)
+        card["created_at"] = now
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                """SELECT chat_id,project_id,user_id,parent_scenario_id,parent_version
+                FROM scenario_workflow WHERE parent_scenario_id=? AND parent_version=?
+                AND user_id=? AND locked=0 ORDER BY created_at LIMIT 1""",
+                (parent_scenario_id, parent_version, user_id),
+            ).fetchone()
+            if existing:
+                connection.commit()
+                return dict(existing)
+            connection.execute(
+                """INSERT INTO scenario_workflow
+                (thread_id,project_id,chat_id,user_id,stage,locked,version,scenario_id,
+                 scenario_key,parent_scenario_id,parent_version,pending_card_json,created_at,updated_at)
+                VALUES(?,?,?,?,?,0,1,?,?,?,?,?,?,?)""",
+                (thread_id, project_id, chat_id, user_id, stage, scenario_id, scenario_key,
+                 parent_scenario_id, parent_version, json.dumps(card, ensure_ascii=False), now, now),
+            )
+            connection.execute(
+                """INSERT INTO chat_sessions(project_id,chat_id,user_id,title,pinned,deleted,created_at,updated_at)
+                VALUES(?,?,?,?,0,0,?,?)""",
+                (project_id, chat_id, user_id, title, now, now),
+            )
+            self._event(
+                connection, thread_id, actor, "version_chat_created", None, stage,
+                {"parent_scenario_id": parent_scenario_id, "parent_version": parent_version,
+                 "scenario_key": scenario_key, "reserved_version": parent_version + 1},
+            )
+            connection.commit()
+            return {"chat_id": chat_id, "project_id": project_id, "user_id": user_id,
+                    "parent_scenario_id": parent_scenario_id, "parent_version": parent_version}
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
 
     def create_revision(
         self,

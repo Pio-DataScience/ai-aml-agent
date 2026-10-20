@@ -51,13 +51,12 @@ def get_active_scenarios(scenario_id: Optional[str] = None) -> List[Dict[str, An
     LEFT JOIN PIO_AML_AGENT_SCENARIOS s
         ON p.SCENARIO_ID = s.SCENARIO_CODE
     WHERE p.IS_ACTIVE = 1
+      AND NVL(s.ACTIVE_FLAG, '1') = '1'
     """
     params: Dict[str, Any] = {}
     if scenario_id:
         sql += " AND p.SCENARIO_ID = :sid"
         params["sid"] = scenario_id.strip()
-    else:
-        sql += " AND NVL(s.ACTIVE_FLAG, '1') = '1'"
 
     sql += " ORDER BY p.CREATED_AT DESC"
 

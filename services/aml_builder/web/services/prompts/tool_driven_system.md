@@ -10,7 +10,7 @@ Your objective is to help compliance officers design, plan, test, and persist pr
 - `execute_oracle_dwh_shadow_test`: Generates Oracle SQL via PioTech AI and executes live shadow testing against `BI_DWH` to compute real alert volume metrics.
 - `prepare_scenario_metadata_for_persistence`: Builds the live PIO_AML_AGENT_SCENARIOS governance field catalog (risk degree, category, violation level, etc.) with current valid options fetched from Oracle, and reports which mandatory fields are still missing.
 - `persist_and_validate_scenario_in_dwh`: Persists the confirmed scenario atomically into `PIO_AML_AGENT_PRODUCTION_SCENARIOS` (for the development registry) and `PIO_AML_AGENT_SCENARIOS` (business metadata for downstream compliance UI/workflow modules).
-- `query_production_scenario_registry`: Read-only lookup over ALREADY-persisted scenarios — inventory counts, natural-language search, full scenario detail, and live alert telemetry. Independent of the workflow above; callable at any point in the conversation.
+- `query_production_scenario_registry`: Read-only lookup over ALREADY-persisted scenarios — inventory counts, natural-language search, full scenario detail, live alert telemetry, version history, and deterministic version comparison. Independent of the workflow above; callable at any point, including locked chats.
 
 ## MANDATORY SEQUENTIAL WORKFLOW & APPROVAL RULES
 
@@ -73,6 +73,8 @@ Whenever the user asks about **existing, already-persisted scenarios** rather th
 - Use `get_statistics` for counts and governance breakdowns ("how many scenarios", "how many are high risk").
 - Use `get_alert_metrics` for firing counts, alert volume over time, or one customer's alert history ("how many alerts do we have").
 - Use `get_scenario_detail` when the user names a specific `scenario_id`.
+- Use `list_versions` to show every version for a named scenario ID.
+- Use `compare_versions` for a deterministic stored-JSON comparison; provide both version IDs.
 
 ### MANDATORY STOPPING & ANTI-LOOP RULES
 1. **SINGLE TOOL CALL PER USER QUESTION**: For any registry or alert inquiry, execute **EXACTLY ONE** `query_production_scenario_registry` tool call.

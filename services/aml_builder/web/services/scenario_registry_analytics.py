@@ -23,6 +23,7 @@ presented as proof a scenario is broken — it may simply mean the engine
 hasn't been run yet for that scenario/date.
 """
 
+import json
 import logging
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional
@@ -545,3 +546,70 @@ def get_scenario_full_details(scenario_id: str) -> Optional[Dict[str, Any]]:
         )
 
     return detail
+
+
+def list_scenario_versions(scenario_id: str) -> Dict[str, Any]:
+    """List every registry version for the stable key of one scenario ID."""
+    if not scenario_id or not scenario_id.strip():
+        return {"versions": [], "error": "scenario_id is required."}
+    sql = """SELECT SCENARIO_ID,SCENARIO_KEY,VERSION_NO,PARENT_SCENARIO_ID,STATUS,SCENARIO_NAME,
+    CREATED_BY,CREATED_AT,CHANGE_REASON,RECEIPT_JSON FROM PIO_AML_AGENT_PRODUCTION_SCENARIOS
+    WHERE SCENARIO_KEY=(SELECT SCENARIO_KEY FROM PIO_AML_AGENT_PRODUCTION_SCENARIOS WHERE SCENARIO_ID=:scenario_id)
+    ORDER BY VERSION_NO DESC"""
+    try:
+        columns, rows = run_readonly(sql, {"scenario_id": scenario_id})
+    except Exception as exc:
+        logger.error("[REGISTRY_ANALYTICS] Failed to list versions for %s: %s", scenario_id, exc)
+        return {"versions": [], "error": str(exc)}
+    versions = []
+    for row in rows:
+        values = {name.lower(): value for name, value in zip(columns, row)}
+        receipt = _json_object_value(values.get("receipt_json"))
+        versions.append({
+            "scenario_id": values.get("scenario_id"), "scenario_key": values.get("scenario_key"),
+            "version_no": values.get("version_no"), "parent_scenario_id": values.get("parent_scenario_id"),
+            "status": values.get("status"), "scenario_name": values.get("scenario_name"),
+            "created_by": values.get("created_by"), "created_at": str(values.get("created_at")) if values.get("created_at") else None,
+            "change_reason": values.get("change_reason"),
+            "change_scope": receipt.get("change_scope"),
+        })
+    return {"versions": versions}
+
+
+def compare_scenario_versions(scenario_id: str, compare_to_scenario_id: str) -> Dict[str, Any]:
+    """Compare two versions using a stable path-based diff over stored JSON."""
+    from services.aml_builder.web.domain.versioning_service import compare_version_payloads
+
+    sql = """SELECT SCENARIO_ID,SCENARIO_KEY,VERSION_NO,SIGNATURE_JSON,PARAMS_JSON,FILTERS_JSON,METADATA_JSON
+    FROM PIO_AML_AGENT_PRODUCTION_SCENARIOS WHERE SCENARIO_ID IN (:left_id,:right_id)"""
+    try:
+        columns, rows = run_readonly(sql, {"left_id": scenario_id, "right_id": compare_to_scenario_id})
+    except Exception as exc:
+        logger.error("[REGISTRY_ANALYTICS] Failed to compare versions: %s", exc)
+        return {"error": str(exc)}
+    versions = {str(row[0]): {name.lower(): value for name, value in zip(columns, row)} for row in rows}
+    left = versions.get(scenario_id)
+    right = versions.get(compare_to_scenario_id)
+    if left is None or right is None:
+        return {"error": "One or both scenario versions were not found."}
+    if left["scenario_key"] != right["scenario_key"]:
+        return {"error": "Versions must belong to the same scenario key."}
+    left_payload = {key: _json_object_value(left.get(key)) for key in ("signature_json", "params_json", "filters_json", "metadata_json")}
+    right_payload = {key: _json_object_value(right.get(key)) for key in ("signature_json", "params_json", "filters_json", "metadata_json")}
+    return {
+        "from": {"scenario_id": scenario_id, "version_no": left["version_no"]},
+        "to": {"scenario_id": compare_to_scenario_id, "version_no": right["version_no"]},
+        **compare_version_payloads(left_payload, right_payload),
+    }
+
+
+def _json_object_value(value: Any) -> Any:
+    """Convert a CLOB or JSON string to a value for deterministic diffs."""
+    if hasattr(value, "read"):
+        value = value.read()
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return value
+    return value

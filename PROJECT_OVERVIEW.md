@@ -1,6 +1,6 @@
 # Canonical Project Overview
 
-> **Status:** Canonical repository-level technical overview, verified against the working-tree implementation on 2026-10-19.
+> **Status:** Canonical repository-level technical overview, verified against the working-tree implementation on 2026-10-20.
 >
 > Read this after the applicable `AGENTS.md`. Use it to navigate and reason about the system, then inspect the current code, tests, schemas, and configuration relevant to the task. Those remain authoritative. Claims below are **Verified** unless explicitly marked **Inferred** or **Unclear**.
 
@@ -17,8 +17,8 @@ Primary implementation evidence: `services/aml_builder/web/api/main.py`, `servic
 The application has four practical layers:
 
 1. **HTTP interface:** FastAPI startup and routes under `services/aml_builder/web/api/` expose chat/SSE, workflow state and revision reads, typed approval actions, authenticated UI copy, session history and sidebar operations, direct deployment, alert-engine execution, and health.
-2. **Agent orchestration:** `services/aml_builder/web/services/graph.py:get_tool_driven_graph` builds one process-level ReAct agent with six tools, an `AsyncSqliteSaver`, and a pre-model hook that adds current workflow context and stubs superseded tool results in model input. Tool selection remains LLM-driven; deterministic workflow state and guards are enforced per policy gate. P5 enforces approvals and P6 enforces parameter-card confirmation; P6b creates copied-forward revisions after a plan exists; P8 remains responsible for conflict-check enforcement.
-3. **Domain and integration services:** pure intent normalization, catalog-driven filter resolution, SQL filter verification, code binding, metadata rules, window conversion, SQL extraction, hashing, and deterministic deployment orchestration live under `web/domain/`. Oracle registry-v2 operations live under `web/adapters/oracle_repo.py`; Oracle-backed metadata lookups, plan rendering, explanation-code search, registry analytics, external text-to-SQL calls, and alert processing remain under `web/services/`.
+2. **Agent orchestration:** `services/aml_builder/web/services/graph.py:get_tool_driven_graph` builds one process-level ReAct agent with six tools, an `AsyncSqliteSaver`, and a pre-model hook that adds current workflow context and stubs superseded tool results in model input. Tool selection remains LLM-driven; deterministic workflow state and guards are enforced per policy gate. P5 enforces approvals, P6 enforces parameter-card confirmation, P6b creates copied-forward revisions after a plan exists, P8 enforces conflict checks, and P9 adds typed version actions outside the LLM tool surface.
+3. **Domain and integration services:** pure intent normalization, catalog-driven filter resolution, SQL filter verification, code binding, metadata rules, window conversion, SQL extraction, hashing, deterministic deployment, and version lifecycle rules live under `web/domain/`. Oracle registry-v2 reads and transactional version/status/audit writes live under `web/adapters/oracle_repo.py`; Oracle-backed metadata lookups, plan rendering, explanation-code search, registry analytics, external text-to-SQL calls, and alert processing remain under `web/services/`.
 4. **Persistence:** SQLite stores LangGraph checkpoints in `STATE_DIR/checkpoints.sqlite`; workflow, revision, card-audit, workflow-event, and composite-key chat-sidebar data live in `STATE_DIR/app_state.sqlite`. Oracle stores source/lookups, scenario definitions and governance records, and generated alerts.
 
 The service is synchronous at several integration boundaries despite async HTTP routes: Oracle helpers, OpenAI/LangChain invocations inside tools, the `httpx.Client` call to the text-to-SQL service, and alert-engine execution are synchronous. FastAPI engine routes invoke that work directly rather than enqueueing it.
@@ -31,7 +31,7 @@ The service is synchronous at several integration boundaries despite async HTTP 
 | `services/aml_builder/web/api/dependencies.py` | Validates BFF service-token/identity headers and rejects body/path ID mismatches. |
 | `services/aml_builder/web/api/routes/me.py` | `GET /me/permissions` returns the caller's YAML policy role and allowed actions. |
 | `services/aml_builder/web/api/routes/chat.py` | `POST /chat/stream`; converts graph messages and selected tool results to SSE events. Card-confirmation acknowledgements return a short SSE response without invoking LangGraph or writing a checkpoint. |
-| `services/aml_builder/web/api/routes/workflow.py` | Own-chat workflow state, revision summaries/details, hash-bound approval actions, and authenticated UI-copy endpoint. |
+| `services/aml_builder/web/api/routes/workflow.py` | Own-chat workflow state, revision summaries/details, hash-bound approvals, P9 version creation/rollback/retirement/history, and authenticated UI-copy endpoint. |
 | `services/aml_builder/web/api/routes/sessions.py` | Checkpoint-backed conversation-text reconstruction and sidebar list/rename/pin/soft-delete endpoints; current artifacts come from workflow state. |
 | `services/aml_builder/web/api/routes/deploy.py` | Direct side-panel deployment from the current typed workflow revision through `DeployService`; returns the deployment receipt. |
 | `services/aml_builder/web/api/codec.py` | Versioned tool-result envelope, per-tool payload models, and legacy checkpoint decoding. |
@@ -50,13 +50,14 @@ The service is synchronous at several integration boundaries despite async HTTP 
 | `services/aml_builder/web/domain/hashing.py` | Canonical SQL normalization and stable JSON SHA-256 hashing. |
 | `services/aml_builder/web/domain/policy.py` | YAML-backed role lookup, action authorization, and own-chat read scope. |
 | `services/aml_builder/web/domain/deploy_service.py` | Hard deployment guards, per-gate approval enforcement, shared deploy-blocker calculation, idempotent retry recovery, and receipt construction. |
-| `services/aml_builder/web/adapters/oracle_repo.py` | Create-if-missing registry-v2 schema and transactional version, metadata, parent-status, and audit writes. |
+| `services/aml_builder/web/adapters/oracle_repo.py` | Create-if-missing registry-v2 schema, version/audit reads, and transactional exact-status, paired metadata-flag, parent supersession, and audit writes. |
+| `services/aml_builder/web/domain/versioning_service.py` | Deterministic create-version, rollback, retirement, registry seed validation, and stored-payload comparison rules. |
 | `services/aml_builder/web/services/schemas.py` | `AMLIntent` domain contract plus chat and SSE Pydantic models. |
 | `services/aml_builder/web/services/plan_renderer.py` | Deterministic Markdown plan renderer, including resolved filters. |
 | `services/aml_builder/web/services/explanation_code_search.py` | Oracle-backed explanation-code embedding cache, similarity search, and LLM reranking. |
 | `services/aml_builder/web/services/scenario_metadata.py` | Governance field registry, defaults, live lookup options, normalization, and validation. |
 | `services/aml_builder/web/services/production_registry.py` | Read-only compatibility access; legacy in-place writes are disabled in favor of `DeployService`. |
-| `services/aml_builder/web/services/scenario_registry_analytics.py` | Read-only scenario search, counts, detail, and alert telemetry. |
+| `services/aml_builder/web/services/scenario_registry_analytics.py` | Read-only scenario search, counts, detail, alert telemetry, version listing, and stored-JSON comparison. |
 | `services/aml_builder/web/services/alert_engine.py` | Loads active scenarios, executes saved SQL, and writes alert headers/details. |
 | `services/aml_builder/web/services/oracle.py` | Primary and shadow Oracle pools plus query/transaction helpers. |
 | `services/aml_builder/web/services/session_store.py` | Composite-key `chat_sessions` table and sidebar CRUD in the app-state database. |
@@ -114,6 +115,10 @@ $env:PYTHONPATH = "services\aml_builder"
 | `POST /workflow/{project_id}/{chat_id}/{user_id}/actions/approve_result` | Approves the successful shadow result only when `revision_id` and `expected_hash` match. Requires `scenario.create`. |
 | `POST /workflow/{project_id}/{chat_id}/{user_id}/actions/confirm_params` | Validates explicit values/default choices for the exact pending card, atomically creates or updates the current revision, renders its plan, resolves the card audit, and returns revision/action details. Requires `scenario.create`. |
 | `POST /workflow/{project_id}/{chat_id}/{user_id}/actions/discard_card` | Discards and audits the exact pending card. Requires `scenario.create`. |
+| `POST /workflow/{project_id}/{chat_id}/{user_id}/actions/create_new_version` | Seeds an idempotent child chat from the latest eligible Oracle version row. Requires `scenario.revise`. |
+| `POST /workflow/{project_id}/{chat_id}/{user_id}/actions/rollback_version` | Reactivates one superseded version and supersedes the expected active version atomically. Requires `scenario.rollback` and a reason. |
+| `POST /workflow/{project_id}/{chat_id}/{user_id}/actions/retire_version` | Soft-retires one active version with paired metadata flag and audit updates. Requires `scenario.delete` and a reason. |
+| `GET /workflow/{project_id}/{chat_id}/{user_id}/versions` | Lists all versions and audit summary from the latest version's locked chat. Requires `chat.read`. |
 | `GET /ui/copy` | Returns the authenticated YAML UI-copy catalog. |
 | `GET /workflow/{project_id}/{chat_id}/{user_id}/revisions` | Lists current, historical, and evicted revision summaries without payloads. |
 | `GET /workflow/{project_id}/{chat_id}/{user_id}/revisions/{revision_id}` | Returns one full revision after checking chat ownership. |
@@ -213,7 +218,7 @@ The server validates required parameters independently of the LLM's `ready_for_h
 
 P6 creates the initial revision. Once a plan exists, P6b confirms changed cards by copying the confirmed intent and newly rendered plan into a new current revision; the prior trio remains in history unchanged apart from its lifecycle fields. The operation atomically updates revision history, applies tombstone eviction, writes the card audit, clears the pending card, and advances the workflow pointer. Planless revisions are updated in place. Metadata is re-seeded and edited fields are revalidated before carry-over. P8 computes the canonical signature and conflict report from the confirmed revision, including P7's resolved filters. A blocking identical scenario leaves the parameter card pending; a warning creates a `PARAMS_CONFIRMED` revision without rendering its plan until `acknowledge_conflicts` records the user's choice. The acknowledgement is a SQLite workflow event and is written to the Oracle audit table only with deployment. The `[ACTION] card_confirmed revision N` chat acknowledgement bypasses LangGraph so it is not added to the checkpoint.
 
-P7 includes resolved filters in the card-confirmed revision and its parameter hash. P8 builds each scenario signature from that revision's resolved filters. Its deterministic comparator checks only ACTIVE scenarios, excludes the same workflow thread and same `SCENARIO_KEY`, and uses interval, scope, and filter set relations. An identical copy of a parent scenario key is still blocked as a no-op. Different scenario types are not compared; legacy similarity is informational only. `conflict_report` SSE events and `GET state` expose matches and deterministic field diffs. The current registry API has no scenario-detail read endpoint for this panel, so View scenario presents the scenario ID and diff.
+P7 includes resolved filters in the card-confirmed revision and its parameter hash. P8 builds each scenario signature from that revision's resolved filters. Its deterministic comparator checks only ACTIVE scenarios, excludes the same workflow thread and same `SCENARIO_KEY`, and uses interval, scope, and filter set relations. P9 excludes the version's parent from its own conflict gate, permits a same-signature metadata-only version, and blocks a child only when both signature and metadata hashes match the parent. Different scenario types are not compared; legacy similarity is informational only. `conflict_report` SSE events and `GET state` expose matches and deterministic field diffs. The panel shows stored version history from the latest locked chat.
 
 ### SQL generation and shadow testing
 
@@ -236,25 +241,27 @@ The route and optional persistence tool call `domain/deploy_service.py:DeploySer
 ```text
 validate current revision, pending-card slot, permission, metadata and shadow SQL hash
   -> check plan/result approvals (hard in enforce mode; recorded as would_block in observe)
+  -> for a child version, check the exact latest parent and supersede an active parent first
   -> insert registry version, metadata row and audit row in one Oracle transaction
-  -> optionally supersede one exact parent key in that transaction
   -> lock the workflow revision in SQLite
 ```
 
 `ensure_schema()` creates only missing registry-v2 tables and indexes and inserts the schema-version row when absent. Development registry data uses `PIO_AML_AGENT_PRODUCTION_SCENARIOS` and `PIO_AML_AGENT_SCENARIOS`; the existing shared `PIO_AML_PRODUCTION_SCENARIOS` and `PIO_AML_SCENARIO` are left untouched. Status writes target the deployed parent version and matching agent metadata row by their exact keys.
 
-P3 pre-allocates `PRD_<8_HEX>` stable keys and P4 stores the first version as `PRD_<8_HEX>_V1`. A committed Oracle deployment followed by a failed SQLite lock update is recovered by retry: the existing row is looked up by unique `THREAD_ID`, and only the workflow lock is completed. Oracle and SQLite cannot share one transaction.
+P3 pre-allocates `PRD_<8_HEX>` stable keys and P4 stores the first version as `PRD_<8_HEX>_V1`. P9 creates a child chat from the deployed Oracle JSON snapshot; it does not copy local source workflow rows. The active parent is superseded before a same-signature child is inserted so the active-signature index remains usable. Retired parents stay retired. Rollback and retirement use exact expected-status updates and update the matching metadata `ACTIVE_FLAG` in the same audited Oracle transaction. A committed Oracle deployment followed by a failed SQLite lock update is recovered by retry: the existing row is looked up by unique `THREAD_ID`, and only the workflow lock is completed. Oracle and SQLite cannot share one transaction.
 
-P5 enforces plan/result approvals and P6 enforces card confirmation. P6b keeps those gates enforced and adds bounded revision history. P8 rechecks the registry before deployment: new blocking conflicts refuse deployment, and warning matches require acknowledgement unless prior acknowledgements still cover the same-or-fewer matches. Registry unavailability blocks deployment when `conflict_check_required` and `conflict_check.on_unavailable: block` are set. The deployment receipt contains acknowledgements; each acknowledged match is written as an `OVERRIDE_CONFLICT` row in `PIO_AML_AGENT_SCENARIO_AUDIT` within the registry deployment transaction. The policy now sets `workflow.enforcement.conflict_check: enforce` and `workflow.conflict_check_required: true`.
+P5 enforces plan/result approvals and P6 enforces card confirmation. P6b keeps those gates enforced and adds bounded revision history. P8 rechecks the registry before deployment: new blocking conflicts refuse deployment, and warning matches require acknowledgement unless prior acknowledgements still cover the same-or-fewer matches. Registry unavailability blocks deployment when `conflict_check_required` and `conflict_check.on_unavailable: block` are set. The deployment receipt contains acknowledgements; each acknowledged match is written as an `OVERRIDE_CONFLICT` row in `PIO_AML_AGENT_SCENARIO_AUDIT` within the registry deployment transaction. P9 uses the same conflict rules before rollback, records rollback acknowledgements with the required reason, and keeps the alert engine limited to versions with both active flags set.
 
 ### Existing-scenario queries
 
-`query_production_scenario_registry` dispatches one of four read-only modes:
+`query_production_scenario_registry` dispatches six read-only modes:
 
 - `semantic_search`: fetches current registry text and creates OpenAI embeddings on each request; no registry-search cache.
 - `get_statistics`: inventory, risk/category breakdowns, and lifetime header-alert count.
 - `get_alert_metrics`: header/date/customer telemetry from `PIO_AML_CUSTOMERS`, with per-scenario detail counts.
 - `get_scenario_detail`: registry/governance data plus header-alert count for one ID.
+- `list_versions`: all versions of the stable key for a scenario ID, newest first.
+- `compare_versions`: deterministic path-based diff of stored signature, params, filters, and metadata JSON for two IDs from the same key.
 
 Database operations use `run_readonly`, but semantic search still calls an external embedding API. Several analytics queries catch failures and return partial/empty results. Comments and historical changelog text say telemetry responses include an explanatory note; current return dictionaries do not include that note.
 
@@ -275,7 +282,7 @@ Transaction detail insertion is enabled when output contains `TRA_SEQ1` **or** `
 
 The engine is on demand only. No cron, task scheduler, queue, worker, or automatic invocation exists in this repository. `run_alert_engine.py` accepts `--scenario-id` and `--date`; there is no `--dry-run`. The HTTP request field is `evaluation_date`.
 
-When a specific `scenario_id` is requested, selection still requires `PIO_AML_AGENT_PRODUCTION_SCENARIOS.IS_ACTIVE = 1` but does not apply the governance `PIO_AML_AGENT_SCENARIOS.ACTIVE_FLAG` filter used for the all-scenarios path.
+When a specific `scenario_id` is requested, selection requires both `PIO_AML_AGENT_PRODUCTION_SCENARIOS.IS_ACTIVE = 1` and the governance `PIO_AML_AGENT_SCENARIOS.ACTIVE_FLAG` to be active, just like the all-scenarios path. Superseded and retired versions stop running while past alert rows remain.
 
 ## 7. Data ownership and persistence
 

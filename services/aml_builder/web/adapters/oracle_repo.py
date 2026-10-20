@@ -15,7 +15,7 @@ REGISTRY_COLUMNS = frozenset(
         "SIGNATURE_HASH", "PARAMS_HASH", "PLAN_HASH", "SQL_HASH", "METADATA_HASH",
         "SIGNATURE_JSON", "PARAMS_JSON", "FILTERS_JSON", "METADATA_JSON", "RECEIPT_JSON",
         "SCENARIO_NAME", "SCENARIO_TYPE", "DETECTION_LOGIC", "RAW_SQL",
-        "TIME_WINDOW_DAYS", "CREATED_BY", "CREATED_AT", "UPDATED_BY", "UPDATED_AT",
+        "TIME_WINDOW_DAYS", "CHANGE_REASON", "CREATED_BY", "CREATED_AT", "UPDATED_BY", "UPDATED_AT",
     }
 )
 
@@ -99,6 +99,14 @@ class DuplicateActiveSignatureError(RuntimeError):
     code = "DUPLICATE_ACTIVE_SIGNATURE"
 
 
+class RegistryStaleError(RuntimeError):
+    """An exact-key registry status/version precondition no longer holds."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
 class OracleRegistryRepo:
     """Read and write registry-v2 rows through Oracle transactions."""
 
@@ -164,6 +172,56 @@ class OracleRegistryRepo:
         )
         return _row_dict(columns, rows[0]) if rows else None
 
+    def get_version(self, scenario_id: str) -> dict[str, Any] | None:
+        """Return one exact version with all stored comparison and seed JSON."""
+        columns, rows = run_readonly(
+            """SELECT SCENARIO_ID,SCENARIO_KEY,VERSION_NO,PARENT_SCENARIO_ID,STATUS,IS_ACTIVE,
+            THREAD_ID,REVISION_ID,REV_NO,SIGNATURE_HASH,PARAMS_HASH,PLAN_HASH,SQL_HASH,METADATA_HASH,
+            SIGNATURE_JSON,PARAMS_JSON,FILTERS_JSON,METADATA_JSON,RECEIPT_JSON,CHANGE_REASON,
+            SCENARIO_NAME,SCENARIO_TYPE,DETECTION_LOGIC,RAW_SQL,TIME_WINDOW_DAYS,CREATED_BY,CREATED_AT,
+            UPDATED_BY,UPDATED_AT FROM PIO_AML_AGENT_PRODUCTION_SCENARIOS WHERE SCENARIO_ID=:scenario_id""",
+            {"scenario_id": scenario_id},
+        )
+        return _row_dict(columns, rows[0]) if rows else None
+
+    def list_versions(self, scenario_key: str) -> list[dict[str, Any]]:
+        """Return every version for a stable key, newest first."""
+        columns, rows = run_readonly(
+            """SELECT SCENARIO_ID,SCENARIO_KEY,VERSION_NO,PARENT_SCENARIO_ID,STATUS,IS_ACTIVE,
+            SIGNATURE_HASH,METADATA_HASH,SIGNATURE_JSON,PARAMS_JSON,FILTERS_JSON,METADATA_JSON,
+            RECEIPT_JSON,CHANGE_REASON,SCENARIO_NAME,SCENARIO_TYPE,CREATED_BY,CREATED_AT,UPDATED_BY,UPDATED_AT
+            FROM PIO_AML_AGENT_PRODUCTION_SCENARIOS WHERE SCENARIO_KEY=:scenario_key
+            ORDER BY VERSION_NO DESC""",
+            {"scenario_key": scenario_key},
+        )
+        return [_row_dict(columns, row) for row in rows]
+
+    def latest_version(self, scenario_key: str) -> dict[str, Any] | None:
+        """Return the most recently numbered version for a stable key."""
+        rows = self.list_versions(scenario_key)
+        return rows[0] if rows else None
+
+    def latest_active_version(self, scenario_key: str) -> dict[str, Any] | None:
+        """Return the active version for a key, if one exists."""
+        columns, rows = run_readonly(
+            """SELECT SCENARIO_ID,SCENARIO_KEY,VERSION_NO,STATUS,IS_ACTIVE,SIGNATURE_HASH,
+            SIGNATURE_JSON,METADATA_JSON FROM PIO_AML_AGENT_PRODUCTION_SCENARIOS
+            WHERE SCENARIO_KEY=:scenario_key AND STATUS='ACTIVE'""",
+            {"scenario_key": scenario_key},
+        )
+        if len(rows) > 1:
+            raise RegistrySchemaError("More than one active version exists for a scenario key.")
+        return _row_dict(columns, rows[0]) if rows else None
+
+    def list_version_audit(self, scenario_key: str) -> list[dict[str, Any]]:
+        """Return creation and status events for all versions of a key."""
+        columns, rows = run_readonly(
+            """SELECT SCENARIO_ID,ACTION,ACTOR,ACTOR_ROLE,TS,FROM_STATUS,TO_STATUS,REASON
+            FROM PIO_AML_AGENT_SCENARIO_AUDIT WHERE SCENARIO_KEY=:scenario_key ORDER BY TS DESC""",
+            {"scenario_key": scenario_key},
+        )
+        return [_row_dict(columns, row) for row in rows]
+
     def get_active_by_key(self, scenario_key: str) -> list[dict[str, Any]]:
         """Return active versions for one stable scenario key."""
         columns, rows = run_readonly(
@@ -188,6 +246,27 @@ class OracleRegistryRepo:
             with atomic_connection() as connection:
                 cursor = connection.cursor()
                 if row.get("parent_scenario_id"):
+                    cursor.execute(
+                        "SELECT SCENARIO_KEY,VERSION_NO,STATUS FROM PIO_AML_AGENT_PRODUCTION_SCENARIOS WHERE SCENARIO_ID=:scenario_id",
+                        {"scenario_id": row["parent_scenario_id"]},
+                    )
+                    parent = cursor.fetchone()
+                    cursor.execute(
+                        "SELECT MAX(VERSION_NO) FROM PIO_AML_AGENT_PRODUCTION_SCENARIOS WHERE SCENARIO_KEY=:scenario_key",
+                        {"scenario_key": row["scenario_key"]},
+                    )
+                    latest = cursor.fetchone()
+                    expected_parent_status = str(row.get("parent_status") or "ACTIVE").upper()
+                    if (
+                        parent is None
+                        or str(parent[0]) != str(row["scenario_key"])
+                        or int(parent[1]) != int(row["parent_version"])
+                        or int((latest or [None])[0] or 0) != int(row["parent_version"])
+                        or str(parent[2]).upper() != expected_parent_status
+                        or expected_parent_status not in {"ACTIVE", "RETIRED"}
+                    ):
+                        raise RegistryStaleError("REVISE_STALE", "Start again from the latest version.")
+                if row.get("parent_scenario_id") and str(row.get("parent_status") or "ACTIVE").upper() == "ACTIVE":
                     self.supersede(cursor, row)
                 cursor.execute(
                     """INSERT INTO PIO_AML_AGENT_PRODUCTION_SCENARIOS
@@ -224,6 +303,10 @@ class OracleRegistryRepo:
                         },
                     )
             return row
+        except RegistryStaleError as exc:
+            if row.get("parent_scenario_id") and exc.code == "VERSION_STALE":
+                raise RegistryStaleError("REVISE_STALE", "Start again from the latest version.") from exc
+            raise
         except Exception as exc:
             if "ORA-00001" in str(exc).upper() or "UNIQUE CONSTRAINT" in str(exc).upper():
                 raise DuplicateActiveSignatureError("DUPLICATE_ACTIVE_SIGNATURE") from exc
@@ -246,38 +329,85 @@ class OracleRegistryRepo:
         institution_code: Any = None,
         from_status: str | None = None,
         audit_action: str | None = None,
+        audit_detail: dict[str, Any] | None = None,
     ) -> None:
         """Set one exact-key status on a caller-owned audited transaction."""
-        if status != "SUPERSEDED" or from_status != "ACTIVE" or audit_action != "SUPERSEDE":
+        transitions = {
+            ("ACTIVE", "SUPERSEDED", "SUPERSEDE"),
+            ("ACTIVE", "SUPERSEDED", "ROLLBACK"),
+            ("SUPERSEDED", "ACTIVE", "ROLLBACK"),
+            ("ACTIVE", "RETIRED", "RETIRE"),
+        }
+        if (from_status, status, audit_action) not in transitions:
             raise ValueError(f"Unsupported scenario status: {status}")
-        active = 0
-        scenario_key = _lookup_scenario_key(cursor, scenario_id)
-        from_clause = " AND STATUS=:from_status" if from_status else ""
-        binds = {"status": status, "active": active, "actor": actor, "scenario_id": scenario_id}
-        if from_status:
-            binds["from_status"] = from_status
+        active = int(status == "ACTIVE")
+        expected_active = int(from_status == "ACTIVE")
         cursor.execute(
-            "UPDATE PIO_AML_AGENT_PRODUCTION_SCENARIOS SET STATUS=:status, IS_ACTIVE=:active, UPDATED_BY=:actor, UPDATED_AT=SYSTIMESTAMP WHERE SCENARIO_ID=:scenario_id" + from_clause,
+            "SELECT SCENARIO_KEY,METADATA_JSON FROM PIO_AML_AGENT_PRODUCTION_SCENARIOS WHERE SCENARIO_ID=:scenario_id",
+            {"scenario_id": scenario_id},
+        )
+        identity_row = cursor.fetchone()
+        if identity_row is None:
+            raise RegistryStaleError("VERSION_STALE", "The scenario status changed. Refresh version history and try again.")
+        scenario_key = str(identity_row[0])
+        metadata_value = identity_row[1]
+        if hasattr(metadata_value, "read"):
+            metadata_value = metadata_value.read()
+        try:
+            metadata = json.loads(metadata_value) if isinstance(metadata_value, str) else metadata_value
+        except json.JSONDecodeError:
+            metadata = {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+        country = country_code if country_code is not None else _value(metadata, "COUNTRY_CODE", settings.AML_COUNTRY_CODE)
+        institution = institution_code if institution_code is not None else _value(metadata, "INST_CODE", settings.AML_INST_CODE)
+        binds = {
+            "status": status, "active": active, "actor": actor,
+            "scenario_id": scenario_id, "from_status": from_status,
+        }
+        cursor.execute(
+            "UPDATE PIO_AML_AGENT_PRODUCTION_SCENARIOS SET STATUS=:status, IS_ACTIVE=:active, UPDATED_BY=:actor, UPDATED_AT=SYSTIMESTAMP WHERE SCENARIO_ID=:scenario_id AND STATUS=:from_status",
             binds,
         )
         if cursor.rowcount != 1:
-            raise LookupError("Scenario was not found by primary key")
+            raise RegistryStaleError("VERSION_STALE", "The scenario status changed. Refresh version history and try again.")
         cursor.execute(
-            "UPDATE PIO_AML_AGENT_SCENARIOS SET ACTIVE_FLAG=:active, UPDATED_BY=:actor, UPDATED_DATE=SYSDATE WHERE COUNTRY_CODE=:country AND INST_CODE=:institution AND SCENARIO_CODE=:scenario_id",
+            "UPDATE PIO_AML_AGENT_SCENARIOS SET ACTIVE_FLAG=:active, UPDATED_BY=:actor, UPDATED_DATE=SYSDATE WHERE COUNTRY_CODE=:country AND INST_CODE=:institution AND SCENARIO_CODE=:scenario_id AND ACTIVE_FLAG=:expected_active",
             {
                 "active": str(active),
                 "actor": _number(actor, settings.AML_CREATED_BY),
-                "country": country_code if country_code is not None else settings.AML_COUNTRY_CODE,
-                "institution": institution_code if institution_code is not None else settings.AML_INST_CODE,
+                "country": country,
+                "institution": institution,
                 "scenario_id": scenario_id,
+                "expected_active": str(expected_active),
             },
         )
         if cursor.rowcount != 1:
-            raise LookupError("Scenario metadata was not found by its composite primary key")
+            raise RegistryStaleError("VERSION_STALE", "The scenario metadata status changed. Refresh version history and try again.")
         self._append_audit_in_transaction(
             cursor,
-            {"scenario_id": scenario_id, "scenario_key": scenario_key, "audit_action": audit_action or status, "actor_id": actor, "actor_role": actor_role, "reason": reason, "from_status": from_status, "to_status": status},
+            {"scenario_id": scenario_id, "scenario_key": scenario_key, "audit_action": audit_action or status, "actor_id": actor, "actor_role": actor_role, "reason": reason, "from_status": from_status, "to_status": status, "audit_diff_json": audit_detail or {}},
         )
+
+    def set_statuses(
+        self,
+        changes: list[tuple[str, str, str]],
+        *,
+        actor: str,
+        actor_role: str,
+        reason: str,
+        audit_action: str,
+        audit_detail: dict[str, Any] | None = None,
+    ) -> None:
+        """Apply one or more exact-key transitions and audits atomically."""
+        with atomic_connection() as connection:
+            cursor = connection.cursor()
+            for scenario_id, expected, status in changes:
+                self.set_status(
+                    cursor, scenario_id, status, actor=actor, actor_role=actor_role,
+                    reason=reason, from_status=expected, audit_action=audit_action,
+                    audit_detail=audit_detail,
+                )
 
     def append_audit(self, row: dict[str, Any]) -> None:
         """Append one immutable audit record in its own transaction."""
@@ -295,18 +425,13 @@ class OracleRegistryRepo:
         if parent is None or str(parent[0]) != str(row["scenario_key"]):
             raise LookupError("Parent scenario does not match the requested stable scenario key")
         if str(parent[1]).upper() != "ACTIVE":
-            raise LookupError("Parent scenario is no longer active")
-        metadata = row["metadata_json"]
-        country = _value(metadata, "COUNTRY_CODE", settings.AML_COUNTRY_CODE)
-        institution = _value(metadata, "INST_CODE", settings.AML_INST_CODE)
+            raise RegistryStaleError("REVISE_STALE", "Start again from the latest version.")
         OracleRegistryRepo().set_status(
             cursor,
             parent_id,
             "SUPERSEDED",
             actor=row["created_by"],
             actor_role=row["actor_role"],
-            country_code=country,
-            institution_code=institution,
             from_status="ACTIVE",
             audit_action="SUPERSEDE",
         )

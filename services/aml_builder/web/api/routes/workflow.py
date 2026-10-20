@@ -29,6 +29,8 @@ from services.aml_builder.web.workflow.cards import (
     create_revision_card,
     resolved_card_rows,
 )
+from services.aml_builder.web.adapters.oracle_repo import OracleRegistryRepo
+from services.aml_builder.web.domain.versioning_service import VersioningError, VersioningService
 
 router = APIRouter(tags=["Workflow"])
 
@@ -65,6 +67,28 @@ class ConflictAcknowledgementRequest(BaseModel):
     reason: str | None = None
 
 
+class CreateNewVersionRequest(BaseModel):
+    """Select the deployed version that should seed a new version chat."""
+
+    scenario_id: str = Field(min_length=1)
+
+
+class RollbackRequest(BaseModel):
+    """Request a guarded rollback to one superseded version."""
+
+    scenario_id: str = Field(min_length=1)
+    expected_active_version: int = Field(ge=1)
+    reason: str = Field(min_length=5, max_length=500)
+    acknowledge_warnings: bool = False
+
+
+class RetireRequest(BaseModel):
+    """Request soft retirement of one active version."""
+
+    scenario_id: str = Field(min_length=1)
+    reason: str = Field(min_length=5, max_length=500)
+
+
 def _project_id(value: str) -> str:
     """Normalize legacy no-project URL values to the chat thread convention."""
     return value if value not in {"0", "None"} else "no_project"
@@ -95,6 +119,39 @@ def _owned_workflow(
     ):
         raise HTTPException(status_code=403, detail="Permission denied.")
     return workflow
+
+
+def _versioning_service(identity: Identity, repo: WorkflowRepo) -> VersioningService:
+    """Build P9 operations with the current identity and P8 read-only conflict gate."""
+    checker = make_conflict_checker(repo)
+
+    def check_rollback_signature(signature: dict[str, Any], scenario_id: str) -> dict[str, Any]:
+        target = OracleRegistryRepo().get_version(scenario_id) or {}
+        active = OracleRegistryRepo().latest_active_version(str(target.get("scenario_key") or ""))
+        excluded = {str(active["scenario_id"])} if active else set()
+        return checker.check_signature(
+            signature,
+            scenario_key=str(target.get("scenario_key") or ""),
+            exclude_scenario_ids=excluded,
+        )
+
+    return VersioningService(
+        registry_repo=OracleRegistryRepo(),
+        workflow_repo=repo,
+        authorizer=lambda user_id, action: authorize(
+            user_id, action, user_email=identity.user_email
+        ),
+        conflict_checker=check_rollback_signature,
+    )
+
+
+def _versioning_http_error(exc: VersioningError) -> HTTPException:
+    """Map a typed versioning refusal to a structured HTTP error."""
+    status_code = 403 if exc.code == "PERMISSION_DENIED" else 404 if exc.code == "VERSION_NOT_FOUND" else 409
+    detail: dict[str, Any] = {"error_code": exc.code, "message": str(exc)}
+    if exc.details is not None:
+        detail["details"] = exc.details
+    return HTTPException(status_code=status_code, detail=detail)
 
 
 def _revision_summary(revision: Revision | None) -> dict[str, Any] | None:
@@ -545,6 +602,8 @@ def get_workflow_state(
         "version": workflow.version,
         "scenario_id": workflow.scenario_id,
         "scenario_key": workflow.scenario_key,
+        "parent_scenario_id": workflow.parent_scenario_id,
+        "parent_version": workflow.parent_version,
         "current_revision": current_data,
         "can_deploy": not blockers,
         "blockers": blockers,
@@ -552,6 +611,113 @@ def get_workflow_state(
         "conflict_report": conflict_report,
         "history": [revision.payload_free_summary() for revision in history],
     }
+
+
+@router.post("/workflow/{project_id}/{chat_id}/{user_id}/actions/create_new_version")
+def create_new_version(
+    project_id: str,
+    chat_id: str,
+    user_id: str,
+    request: CreateNewVersionRequest,
+    identity: Identity = Depends(require_identity),
+    repo: WorkflowRepo = Depends(get_workflow_repo),
+) -> dict[str, Any]:
+    """Create a child chat seeded from the selected deployed registry version."""
+    workflow = _owned_workflow(project_id, chat_id, user_id, identity, repo)
+    if not workflow.locked or workflow.scenario_id != request.scenario_id:
+        raise HTTPException(status_code=409, detail={"error_code": "REVISE_STALE", "message": "Start again from the latest version."})
+    try:
+        return _versioning_service(identity, repo).create_new_version(
+            request.scenario_id,
+            project_id=workflow.project_id,
+            user_id=workflow.user_id,
+            actor_id=identity.user_id,
+            actor_role=get_role(identity.user_id, identity.user_email),
+        )
+    except VersioningError as exc:
+        raise _versioning_http_error(exc) from exc
+
+
+@router.get("/workflow/{project_id}/{chat_id}/{user_id}/versions")
+def list_scenario_versions(
+    project_id: str,
+    chat_id: str,
+    user_id: str,
+    identity: Identity = Depends(require_identity),
+    repo: WorkflowRepo = Depends(get_workflow_repo),
+) -> dict[str, Any]:
+    """List the latest version's full lineage and last status-change audit data."""
+    workflow = _owned_workflow(project_id, chat_id, user_id, identity, repo)
+    if not workflow.locked:
+        raise HTTPException(status_code=409, detail={"error_code": "STAGE_NOT_ALLOWED", "message": "Version history is available from a deployed scenario."})
+    registry = OracleRegistryRepo()
+    latest = registry.latest_version(workflow.scenario_key)
+    if latest is None or latest["scenario_id"] != workflow.scenario_id:
+        raise HTTPException(status_code=409, detail={"error_code": "REVISE_STALE", "message": "Version history is available from the latest version only."})
+    versions = registry.list_versions(workflow.scenario_key)
+    audit = registry.list_version_audit(workflow.scenario_key)
+    shown_actions = {"CREATE", "REVISE", "SUPERSEDE", "ROLLBACK", "RETIRE"}
+    result = []
+    for version in versions:
+        events = [item for item in audit if item.get("scenario_id") == version["scenario_id"]]
+        status_events = [item for item in events if item.get("action") in shown_actions and item.get("action") not in {"CREATE", "REVISE"}]
+        creation = next((item for item in reversed(events) if item.get("action") in {"CREATE", "REVISE"}), None)
+        result.append({
+            "version": version["version_no"],
+            "id": version["scenario_id"],
+            "status": version["status"],
+            "name": version["scenario_name"],
+            "creator": creation.get("actor") if creation else version.get("created_by"),
+            "created_at": creation.get("ts") if creation else version.get("created_at"),
+            "parent": version.get("parent_scenario_id"),
+            "change_reason": version.get("change_reason"),
+            "last_status_change": status_events[0] if status_events else creation,
+            "override_conflict_count": sum(item.get("action") == "OVERRIDE_CONFLICT" for item in events),
+        })
+    return {"versions": result}
+
+
+@router.post("/workflow/{project_id}/{chat_id}/{user_id}/actions/rollback_version")
+def rollback_version(
+    project_id: str,
+    chat_id: str,
+    user_id: str,
+    request: RollbackRequest,
+    identity: Identity = Depends(require_identity),
+    repo: WorkflowRepo = Depends(get_workflow_repo),
+) -> dict[str, Any]:
+    """Rollback one superseded version after the P8 conflict check."""
+    _owned_workflow(project_id, chat_id, user_id, identity, repo)
+    try:
+        return _versioning_service(identity, repo).rollback(
+            request.scenario_id, expected_active_version=request.expected_active_version,
+            reason=request.reason, actor_id=identity.user_id,
+            actor_role=get_role(identity.user_id, identity.user_email),
+            acknowledge_warnings=request.acknowledge_warnings,
+        )
+    except VersioningError as exc:
+        raise _versioning_http_error(exc) from exc
+
+
+@router.post("/workflow/{project_id}/{chat_id}/{user_id}/actions/retire_version")
+def retire_version(
+    project_id: str,
+    chat_id: str,
+    user_id: str,
+    request: RetireRequest,
+    identity: Identity = Depends(require_identity),
+    repo: WorkflowRepo = Depends(get_workflow_repo),
+) -> dict[str, Any]:
+    """Soft-retire one active registry version."""
+    _owned_workflow(project_id, chat_id, user_id, identity, repo)
+    try:
+        _versioning_service(identity, repo).retire(
+            request.scenario_id, reason=request.reason, actor_id=identity.user_id,
+            actor_role=get_role(identity.user_id, identity.user_email),
+        )
+    except VersioningError as exc:
+        raise _versioning_http_error(exc) from exc
+    return {"scenario_id": request.scenario_id, "status": "RETIRED"}
 
 
 def _approve(

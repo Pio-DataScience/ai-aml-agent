@@ -196,6 +196,8 @@ def commit_confirmed_card(
             confirmed_intent,
             thread_id=thread_id,
             scenario_key=workflow.scenario_key if workflow else None,
+            exclude_scenario_ids={workflow.parent_scenario_id}
+            if workflow and workflow.parent_scenario_id else None,
         )
         if conflict_checker is not None
         else {

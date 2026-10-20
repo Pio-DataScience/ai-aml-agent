@@ -22,14 +22,18 @@ class DeployError(RuntimeError):
 class ConflictGate(Protocol):
     """Port for checking conflict acknowledgements before registry commit."""
 
-    def check(self, thread_id: str, revision_id: str) -> dict[str, Any]:
+    def check(
+        self, thread_id: str, revision_id: str, *, exclude_scenario_ids: set[str] | None = None
+    ) -> dict[str, Any]:
         """Return a status and acknowledgement list for the current revision."""
 
 
 class _NotRunConflictGate:
     """Default conflict gate until P8 provides an authoritative checker."""
 
-    def check(self, thread_id: str, revision_id: str) -> dict[str, Any]:
+    def check(
+        self, thread_id: str, revision_id: str, *, exclude_scenario_ids: set[str] | None = None
+    ) -> dict[str, Any]:
         return {"status": "not_run", "acknowledgements": []}
 
 
@@ -129,6 +133,7 @@ class DeployService:
         raw_sql: str | None = None,
         metadata: dict[str, Any] | None = None,
         parent_scenario_id: str | None = None,
+        parent_version: int | None = None,
         change_reason: str | None = None,
         scenario_id: str | None = None,
         scenario_key: str | None = None,
@@ -162,13 +167,9 @@ class DeployService:
         selected_scenario_id = scenario_id or workflow.scenario_id
         selected_scenario_key = scenario_key or workflow.scenario_key
         selected_version_no = version_no or _version_no(selected_scenario_id)
-        if parent_scenario_id and not (scenario_id and scenario_key and version_no):
-            raise DeployError(
-                "VERSION_METADATA_REQUIRED",
-                "Parent supersession requires a pre-allocated version ID, key, and number.",
-            )
-        if selected_version_no > 1 and not change_reason:
-            raise DeployError("CHANGE_REASON_REQUIRED", "A change reason is required for versions after v1.")
+        change_reason = change_reason.strip() if isinstance(change_reason, str) else change_reason
+        if selected_version_no > 1 and (not change_reason or not 5 <= len(change_reason.strip()) <= 500):
+            raise DeployError("CHANGE_REASON_REQUIRED", "A change reason between 5 and 500 characters is required for versions after v1.")
         self._require_permission(actor_id, "scenario.revise" if parent_scenario_id else "scenario.create")
         if workflow.current_revision_id != revision_id or revision is None or revision.revision_id != revision_id:
             raise DeployError("REVISION_STALE", "The supplied revision is no longer current.")
@@ -228,11 +229,17 @@ class DeployService:
             approval_status = "would_block"
 
         metadata_value = metadata if metadata is not None else (_json_value(revision.metadata_json) or {})
+        effective_metadata_hash = stable_hash(metadata_value)
         valid, errors = self.metadata_validator(metadata_value)
         if not valid:
             raise DeployError("METADATA_INVALID", "Governance metadata is invalid.", details=errors)
 
-        conflict = self.conflict_gate.check(thread_id, revision_id)
+        if parent_scenario_id:
+            conflict = self.conflict_gate.check(
+                thread_id, revision_id, exclude_scenario_ids={parent_scenario_id}
+            )
+        else:
+            conflict = self.conflict_gate.check(thread_id, revision_id)
         if (
             self.conflict_check_required
             and conflict.get("status") == "unavailable"
@@ -304,6 +311,23 @@ class DeployService:
         scenario_key = selected_scenario_key
         if not _valid_version_identity(scenario_id, scenario_key, selected_version_no):
             raise DeployError("REGISTRY_ID_INVALID", "Pre-allocated scenario ID does not match registry v2 format.")
+        parent_row = None
+        if parent_scenario_id:
+            get_version = getattr(self.oracle_repo, "get_version", None)
+            parent_row = get_version(parent_scenario_id) if get_version else None
+            if parent_row is None:
+                raise DeployError("REVISE_STALE", "Start again from the latest version.")
+            if str(parent_row.get("status", "")).upper() not in {"ACTIVE", "RETIRED"}:
+                raise DeployError("REVISE_STALE", "Start again from the latest version.")
+            parent_version = int(parent_row.get("version_no") or parent_version or 0)
+            same_signature = bool(revision.signature_hash and parent_row.get("signature_hash") and revision.signature_hash == parent_row.get("signature_hash"))
+            same_metadata = bool(effective_metadata_hash and parent_row.get("metadata_hash") and effective_metadata_hash == parent_row.get("metadata_hash"))
+            if same_signature and same_metadata:
+                raise DeployError("IDENTICAL_TO_PARENT", "The scenario and governance metadata are unchanged from the parent version.")
+        change_scope = (
+            "metadata" if parent_row and same_signature
+            else "logic" if parent_row else "initial"
+        )
         created_by_number = _numeric_user(actor_id, self.numeric_created_by_default)
         receipt = {
             "thread_id": thread_id,
@@ -313,11 +337,14 @@ class DeployService:
             "scenario_key": scenario_key,
             "version_no": selected_version_no,
             "parent_scenario_id": parent_scenario_id,
+            "parent_version": parent_version,
+            "change_reason": change_reason,
+            "change_scope": change_scope,
             "card_audit_request_ids": card_audits,
             "params_hash": revision.params_hash,
             "plan_hash": revision.plan_hash,
             "sql_hash": sql_hash,
-            "metadata_hash": revision.metadata_hash,
+            "metadata_hash": effective_metadata_hash,
             "signature_hash": revision.signature_hash,
             "params_confirmed_by": revision.created_by,
             "params_confirmed_at": revision.created_at,
@@ -342,6 +369,8 @@ class DeployService:
             "scenario_key": scenario_key,
             "version_no": selected_version_no,
             "parent_scenario_id": parent_scenario_id,
+            "parent_version": parent_version,
+            "parent_status": parent_row.get("status") if parent_row else None,
             "status": "ACTIVE",
             "is_active": 1,
             "thread_id": thread_id,
@@ -351,10 +380,10 @@ class DeployService:
             "signature_json": revision.signature_json,
             "params_hash": revision.params_hash,
             "params_json": _json_value(revision.card_json),
-            "filters_json": None,
+            "filters_json": intent.get("resolved_filters", []),
             "plan_hash": revision.plan_hash,
             "sql_hash": sql_hash,
-            "metadata_hash": revision.metadata_hash,
+            "metadata_hash": effective_metadata_hash,
             "metadata_json": metadata_value,
             "receipt_json": receipt,
             "change_reason": change_reason,

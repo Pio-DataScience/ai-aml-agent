@@ -5,6 +5,20 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-10-20] feat: P9 versioning flows
+
+### What
+- Added Oracle-snapshot-seeded child chats, version history, reasoned rollback, and soft retirement with exact expected-status updates, paired metadata active flags, and audit rows in the same Oracle transaction.
+- Added deploy-time stale-parent checks, required version reasons, identical-parent no-op blocking, metadata-only version receipts, and parent supersession before insertion.
+- Added read-only list/compare version query modes and exposed the locked-chat actions, version history, and reason/confirmation dialogs in the UI.
+- Kept the alert engine scoped to rows whose production `IS_ACTIVE` and metadata `ACTIVE_FLAG` are both active, including targeted runs.
+
+### Verification
+- P9 fake-backed and related P4/P8 offline verification results are recorded in `Docs/refactor_status.md`.
+- No live Oracle, LLM, or Service B call was made.
+
+---
+
 ## [2026-10-20] feat: P8 deterministic signature conflicts and acknowledgement
 
 ### What

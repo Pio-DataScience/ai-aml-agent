@@ -13,6 +13,7 @@ from services.aml_builder.web.domain.deploy_service import (
     DeployService,
     stable_hash_sql,
 )
+from services.aml_builder.web.domain.hashing import stable_hash
 from services.aml_builder.web.workflow.models import Revision, WorkflowRow
 
 
@@ -85,11 +86,15 @@ def _fixture(*, enforcement: str = "enforce"):
             self.metadata_active = {}
             self.audit = []
             self.calls = 0
+            self.operations = []
             self.fail_duplicate = False
             self.fail_parent_commit = False
 
         def get_by_thread(self, thread_id):
             return next((row for row in self.rows.values() if row["thread_id"] == thread_id), None)
+
+        def get_version(self, scenario_id):
+            return self.rows.get(scenario_id)
 
         def insert_version(self, row):
             self.calls += 1
@@ -98,8 +103,9 @@ def _fixture(*, enforcement: str = "enforce"):
             old_rows = {key: dict(value) for key, value in self.rows.items()}
             old_metadata = dict(self.metadata_active)
             old_audit = list(self.audit)
-            if row.get("parent_scenario_id"):
+            if row.get("parent_scenario_id") and row.get("parent_status", "ACTIVE") == "ACTIVE":
                 parent = self.rows[row["parent_scenario_id"]]
+                self.operations.append(("supersede", parent["scenario_id"]))
                 parent["status"] = "SUPERSEDED"
                 parent["is_active"] = 0
                 self.metadata_active[row["parent_scenario_id"]] = False
@@ -109,6 +115,7 @@ def _fixture(*, enforcement: str = "enforce"):
                     self.metadata_active = old_metadata
                     self.audit = old_audit
                     raise RuntimeError("simulated atomic rollback")
+            self.operations.append(("insert", row["scenario_id"]))
             self.rows[row["scenario_id"]] = row
             self.audit.append({"scenario_id": row["scenario_id"], "action": row["audit_action"]})
             return row
@@ -208,7 +215,8 @@ def test_parent_supersession_is_included_in_the_single_repository_operation():
     service, _workflow, oracle, command = _fixture()
     oracle.rows["PRD_ABCDEF12_V1"] = {
         "scenario_id": "PRD_ABCDEF12_V1", "status": "ACTIVE", "is_active": 1,
-        "thread_id": "parent-thread",
+            "thread_id": "parent-thread", "scenario_key": "PRD_ABCDEF12", "version_no": 1,
+            "signature_hash": "parent-signature", "metadata_hash": "parent-metadata",
     }
     oracle.metadata_active["PRD_ABCDEF12_V1"] = True
     command.update({
@@ -233,7 +241,8 @@ def test_parent_supersession_rolls_back_as_one_fake_repository_operation():
     service, _workflow, oracle, command = _fixture()
     oracle.rows["PRD_ABCDEF12_V1"] = {
         "scenario_id": "PRD_ABCDEF12_V1", "status": "ACTIVE", "is_active": 1,
-        "thread_id": "parent-thread",
+            "thread_id": "parent-thread", "scenario_key": "PRD_ABCDEF12", "version_no": 1,
+            "signature_hash": "parent-signature", "metadata_hash": "parent-metadata",
     }
     oracle.metadata_active["PRD_ABCDEF12_V1"] = True
     oracle.fail_parent_commit = True
@@ -249,6 +258,73 @@ def test_parent_supersession_rolls_back_as_one_fake_repository_operation():
     assert oracle.rows["PRD_ABCDEF12_V1"]["status"] == "ACTIVE"
     assert oracle.metadata_active["PRD_ABCDEF12_V1"] is True
     assert oracle.audit == []
+
+
+def _versioned_command(service, workflow_repo, oracle, *, signature_hash, metadata_hash, parent_status="ACTIVE"):
+    parent = {
+        "scenario_id": "PRD_ABCDEF12_V1", "scenario_key": "PRD_ABCDEF12", "version_no": 1,
+        "status": parent_status, "is_active": int(parent_status == "ACTIVE"),
+        "signature_hash": signature_hash, "metadata_hash": metadata_hash,
+        "thread_id": "parent-thread",
+    }
+    oracle.rows[parent["scenario_id"]] = parent
+    oracle.metadata_active[parent["scenario_id"]] = parent_status == "ACTIVE"
+    workflow_repo.revision = replace(
+        workflow_repo.revision, signature_hash=signature_hash, metadata_hash="metadata-new"
+    )
+    workflow_repo.workflow = replace(
+        workflow_repo.workflow, scenario_id="PRD_ABCDEF12_V2", scenario_key="PRD_ABCDEF12",
+        parent_scenario_id=parent["scenario_id"], parent_version=1,
+    )
+    command = {
+        "thread_id": workflow_repo.workflow.thread_id,
+        "revision_id": workflow_repo.revision.revision_id,
+        "actor_id": "user", "actor_role": "manager", "raw_sql": "SELECT 1",
+        "metadata": {"COUNTRY_CODE": 1}, "parent_scenario_id": parent["scenario_id"],
+        "parent_version": 1, "change_reason": "Governance update",
+    }
+    return command
+
+
+def test_identical_signature_and_metadata_parent_is_blocked_as_noop():
+    service, workflow_repo, oracle, _command = _fixture()
+    command = _versioned_command(service, workflow_repo, oracle, signature_hash="same", metadata_hash=stable_hash({"COUNTRY_CODE": 1}))
+    with pytest.raises(DeployError) as error:
+        service.deploy(**command)
+    assert error.value.code == "IDENTICAL_TO_PARENT"
+    assert oracle.calls == 0
+    assert not workflow_repo.workflow.locked
+
+
+def test_metadata_only_version_is_allowed_and_parent_is_superseded_before_insert():
+    service, workflow_repo, oracle, _command = _fixture()
+    command = _versioned_command(service, workflow_repo, oracle, signature_hash="same-signature", metadata_hash="metadata-old")
+    result = service.deploy(**command)
+    assert result.receipt["change_scope"] == "metadata"
+    assert result.receipt["parent_scenario_id"] == "PRD_ABCDEF12_V1"
+    assert result.receipt["parent_version"] == 1
+    assert result.receipt["change_reason"] == "Governance update"
+    assert oracle.operations == [("supersede", "PRD_ABCDEF12_V1"), ("insert", "PRD_ABCDEF12_V2")]
+
+
+def test_new_version_from_retired_parent_does_not_supersede_it_again():
+    service, workflow_repo, oracle, _command = _fixture()
+    command = _versioned_command(service, workflow_repo, oracle, signature_hash="new-signature", metadata_hash="old", parent_status="RETIRED")
+    result = service.deploy(**command)
+    assert result.scenario_id == "PRD_ABCDEF12_V2"
+    assert oracle.rows["PRD_ABCDEF12_V1"]["status"] == "RETIRED"
+    assert oracle.operations == [("insert", "PRD_ABCDEF12_V2")]
+
+
+@pytest.mark.parametrize("reason", ["", "1234", "x" * 501])
+def test_version_deploy_requires_reason_between_five_and_five_hundred_chars(reason):
+    service, workflow_repo, oracle, _command = _fixture()
+    command = _versioned_command(service, workflow_repo, oracle, signature_hash="same", metadata_hash="old")
+    command["change_reason"] = reason
+    with pytest.raises(DeployError) as error:
+        service.deploy(**command)
+    assert error.value.code == "CHANGE_REASON_REQUIRED"
+    assert oracle.calls == 0
     assert "PRD_ABCDEF12_V2" not in oracle.rows
 
 

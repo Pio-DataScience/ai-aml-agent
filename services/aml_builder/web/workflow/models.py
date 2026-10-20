@@ -24,6 +24,8 @@ class WorkflowRow:
     pending_card: dict[str, Any] | None
     created_at: str
     updated_at: str
+    parent_scenario_id: str | None = None
+    parent_version: int | None = None
 
 
 @dataclass(frozen=True)
