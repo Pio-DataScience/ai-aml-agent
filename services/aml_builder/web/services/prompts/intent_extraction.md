@@ -17,6 +17,9 @@ Output ONLY a valid JSON object matching AMLIntent schema with mandatory root ke
 - explanation_codes (list of str or null)
 - explanation_codes_by_type (dict of str -> list of str, or null)
 - filters (list of objects with dimension, raw_mention, and polarity)
+- field_provenance (dict of field path to 'stated', 'inferred', or 'default')
+
+For `field_provenance`, mark `scenario_name` as `stated` only when the user explicitly gives an exact desired title; otherwise mark it `inferred`. Mark `detection_logic` as `inferred` when you summarize the request, and `stated` only when the user requests exact wording. For `baseline_window.description`, mark user-specified text `stated`, derived text `inferred`, and fallback values `default`. Preserve these provenance markers in the output.
 
 {{FILTER_DIMENSIONS}}
 

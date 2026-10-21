@@ -475,6 +475,7 @@ class WorkflowRepo:
         signature_hash: str | None = None,
         conflict: dict[str, Any] | None = None,
         resulting_stage: str = "PLAN_PENDING",
+        message_position: int | None = None,
     ) -> tuple[Revision, bool]:
         """Atomically apply a confirmed card and return its current revision.
 
@@ -657,7 +658,8 @@ class WorkflowRepo:
                     "card_auto_confirmed" if outcome == "auto_confirmed" else "card_confirmed",
                     workflow["stage"],
                     resulting_stage, {"request_id": request_id, "revision_id": revision_id,
-                    "confirmation_hash": confirmation_hash, "carry_over": carry_over},
+                    "confirmation_hash": confirmation_hash, "carry_over": carry_over,
+                    "message_position": message_position},
                 )
                 connection.commit()
         except Exception:
@@ -882,7 +884,7 @@ class WorkflowRepo:
 
     def approve_revision(
         self, thread_id: str, revision_id: str, *, approval: str, actor: str,
-        role: str, expected_hash: str,
+        role: str, expected_hash: str, message_position: int | None = None,
     ) -> Revision:
         """Record one typed approval atomically; same-hash retries are idempotent."""
         column = "plan_hash" if approval == "plan" else "sql_hash"
@@ -909,7 +911,20 @@ class WorkflowRepo:
                 raise ValueError("The expected hash does not match the current artifact")
             connection.execute(f"UPDATE scenario_revision SET {approved_at}=?,{approved_by}=?,stage=?,version=version+1 WHERE revision_id=?", (_now(), actor, next_stage, revision_id))
             connection.execute("UPDATE scenario_workflow SET stage=?,version=version+1,updated_at=? WHERE thread_id=?", (next_stage, _now(), thread_id))
-            self._event(connection, thread_id, actor, action, workflow["stage"], next_stage, {"revision_id": revision_id, "actor_role": role, "expected_hash": expected_hash})
+            self._event(
+                connection,
+                thread_id,
+                actor,
+                action,
+                workflow["stage"],
+                next_stage,
+                {
+                    "revision_id": revision_id,
+                    "actor_role": role,
+                    "expected_hash": expected_hash,
+                    **({"message_position": message_position} if message_position is not None else {}),
+                },
+            )
             connection.commit()
         except Exception:
             connection.rollback()

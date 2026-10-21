@@ -76,6 +76,9 @@ async def get_chat_history(project_id: str, chat_id: str, user_id: str, identity
             for msg in messages_data:
                 msg_class = msg.__class__.__name__
                 if msg_class == "HumanMessage":
+                    additional_kwargs = getattr(msg, "additional_kwargs", {})
+                    if isinstance(additional_kwargs, dict) and additional_kwargs.get("workflow_event"):
+                        continue
                     content = msg.content if hasattr(msg, "content") else str(msg)
                     chat_messages.append(ChatMessage(role="user", content=content))
                 elif msg_class == "AIMessage":

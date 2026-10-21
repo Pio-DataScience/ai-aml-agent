@@ -5,6 +5,27 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-10-21] feat: Complete descriptive intent from confirmed parameters
+
+- Added a constrained fast-LLM pass after parameter confirmation to correct only trivial spelling/grammar issues in scenario name and detection description, and generate eligible missing descriptive fields from the confirmed intent; structured business parameters remain unchanged.
+- Preserved extracted field provenance through normalization so explicit user wording is not overwritten by generated content.
+
+## [2026-10-21] feat: Persist parameter confirmation timeline notes
+
+- Store the chat position on parameter confirmation events and expose them alongside plan/result approval notes; remove the synthetic `[ACTION] card_confirmed` acknowledgement path.
+
+## [2026-10-21] feat: Include plan readiness in confirmation notes
+
+- Expose whether a confirmed revision has a generated plan so the UI can show an accurate confirmation response and offer plan navigation only when available.
+
+## [2026-10-21] fix: Persist workflow approvals as UI timeline notes
+
+- Exposed revision-scoped plan and result approval audit events from workflow state so the UI can display durable notes at their original chat positions; continue the LLM workflow through a verified hidden handoff and reject unsupported action-prefixed messages before they reach the model.
+
+## [2026-10-21] feat: Expose confirmed parameter cards to chat history
+
+- Include confirmed and auto-confirmed parameter-card audit snapshots in workflow state so the frontend can retain a read-only confirmed card in the conversation.
+
 ## [2026-10-20] feat: P10 baseline observability
 
 - Added per-tool JSON-lines timing metrics and request/thread correlation metadata, and recorded the fake-adapter baseline in `Docs/P10_performance_context_observability.md`.

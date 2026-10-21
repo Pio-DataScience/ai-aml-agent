@@ -8,7 +8,6 @@ expect: tool_call, content, plan_artifact, scenario_result, done.
 
 import json
 import logging
-import re
 import time
 import uuid
 from typing import AsyncIterator
@@ -92,30 +91,48 @@ async def chat_stream(
     if not project_id or project_id in ("0", "None"):
         project_id = "no_project"
 
-    action_text = request.messages[-1].content if request.messages else ""
-    action_match = re.fullmatch(r"\[ACTION\] card_confirmed revision (\d+)", action_text)
-    if metadata.get("action_message") is True and action_match:
-        revision_number = action_match.group(1)
-
-        async def action_acknowledgement() -> AsyncIterator[str]:
-            """Acknowledge a typed card action without touching workflow persistence."""
-            acknowledgement = (
-                f"Parameters confirmed. Revision {revision_number} is ready for plan review."
-            )
-            yield f"data: {SSEEvent(type='content', text=acknowledgement).model_dump_json()}\n\n"
-            yield f"data: {SSEEvent(type='done').model_dump_json()}\n\n"
-
-        return StreamingResponse(
-            action_acknowledgement(),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "X-Accel-Buffering": "no",
-                "Connection": "keep-alive",
-                "X-Request-ID": request_id,
-            },
+    workflow_event = metadata.get("workflow_event")
+    if metadata.get("action_message") is True:
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported workflow action message.",
         )
-
+    if workflow_event is not None:
+        if not isinstance(workflow_event, dict):
+            raise HTTPException(status_code=400, detail="Invalid workflow event.")
+        event_type = workflow_event.get("type")
+        revision_id = workflow_event.get("revision_id")
+        revision_no = workflow_event.get("revision_no")
+        expected = (
+            {
+                "plan_approved": ("PLAN_APPROVED", "plan_approved_at"),
+                "result_approved": ("RESULT_APPROVED", "result_approved_at"),
+            }.get(event_type)
+            if isinstance(event_type, str)
+            else None
+        )
+        if (
+            expected is None
+            or not isinstance(revision_id, str)
+            or not isinstance(revision_no, int)
+            or isinstance(revision_no, bool)
+        ):
+            raise HTTPException(status_code=400, detail="Invalid workflow event.")
+        event_thread_id = f"{project_id}_{chat_id}_{user_id}"
+        event_repo = get_workflow_repo()
+        approved_revision = await run_in_io_pool(event_repo.current, event_thread_id)
+        stage, approval_field = expected
+        if (
+            approved_revision is None
+            or approved_revision.revision_id != revision_id
+            or approved_revision.rev_no != revision_no
+            or approved_revision.stage != stage
+            or not getattr(approved_revision, approval_field)
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="The workflow event does not match an approved current revision.",
+            )
     thread_id = f"{project_id}_{chat_id}_{user_id}"
     correlation_id = build_correlation_id(thread_id, request_id)
 
@@ -153,15 +170,22 @@ async def chat_stream(
         "correlation_id": correlation_id,
         "request_id": request_id,
     }
-    if metadata.get("action_message") is True:
-        trace_metadata["action_message"] = True
+    if workflow_event is not None:
+        trace_metadata["workflow_event"] = workflow_event
     config["metadata"] = trace_metadata
     user_msg = request.messages[-1].content if request.messages else ""
     if request.metadata_json:
         metadata_str = json.dumps(request.metadata_json, ensure_ascii=False)
         user_msg += f"\n\n[Active Scenario Governance Metadata from Sidebar]:\n{metadata_str}"
 
-    inputs = {"messages": [HumanMessage(content=user_msg)]}
+    inputs = {
+        "messages": [
+            HumanMessage(
+                content=user_msg,
+                additional_kwargs={"workflow_event": workflow_event} if workflow_event else {},
+            )
+        ]
+    }
 
     async def event_generator():
         """Async generator yielding SSE-formatted events.

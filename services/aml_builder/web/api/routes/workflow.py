@@ -40,6 +40,7 @@ class ApprovalRequest(BaseModel):
 
     revision_id: str
     expected_hash: str = Field(min_length=1)
+    message_position: int | None = Field(default=None, ge=0)
 
 
 class ConfirmParamsRequest(BaseModel):
@@ -48,6 +49,7 @@ class ConfirmParamsRequest(BaseModel):
     request_id: str = Field(min_length=1)
     values: dict[str, Any] = Field(default_factory=dict)
     accept_defaults: bool = False
+    message_position: int | None = Field(default=None, ge=0)
     source: Literal["ui", "api"] = "api"
 
 
@@ -322,7 +324,6 @@ def confirm_params(
                 },
                 "carry_over": prior.get("carry_over") or {"kept": [], "dropped": []},
                 "history_count": repo.history_count(existing_workflow.thread_id),
-                "action_message": f"[ACTION] card_confirmed revision {revision.rev_no}",
             }
         )
         return response
@@ -397,6 +398,7 @@ def confirm_params(
             resolved_rows=resolved_card_rows(card.get("rows", []), values),
             confirmation_hash=request_hash,
             conflict_checker=make_conflict_checker(repo),
+            message_position=request.message_position,
         )
     except WorkflowConflict as exc:
         raise HTTPException(
@@ -421,7 +423,6 @@ def confirm_params(
             },
             "carry_over": result["carry_over"],
             "history_count": result["history_count"],
-            "action_message": result["action_message"],
             "conflict_report": result.get("conflict_report"),
         }
     )
@@ -595,6 +596,34 @@ def get_workflow_state(
         conflict_report = json.loads(current.conflict_json) if current and current.conflict_json else None
     except (json.JSONDecodeError, TypeError):
         conflict_report = None
+    approval_notes: list[dict[str, Any]] = []
+    for event in repo.list_events(workflow.thread_id):
+        action = event.get("action")
+        if action not in {"approve_plan", "approve_result", "card_confirmed"}:
+            continue
+        try:
+            detail = json.loads(event.get("detail_json") or "{}")
+        except (json.JSONDecodeError, TypeError):
+            continue
+        revision_id = detail.get("revision_id")
+        revision = repo.get_revision(revision_id) if isinstance(revision_id, str) else None
+        if revision is None:
+            continue
+        note_action = "confirm_params" if action == "card_confirmed" else action
+        approval_notes.append(
+            {
+                "id": event["id"],
+                "ts": event["ts"],
+                "action": note_action,
+                "revision_no": revision.rev_no,
+                "message_position": detail.get("message_position"),
+                **(
+                    {"plan_ready": bool(revision.plan_md)}
+                    if action == "card_confirmed"
+                    else {}
+                ),
+            }
+        )
     return {
         "thread_id": workflow.thread_id,
         "stage": workflow.stage,
@@ -608,8 +637,14 @@ def get_workflow_state(
         "can_deploy": not blockers,
         "blockers": blockers,
         "pending_card": workflow.pending_card,
+        "confirmed_cards": [
+            audit
+            for audit in repo.card_audit_repo.list_for_thread(workflow.thread_id)
+            if audit and audit.get("outcome") in {"confirmed", "auto_confirmed"}
+        ],
         "conflict_report": conflict_report,
         "history": [revision.payload_free_summary() for revision in history],
+        "approval_notes": approval_notes,
     }
 
 
@@ -783,6 +818,7 @@ def _approve(
             actor=identity.user_id,
             role=get_role(identity.user_id, identity.user_email),
             expected_hash=request.expected_hash,
+            message_position=request.message_position,
         )
     except WorkflowConflict as exc:
         raise HTTPException(

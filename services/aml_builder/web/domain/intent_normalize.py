@@ -19,7 +19,16 @@ def normalize_intent(
     """
     intent = deepcopy(raw_intent)
     applied_defaults: List[str] = []
-    field_provenance: Dict[str, str] = {}
+    supplied_provenance = intent.get("field_provenance")
+    field_provenance: Dict[str, str] = (
+        {
+            str(path): str(source)
+            for path, source in supplied_provenance.items()
+            if isinstance(path, str) and isinstance(source, str)
+        }
+        if isinstance(supplied_provenance, dict)
+        else {}
+    )
 
     def mark_default(path: str) -> None:
         applied_defaults.append(f"{path}: {intent_path_value(intent, path)}")

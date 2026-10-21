@@ -23,6 +23,9 @@ from services.aml_builder.web.services.scenario_metadata import (
 from services.aml_builder.web.services.settings import settings
 from services.aml_builder.web.workflow.repo import WorkflowRepo, WorkflowConflict
 from services.aml_builder.web.services.conflict_check import ConflictChecker
+from services.aml_builder.web.services.confirmed_intent_completion import (
+    complete_confirmed_intent,
+)
 
 
 def prepare_card(
@@ -143,6 +146,7 @@ def commit_confirmed_card(
     resolved_rows: list[dict[str, Any]] | None = None,
     confirmation_hash: str | None = None,
     conflict_checker: ConflictChecker | None = None,
+    message_position: int | None = None,
 ) -> dict[str, Any]:
     """Apply a confirmed card atomically and deterministically render its plan.
 
@@ -178,7 +182,6 @@ def commit_confirmed_card(
             "carry_over": carry_over,
             "already_confirmed": True,
             "history_count": repo.history_count(thread_id),
-            "action_message": f"[ACTION] card_confirmed revision {prior_revision.rev_no}",
         }
     workflow = repo.get_workflow(thread_id)
     card = workflow.pending_card if workflow else None
@@ -190,6 +193,11 @@ def commit_confirmed_card(
             "The card was shown for a revision that is no longer current", "CARD_STALE"
         )
     confirmed_intent = apply_confirmed_params(card.get("intent") or {}, values)
+    confirmed_intent = complete_confirmed_intent(
+        confirmed_intent,
+        card.get("rows", []),
+        values,
+    )
     signature, signature_hash = build_signature(confirmed_intent)
     conflict = (
         conflict_checker.check_intent(
@@ -252,6 +260,7 @@ def commit_confirmed_card(
         signature_hash=signature_hash,
         conflict=conflict,
         resulting_stage=resulting_stage,
+        message_position=message_position,
     )
     return {
         "revision_id": revision.revision_id,
@@ -259,7 +268,6 @@ def commit_confirmed_card(
         "carry_over": carry_over,
         "already_confirmed": already_confirmed,
         "history_count": repo.history_count(thread_id),
-        "action_message": f"[ACTION] card_confirmed revision {revision.rev_no}" if not requires_ack else None,
         "conflict_report": conflict,
     }
 
@@ -318,8 +326,13 @@ def _carry_forward_metadata(
     ]
     seeded = seed_scenario_metadata(intent, {})
     if card.get("metadata_from_analysis") and isinstance(card.get("metadata"), dict):
+        generated_description_fields = {"SCENARIO_DES_ENG", "SCENARIO_DES_NAT_LAN"}
         seeded.update(
-            {key: value for key, value in card["metadata"].items() if value is not None}
+            {
+                key: value
+                for key, value in card["metadata"].items()
+                if value is not None and key not in generated_description_fields
+            }
         )
     carried = {key: previous_metadata[key] for key in keys}
     candidate = {**seeded, **carried}

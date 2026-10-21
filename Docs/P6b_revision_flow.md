@@ -16,7 +16,7 @@ Metadata carry-over compares stored metadata with values seeded from the prior i
 
 ## Action response and UI
 
-`confirm_params` returns the full current workflow state plus `revision_summary`, the new `plan_md`, `stage_changed` (including `revision_id`), `carry_over`, `history_count`, and `action_message` (`[ACTION] card_confirmed revision N`). After a successful response, the UI relays `action_message` to `/chat/stream`. That exact action is acknowledged with a short SSE response without invoking LangGraph, changing workflow state, or writing the action into the checkpoint. The UI refreshes the plan, clears the prior shadow result, and displays the current revision badge. No history picker or restore endpoint is part of P6b.
+`confirm_params` returns the full current workflow state plus `revision_summary`, the new `plan_md`, `stage_changed` (including `revision_id`), `carry_over`, and `history_count`. The UI refreshes the plan, records a confirmation note at the card's chat position, clears the prior shadow result, and displays the current revision badge. No history picker or restore endpoint is part of P6b.
 
 ## How to run and verify
 
