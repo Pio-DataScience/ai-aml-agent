@@ -180,3 +180,21 @@ def test_route_runs_the_agent_for_in_scope_messages(monkeypatch: pytest.MonkeyPa
     _stream(monkeypatch, graph, "Detect customers whose cash deposits total more than 10,000 JOD within 7 days")
 
     assert graph.ran and graph.updates == []
+
+
+@pytest.mark.parametrize("question", [
+    "How many customers made cash deposits above 50,000 JOD in 2019?",
+    "What is the difference between a current account and a savings account?",
+    "Which explanation code is used for cash withdrawals?",
+])
+def test_banking_questions_are_answered(monkeypatch: pytest.MonkeyPatch, question: str) -> None:
+    """Questions about transactions, customers and accounts are in scope ('banking')."""
+    monkeypatch.setattr(scope_guard, "_judge_factory", _judge_returning("banking", []))
+    assert not scope_guard.check(question).blocked
+
+
+def test_the_judge_is_told_about_banking_and_the_screen() -> None:
+    """The scope text offers the banking category and treats 'show the side panel' as about the assistant."""
+    assert '"banking"' in scope_guard.SCOPE and "the side panel, the form, the plan" in scope_guard.SCOPE
+    assert "banking" in scope_guard.WITHIN
+    assert scope_guard.REFUSAL.startswith("I can only help with banking and anti-money-laundering (AML) topics")

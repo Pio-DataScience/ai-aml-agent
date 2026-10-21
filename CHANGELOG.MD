@@ -5,6 +5,129 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-10-19] fix: "X% of the balance" rules - one ratio, percentages, slot-bound answers, plain errors, balance capability
+
+### What
+- **Bug 1 (ratio split)**: `Threshold` could not express "factor x other field", so the LLM produced
+  `transaction_amount > 0.5` + `account_balance < None`. Now `Threshold.kind = "ratio"` + `relative_to`;
+  `clarification.parse_ratio_conditions` (English and Arabic) and `apply_ratio_conditions` replace the split with one
+  condition (`deposit_amount > 0.5 * account_balance`, see `condition_sql`); sent to PioTech as
+  `<left>_to_<right>_ratio` (`for_sql_service`). Intent prompt rule 7a.
+- **Bug 2 (percentages)**: `_NUMBER` required a word boundary after `%`, so no format (not even "50%") was read as 0.5.
+  `normalize_text` (Arabic-Indic digits, ٪, "percent", "بالمئة") + `percentages_in`; `numbers_in` uses them.
+- **Bug 3 (answer leak)**: `apply_answers` wrote the amount into every field matching `...|balance`. Thresholds now have
+  `slot_id`; the amount question carries the one slot it fills (`amount_slot`: plain amounts only, never balance, ratio,
+  count); the answer turn builds from the stored partial intent (no new LLM parse), so slots stay stable.
+- **Bug 4 (raw errors)**: `validate_conditions` runs before SQL generation; an incomplete rule is not sent and the user
+  gets `user_message` ("I can't build this rule yet: the value for the account balance is missing ..."). Refusal texts
+  pass `plain_text` (no `x < None`); the agent shows `user_message` verbatim.
+- **Balance capability**: `settings.DATA_CAPABILITIES` (`{"OPENBI2": {"balance_history": false}}`) + `has_capability`.
+  A balance rule without balance history returns `NOT_SUPPORTED` with only the plain refusal, in the user's language
+  ("Balances on this database aren't kept day by day, so I can't build rules that compare deposits with the account
+  balance."). No other rule is suggested and no follow-up question is asked, since that would change the meaning of the
+  request. Enabling a bank later = set `balance_history: true` for it (extension point: `balance_capability_refusal`).
+- Tests: 30 added to `test_clarification.py` (2 existing expectations updated: slot ids; no second LLM parse);
+  full suite 240 passed. Live: the original sentence → refusal + alternative; "yes" → plan with one ratio condition.
+
+---
+
+## [2026-10-19] fix: "3 high cash deposits in one week in 2019" - amount asked, every week of 2019 checked
+
+### What
+- **Problem**: the generated SQL had `EQU_TRA_AMT >= 0` (no amount for "high") and checked only the last 5 working
+  days of 2019 (`:bd_minus_5` .. 2019-12-31): 0 customers. Correct (any week of 2019, deposits >= 10,000): 6 customers.
+- **Amount** (`clarification._threshold_stated`): a count ("3 deposits") is not an amount; "high / large / big ..."
+  without a number asks for the amount (pre-filled 10,000 JOD). "high-risk" is not an amount word; count-only rules
+  ("more than 20 withdrawals in a month") still ask nothing.
+- **Window inside a period** (`sql_dates.slide_window_over_period`): a per-customer / per-account rule with HAVING whose
+  window is shorter than the stated period now checks every window of the period: moving `COUNT/SUM ... OVER (PARTITION
+  BY ... ORDER BY TRA_DATE RANGE ...)` limited to the period, flagged on the best window. Weeks and months exact; N
+  working days as about N*7/5 calendar days. Not rewritten (last window only, as before): DISTINCT counts, "fewer than"
+  conditions, ORDER BY, per-transaction rules. Shadow result: `fixed_period.window_slides_over_period`.
+- **Plan**: `AMLIntent.evaluation_period`; Evaluation Mode reads "Any `1 week` window within `2019-01-01` to `2019-12-31`".
+- Tests: +15 (`test_business_dates.py`, `test_clarification.py`); full suite 210 passed. Live (port 8005): form asks only
+  the amount → plan "any 1-week window within 2019" → shadow test 6 customers (= hand query). No new files.
+
+---
+
+## [2026-10-19] fix: Side panel form always shown; banking questions answered
+
+### What
+- **Problem 1**: "Flag transactions in the last 90 days." got "please complete the form in the side panel" but no form:
+  the agent (`gpt-5.4-mini`) wrote the sentence without calling the intent tool. Then "give me the side panel" was
+  refused by the scope guard.
+- **Fix** (`routes/chat.py`): a reply that promises a form when the intent tool was not called triggers the tool
+  server-side; the form is sent and recorded in the conversation. "give me the side panel" / "show the form" /
+  "أين النموذج" re-sends the open form (else the latest plan) without the scope guard or the LLM. The prompt no
+  longer contains the example sentence, and requires the intent tool for every scenario request.
+- **Frontend** (`ChatBubble.tsx`): a "Complete scenario details" button on the message that asked reopens the form.
+- **Problem 2**: banking questions were refused. **Fix**: the scope guard has a `banking` category (transactions,
+  customers, accounts, cards, loans, branches, products, codes, the bank's data) and treats screen requests as about
+  the assistant; only messages outside banking are refused (new refusal text). The agent no longer refuses anything
+  itself; questions about the bank's own records go through the plan → read-only shadow test.
+- Tests: `test_clarification.py` (+12), `test_scope_guard.py` (+5); full suite 195 passed; `tsc` clean. Live: the five
+  messages above behave as described. No new files.
+
+---
+
+## [2026-10-19] fix: Clarification never re-asks what the user wrote; form starts pre-filled
+
+### What
+- **Problem**: "Flag any above 50,000 JOD" could ask for the amount again (the LLM's provenance label is inconsistent:
+  a written amount or window came back as `assumed_default`), and asked for the channel although the user said "any".
+- **Fix** (`clarification.py`): the user's words decide. A threshold whose number is in the text and a timeframe
+  phrase in the text count as stated whatever the label; "any / all" with no type named = all transaction types
+  (`all_types_if_any` sets the scope to ALL).
+- **Form** (`ClarificationForm.tsx`): every question starts filled with its default (30 days, cash deposit + withdrawal,
+  10,000 JOD), so the user only changes what differs; stated values are never asked and show in "What I understood".
+- Live: "Flag any above 50,000 JOD" asks only the timeframe; "... within 7 days" asks nothing.
+- Tests: 2 added to `test_clarification.py`; backend 179 passed; frontend 8 passed, `tsc` clean. No new files.
+
+---
+
+## [2026-10-19] change: Clarification form - per customer always, quarters, typed transaction types
+
+### What
+- **Business decision: monitor per customer.** "What should be monitored?" is no longer asked
+  (`CLARIFICATION_ASK_ENTITY=false`); `clarification.default_entity` sets per customer when the request does not
+  name accounts, customers or single transactions.
+- **Quarter options** in the timeframe question (First / Second / Third / Last quarter) with a year question
+  (`quarter_year`, shown only for a quarter) → a fixed 3-month period ending on the quarter's last day.
+- **Other transaction type**: `OTHER` option + `other_channels` text question (shown only when Other is picked);
+  typed types are added to the channels and searched in the code catalog.
+- `show_if` now supports `equals`, `in` and `includes` (schema field added; frontend `isVisible` updated).
+- No new files: changes in `clarification.py`, `settings.py`, `schemas.py`, `tools.py`, the existing tests, and in
+  `AI_AML_INTERFACE` `clarificationForm.ts`, `ClarificationForm.tsx`, `types/clarification.ts`, `clarification-form.test.cjs`.
+- Tests: backend 177 passed; frontend form tests 8 passed, speech 8 passed, `tsc` clean. Live: "Flag suspicious deposits"
+  → form without the entity question → Q1 2019 + "LOAN REPAYMENT" → plan with 2019-01-01..2019-03-31 and loan-repayment codes.
+
+---
+
+## [2026-10-18] feat: Clarification Question Flow; one run per conversation
+
+### What
+- **Ask, never guess**: when a request does not state the target entity, threshold amount, timeframe or channels,
+  the intent tool returns `NEEDS_CLARIFICATION` (understood summary, missing fields, questions with industry defaults:
+  per customer, 10,000 JOD, 30 days, cash deposit + withdrawal) before code discovery, the plan and the shadow test.
+  The gap decision is made in code (`web/services/clarification.py`); an LLM-filled value the user did not write is a gap.
+- **Answers**: `ChatRequest.clarification_answers` → run config → the intent tool restores the original request and
+  applies the answers (they override the LLM); the chat shows them as a readable "Clarification answers: …" message.
+- **API/SSE**: new `clarification_request` event; history restores the form on its message (`ChatMessage.clarification_request`).
+- **Schemas**: `ClarificationQuestion`, `ClarificationResponse`, `ScenarioIntentResponse`; complete intents carry `status: COMPLETE`.
+- **Prompts**: intent rules 15 (gap analysis / provenance) and 16 (answers); agent: on NEEDS_CLARIFICATION stop and
+  reply in one sentence.
+- **One run per conversation** (`routes/chat.py`): a second request for a busy chat gets a notice instead of a second
+  concurrent run (the duplicate "go ahead" answer of 2026-10-18 10:33).
+- **Frontend** (`AI_AML_INTERFACE`, branch `feat/clarification-flow`): `ClarificationForm` side panel with Apply Industry
+  Defaults; answers sent with the next request; hook-level send lock; Enter auto-repeat ignored. `tsc` clean, `next build`
+  OK, `npm run test:clarification` 6 passed.
+- Settings: `AML_CLARIFICATION_FLOW` (default true), `CLARIFICATION_DEFAULT_*`.
+- Supersedes, for these four parameters only, the 2026-10-17 assumed-default behaviour; PioTech auto-correction unchanged.
+- Tests: `tests/test_clarification.py` (24); full suite 169 passed. Live on port 8005: vague request → form →
+  defaults submitted → plan; 5 fully stated demo prompts pass without questions. Doc: `Docs/11_clarification_flow.md`.
+
+---
+
 ## [2026-10-18] change: Attribute filters take priority over explanation codes
 
 ### What

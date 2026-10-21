@@ -36,6 +36,8 @@ def test_any_transaction_scope_skips_explanation_code_search(monkeypatch):
     def fail_if_code_search_runs(_transaction_types):
         raise AssertionError("ALL/ANY scope must skip explanation-code search")
 
+    # This test is about code discovery; the clarification flow has its own tests.
+    monkeypatch.setattr(aml_tools.settings, "AML_CLARIFICATION_FLOW", False)
     monkeypatch.setattr(aml_tools, "build_llm", lambda: FakeLLM())
     monkeypatch.setattr(
         aml_tools, "select_relevant_explanation_codes", fail_if_code_search_runs

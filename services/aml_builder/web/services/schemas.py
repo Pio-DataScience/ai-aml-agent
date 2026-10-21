@@ -30,9 +30,22 @@ class Threshold(BaseModel):
         operator (str): Comparison operator: '>', '<', '>=', '<=', '=', 'BETWEEN', 'IN'.
         value_from (Optional[Union[float, str]]): Numeric threshold value or relational field name.
         value_to (Optional[Union[float, str]]): Upper bound value, used only for BETWEEN.
+        kind (str): 'value' (field <op> value_from) or 'ratio' (field <op> value_from x relative_to).
+        relative_to (Optional[str]): For a ratio, the field compared against (e.g. 'account_balance').
+        slot_id (Optional[str]): Stable id of the condition; a clarification answer updates only its slot.
     """
 
     field: str = Field(..., description="Business field name from the user's intent.")
+    kind: Literal["value", "ratio"] = Field(
+        default="value",
+        description="'ratio': field <operator> value_from x relative_to (e.g. deposit_amount > 0.5 x account_balance).",
+    )
+    relative_to: Optional[str] = Field(
+        default=None, description="For a ratio: the field compared against (e.g. 'account_balance')."
+    )
+    slot_id: Optional[str] = Field(
+        default=None, description="Stable condition id; clarification answers update only the slot they are bound to."
+    )
     operator: Literal[">", "<", ">=", "<=", "=", "BETWEEN", "IN"] = Field(
         ..., description="Comparison operator."
     )
@@ -276,6 +289,79 @@ class Clarification(BaseModel):
     options: Optional[List[str]] = Field(default=None)
 
 
+ClarificationInputType = Literal["number", "single_select", "multi_select", "date_range", "text"]
+
+
+class ClarificationQuestion(BaseModel):
+    """One question the user must answer before a scenario can be generated.
+
+    Args:
+        id (str): Stable question id; the answer comes back under this key.
+        field_name (str): The mandatory parameter it fills: target_entity, threshold_amount,
+            timeframe or channels.
+        input_type (str): number | single_select | multi_select | date_range | text.
+        question_text (str): Business-phrased question.
+        options (Optional[list[dict]]): Choices for select inputs, each {'value', 'label'}.
+        default_value (Any): Compliance baseline used by "Apply Industry Defaults".
+        required (bool): Whether the scenario cannot be built without it.
+        unit (Optional[str]): Unit shown next to the input (e.g. 'JOD', 'days').
+        help_text (Optional[str]): One line under the question.
+        show_if (Optional[dict]): Visibility rule {question_id, equals | in | includes}.
+    """
+
+    id: str
+    field_name: str
+    input_type: ClarificationInputType
+    question_text: str
+    options: Optional[List[Dict[str, Any]]] = None
+    default_value: Any = None
+    required: bool = True
+    unit: Optional[str] = None
+    help_text: Optional[str] = None
+    show_if: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Shown only when another answer matches: {question_id, equals | in | includes}.",
+    )
+    slot_id: Optional[str] = Field(
+        default=None,
+        description="The one condition this answer updates (a threshold's slot_id, or 'new' to add one).",
+    )
+
+
+class ClarificationResponse(BaseModel):
+    """The scenario cannot be built yet: mandatory parameters are missing.
+
+    Args:
+        status (str): Always 'NEEDS_CLARIFICATION'.
+        understood_summary (list[str]): What was understood, one plain line each.
+        missing_fields (list[str]): field_name of every unanswered mandatory parameter.
+        questions (list[ClarificationQuestion]): The form to show.
+        original_request (str): The user's request the answers complete.
+    """
+
+    status: Literal["NEEDS_CLARIFICATION"] = "NEEDS_CLARIFICATION"
+    understood_summary: List[str] = Field(default_factory=list)
+    missing_fields: List[str] = Field(default_factory=list)
+    questions: List[ClarificationQuestion] = Field(default_factory=list)
+    original_request: str = ""
+
+
+class ScenarioIntentResponse(BaseModel):
+    """The scenario is fully specified and ready for the plan and the shadow test.
+
+    Args:
+        status (str): Always 'COMPLETE'.
+        enriched_intent (dict): The resolved AMLIntent (rule parameters).
+        plan_artifact (str): The implementation plan markdown.
+        resolved_parameters (dict): The four mandatory parameters as resolved.
+    """
+
+    status: Literal["COMPLETE"] = "COMPLETE"
+    enriched_intent: Dict[str, Any] = Field(default_factory=dict)
+    plan_artifact: str = ""
+    resolved_parameters: Dict[str, Any] = Field(default_factory=dict)
+
+
 class AttributeFilter(BaseModel):
     """A restriction on a customer, account or transaction attribute, resolved from a lookup table.
 
@@ -424,6 +510,13 @@ class AMLIntent(BaseModel):
         default=None,
         description="Maximum expected alert count (used in validator sanity check).",
     )
+    evaluation_period: Optional[Dict[str, str]] = Field(
+        default=None,
+        description=(
+            "{'start', 'end'} (YYYY-MM-DD) of a fixed period that contains a shorter window "
+            "(\"3 deposits in one week, in 2019\"): the window is checked anywhere inside the period."
+        ),
+    )
     anchor_date: Optional[str] = Field(
         default=None,
         description=(
@@ -503,6 +596,7 @@ class ChatMessage(BaseModel):
         plan_artifact (Optional[str]): Markdown execution plan, if this turn produced one.
         scenario_result (Optional[Dict[str, Any]]): Structured scenario/validation result.
         escalation_report (Optional[str]): Markdown escalation report, if this turn produced one.
+        clarification_request (Optional[Dict[str, Any]]): Clarification form, if this turn asked for one.
     """
 
     role: Literal["user", "assistant"] = Field(..., description="Message role.")
@@ -518,6 +612,9 @@ class ChatMessage(BaseModel):
     )
     escalation_report: Optional[str] = Field(
         default=None, description="The markdown escalation report"
+    )
+    clarification_request: Optional[Dict[str, Any]] = Field(
+        default=None, description="The clarification form (NEEDS_CLARIFICATION), if this turn asked for one"
     )
 
 
@@ -545,6 +642,13 @@ class ChatRequest(BaseModel):
         default="instant",
         description="Reasoning depth: instant=fast, thinking=deep deliberation.",
     )
+    clarification_answers: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description=(
+            "Answers from the clarification form, keyed by question id "
+            "(target_entity, threshold_amount, timeframe, channels)."
+        ),
+    )
 
 
 class SSEEvent(BaseModel):
@@ -567,6 +671,7 @@ class SSEEvent(BaseModel):
         "plan_artifact",
         "scenario_metadata_catalog",
         "escalation_report",
+        "clarification_request",
         "error",
         "done",
     ] = Field(..., description="SSE event type.")

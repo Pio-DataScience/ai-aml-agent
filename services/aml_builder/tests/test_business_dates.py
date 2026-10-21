@@ -368,7 +368,8 @@ def test_shadow_test_uses_the_stated_period(monkeypatch: pytest.MonkeyPatch) -> 
     assert "t.TRA_DATE >= DATE '2016-01-01' AND t.TRA_DATE < DATE '2023-01-01'" in sql
     assert not params
     assert result["evaluation_date"] == "2022-12-31"
-    assert result["fixed_period"] == {"start": "2016-01-01", "end": "2022-12-31", "pinned_in_sql": True}
+    assert result["fixed_period"] == {"start": "2016-01-01", "end": "2022-12-31", "pinned_in_sql": True,
+                                      "window_slides_over_period": False}
     assert result["header_alert_count"] == 12
 
 
@@ -503,3 +504,63 @@ def test_shadow_result_carries_the_measured_summary(monkeypatch: pytest.MonkeyPa
 
     assert result["metrics_summary"] == "120 transactions across 65 distinct customers"
     assert (result["header_alert_count"], result["transaction_detail_count"]) == (65, 120)
+
+
+# ─────────────────────────── a short window anywhere inside a period ───────────────────────────
+
+WEEKLY_RULE = (
+    "SELECT t.CUS_NUM, COUNT(*) AS TRANSACTION_COUNT\nFROM BI_DWH.PIO_TRANSACTIONS t\nWHERE t.COUNTRY_CODE = 400\n"
+    "  AND t.EXPL_CODE IN ('1', '660')\n  AND t.DEB_CRE_IND = '2'\n  AND t.EQU_TRA_AMT >= 10000\n"
+    "  AND t.TRA_DATE >= SYSDATE - 7\nGROUP BY t.COUNTRY_CODE, t.INST_CODE, t.CUS_NUM\nHAVING COUNT(*) >= 3"
+)
+WEEK = {"unit": "WEEKS", "value": 1}
+
+
+def test_one_week_slides_over_the_whole_year() -> None:
+    """Live case: '3 high cash deposits in one week in 2019' checks every week of 2019, not only the last one."""
+    from services.aml_builder.web.services.sql_dates import slide_window_over_period
+
+    sql, ok = slide_window_over_period(anchor_sql(WEEKLY_RULE, {"time_window": WEEK}), date(2019, 1, 1), date(2019, 12, 31), WEEK)
+
+    assert ok
+    assert ("COUNT(*) OVER (PARTITION BY t.COUNTRY_CODE, t.INST_CODE, t.CUS_NUM ORDER BY t.TRA_DATE "
+            "RANGE BETWEEN 6 PRECEDING AND CURRENT ROW) AS W1") in sql
+    assert "t.TRA_DATE >= DATE '2019-01-01' AND t.TRA_DATE < DATE '2020-01-01'" in sql
+    assert sql.startswith("SELECT CUS_NUM, MAX(W1) AS TRANSACTION_COUNT\nFROM (\nSELECT ")
+    assert sql.endswith("GROUP BY COUNTRY_CODE, INST_CODE, CUS_NUM\nHAVING MAX(W1) >= 3")
+    assert binds_used(sql) == [] and not NO_CLOCK.search(sql)
+
+
+@pytest.mark.parametrize("window, frame", [
+    ({"unit": "WEEKS", "value": 2}, "13 PRECEDING"),
+    ({"unit": "DAYS", "value": 1}, "0 PRECEDING"),
+    ({"unit": "DAYS", "value": 5}, "6 PRECEDING"),
+    ({"unit": "MONTHS", "value": 1}, "INTERVAL '1' MONTH PRECEDING"),
+])
+def test_window_frames(window: Dict[str, Any], frame: str) -> None:
+    """Weeks and months exactly; N working days as about N * 7 / 5 calendar days."""
+    from services.aml_builder.web.services.sql_dates import _window_range
+
+    assert _window_range(window) == frame
+
+
+@pytest.mark.parametrize("rule", [
+    WEEKLY_RULE.replace("HAVING COUNT(*) >= 3", "HAVING COUNT(*) < 3"),
+    WEEKLY_RULE.replace("COUNT(*) AS", "COUNT(DISTINCT t.BRA_CODE) AS").replace("HAVING COUNT(*)", "HAVING COUNT(DISTINCT t.BRA_CODE)"),
+    WEEKLY_RULE.replace("\nGROUP BY t.COUNTRY_CODE, t.INST_CODE, t.CUS_NUM\nHAVING COUNT(*) >= 3", ""),
+    WEEKLY_RULE + "\nORDER BY 2 DESC",
+])
+def test_rules_that_cannot_slide_are_left_as_they_are(rule: str) -> None:
+    """'Fewer than', DISTINCT counts, per-transaction rules and ORDER BY keep the last-window behaviour."""
+    from services.aml_builder.web.services.sql_dates import slide_window_over_period
+
+    anchored = anchor_sql(rule, {"time_window": WEEK})
+    assert slide_window_over_period(anchored, date(2019, 1, 1), date(2019, 12, 31), WEEK) == (anchored, False)
+
+
+def test_plan_says_any_window_within_the_period() -> None:
+    """The plan states that the week can be any week of the period."""
+    plan = build_plan_markdown({"scenario_name": "x", "detection_logic": "x", "anchor_date": "2019-12-31",
+                                "time_window": {"unit": "WEEKS", "value": 1, "is_rolling": True},
+                                "evaluation_period": {"start": "2019-01-01", "end": "2019-12-31"}}, None)
+    assert "Any `1 week` window within `2019-01-01` to `2019-12-31`" in plan

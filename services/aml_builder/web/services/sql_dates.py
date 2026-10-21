@@ -161,6 +161,125 @@ def pin_period(sql: str, start: date, end: date) -> Tuple[str, bool]:
     return _restore(out, literals), True
 
 
+_AGGREGATE_START: Final = re.compile(r"\b(COUNT|SUM|AVG|MIN|MAX)\s*\(", re.IGNORECASE)
+_TX_FROM: Final = re.compile(r"^FROM\s+(?:BI_DWH\.)?PIO_TRANSACTIONS\s+(?:AS\s+)?([A-Za-z_]\w*)\s*$", re.IGNORECASE)
+_COLUMN_REF: Final = re.compile(r"^(?:([A-Za-z_]\w*)\.)?([A-Za-z_][\w$#]*)$")
+
+
+def _aggregates(text: str) -> List[str]:
+    """Every aggregate call in a SQL fragment, as written (balanced parentheses).
+
+    Args:
+        text (str): A SELECT list or HAVING clause.
+
+    Returns:
+        List[str]: e.g. ['COUNT(*)', 'SUM(t.EQU_TRA_AMT)'].
+    """
+    found: List[str] = []
+    for match in _AGGREGATE_START.finditer(text):
+        depth, i = 0, match.end() - 1
+        while i < len(text):
+            depth += {"(": 1, ")": -1}.get(text[i], 0)
+            if depth == 0:
+                found.append(text[match.start():i + 1])
+                break
+            i += 1
+    return found
+
+
+def _window_range(window: Dict[str, Any]) -> Optional[str]:
+    """The RANGE frame of a time window, ending on each transaction's date.
+
+    Args:
+        window (Dict[str, Any]): The intent's time_window (unit, value).
+
+    Returns:
+        Optional[str]: e.g. '6 PRECEDING' for 1 week, "INTERVAL '1' MONTH PRECEDING", or None.
+    """
+    try:
+        size = int(window.get("value") or 0)
+    except (TypeError, ValueError):
+        return None
+    unit = str(window.get("unit") or "DAYS").strip().upper().rstrip("S") + "S"
+    if size < 1:
+        return None
+    if unit == "WEEKS":
+        return f"{7 * size - 1} PRECEDING"
+    if unit == "DAYS":
+        # N working days (Sunday-Thursday) span about N * 7 / 5 calendar days; 1 working day is that day.
+        return "0 PRECEDING" if size == 1 else f"{-(-size * 7 // 5) - 1} PRECEDING"
+    if unit in ("MONTHS", "YEARS"):
+        return f"INTERVAL '{size}' {unit[:-1]} PRECEDING"
+    return None
+
+
+def slide_window_over_period(sql: str, start: date, end: date, window: Dict[str, Any]) -> Tuple[str, bool]:
+    """Check a short window ANYWHERE inside a fixed period ("3 deposits in one week, in 2019").
+
+    The anchored SQL evaluates its window once, ending on the period's last day. This rewrites a
+    single-table rule grouped per customer / account with a HAVING condition so that the window
+    slides over every transaction date of the period: each aggregate becomes a moving aggregate over
+    the window (COUNT(*) OVER (PARTITION BY ... ORDER BY TRA_DATE RANGE ...)), the rows are limited to
+    the period, and a group is flagged when its best window meets the condition (MAX of the moving value).
+
+    Args:
+        sql (str): SQL anchored by :func:`anchor_sql` (one window start).
+        start (date): First day of the period.
+        end (date): Last day of the period.
+        window (Dict[str, Any]): The intent's time_window (the short window).
+
+    Returns:
+        Tuple[str, bool]: The rewritten SQL and True; or the SQL unchanged and False when the rule is not of
+            that form (no GROUP BY / HAVING, joins, DISTINCT aggregates, ORDER BY, or a "below" condition).
+    """
+    from services.aml_builder.web.services.attribute_filters import top_level_clauses
+
+    frame = _window_range(window or {})
+    pinned, ok = pin_period(sql, start, end)
+    clauses = top_level_clauses(pinned) if ok and frame else None
+    if not clauses or not {"GROUP BY", "HAVING"} <= set(clauses) or "ORDER BY" in clauses:
+        return sql, False
+    from_text = pinned[clauses["FROM"][0]:clauses["FROM"][1]].strip()
+    alias_match = _TX_FROM.match(from_text)
+    if not alias_match:
+        return sql, False
+    alias = alias_match.group(1)
+    select_list = pinned[clauses["SELECT"][0] + len("SELECT"):clauses["FROM"][0]].strip()
+    group_list = pinned[clauses["GROUP BY"][0] + len("GROUP BY"):clauses["GROUP BY"][1]].strip()
+    having = pinned[clauses["HAVING"][0] + len("HAVING"):clauses["HAVING"][1]].strip()
+    body = pinned[clauses["FROM"][0]:clauses["GROUP BY"][0]].rstrip()
+
+    # Only "at least / more than" conditions: the best window decides (MAX). "Fewer than" cannot slide this way.
+    if re.search(r"<|(?<![<>!])=(?!=)", re.sub(r">=", ">", having)):
+        return sql, False
+    aggregates = list(dict.fromkeys(_aggregates(select_list) + _aggregates(having)))
+    if not aggregates or any(re.search(r"\bDISTINCT\b", a, re.IGNORECASE) for a in aggregates):
+        return sql, False
+    groups = [g.strip() for g in group_list.split(",") if g.strip()]
+    names = []
+    for group in groups:
+        column = _COLUMN_REF.match(group)
+        if not column:
+            return sql, False
+        names.append(column.group(2))
+
+    partition = ", ".join(groups)
+    moving = [f"{agg} OVER (PARTITION BY {partition} ORDER BY {alias}.TRA_DATE RANGE BETWEEN {frame} AND CURRENT ROW) AS W{i}"
+              for i, agg in enumerate(aggregates, 1)]
+    inner_select = ", ".join([f"{g} AS {n}" for g, n in zip(groups, names)] + moving)
+
+    def outer(text: str) -> str:
+        for i, agg in enumerate(aggregates, 1):
+            text = text.replace(agg, f"MAX(W{i})")
+        return re.sub(rf"\b{re.escape(alias)}\.", "", text)
+
+    rewritten = (
+        f"SELECT {outer(select_list)}\nFROM (\nSELECT {inner_select}\n{body}\n) w\n"
+        f"GROUP BY {', '.join(names)}\nHAVING {outer(having)}"
+    )
+    return rewritten, True
+
+
 # ─────────────────────────────── helpers ────────────────────────────────
 
 
