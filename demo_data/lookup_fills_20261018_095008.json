@@ -1,0 +1,7200 @@
+{
+  "created_at": "2026-10-18T09:50:04",
+  "database": "192.168.30.43:1521/OPENBI2",
+  "user": "BI_DWH",
+  "country_code": "400",
+  "inst_code": "1",
+  "applied": true,
+  "rows": [
+    {
+      "attribute": "account_status",
+      "table": "BI_DWH.PIO_ACCOUNT_STATUS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "STATUS_CODE": "0"
+      },
+      "values": {
+        "DES_ENG": "OPEN",
+        "DES_NAT_LAN": "مفتوح"
+      },
+      "source_rows": 10288,
+      "basis": "same code in PIO_ACCOUNT_STATUS for country 414 / inst 1"
+    },
+    {
+      "attribute": "account_status",
+      "table": "BI_DWH.PIO_ACCOUNT_STATUS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "STATUS_CODE": "6"
+      },
+      "values": {
+        "DES_ENG": "ACCOUNT STATUS 6 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 44,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "account_status",
+      "table": "BI_DWH.PIO_ACCOUNT_STATUS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "STATUS_CODE": "7"
+      },
+      "values": {
+        "DES_ENG": "ACCOUNT STATUS 7 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 11,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "account_status",
+      "table": "BI_DWH.PIO_ACCOUNT_STATUS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "STATUS_CODE": "8"
+      },
+      "values": {
+        "DES_ENG": "BLACK LISTED",
+        "DES_NAT_LAN": "مدرج بالقائمة السوداء"
+      },
+      "source_rows": 11,
+      "basis": "same code in PIO_ACCOUNT_STATUS for countries 414 and 508"
+    },
+    {
+      "attribute": "account_product",
+      "table": "BI_DWH.PIO_PRODUCTS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PRODUCT_CODE": "0"
+      },
+      "values": {
+        "PRODUCT_DES_ENG": "ACCOUNT PRODUCT 0 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 11394,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "account_product",
+      "table": "BI_DWH.PIO_PRODUCTS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PRODUCT_CODE": "3"
+      },
+      "values": {
+        "PRODUCT_DES_ENG": "SAVING",
+        "PRODUCT_DES_NAT": "التوفير"
+      },
+      "source_rows": 21,
+      "basis": "same code in PIO_PRODUCTS for country 414 / inst 1"
+    },
+    {
+      "attribute": "account_product",
+      "table": "BI_DWH.PIO_PRODUCTS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PRODUCT_CODE": "2"
+      },
+      "values": {
+        "PRODUCT_DES_ENG": "TIME DEPOSITS",
+        "PRODUCT_DES_NAT": "ودائع لأجل"
+      },
+      "source_rows": 11,
+      "basis": "same code in PIO_PRODUCTS for country 414 / inst 1"
+    },
+    {
+      "attribute": "account_type",
+      "table": "BI_DWH.PIO_ACCOUNT_TYPE",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "ACCT_TYPE": "5"
+      },
+      "values": {
+        "DES_ENG": "ACCOUNT TYPE 5 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 2,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "account_type",
+      "table": "BI_DWH.PIO_ACCOUNT_TYPE",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "ACCT_TYPE": "N"
+      },
+      "values": {
+        "DES_ENG": "ACCOUNT TYPE N (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 1,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "account_type",
+      "table": "BI_DWH.PIO_ACCOUNT_TYPE",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "ACCT_TYPE": "U"
+      },
+      "values": {
+        "DES_ENG": "ACCOUNT TYPE U (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 1,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "account_type",
+      "table": "BI_DWH.PIO_ACCOUNT_TYPE",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "ACCT_TYPE": "3"
+      },
+      "values": {
+        "DES_ENG": "ACCOUNT TYPE 3 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 1,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "account_type",
+      "table": "BI_DWH.PIO_ACCOUNT_TYPE",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "ACCT_TYPE": "4"
+      },
+      "values": {
+        "DES_ENG": "ACCOUNT TYPE 4 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 1,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "account_type",
+      "table": "BI_DWH.PIO_ACCOUNT_TYPE",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "ACCT_TYPE": "Y"
+      },
+      "values": {
+        "DES_ENG": "ACCOUNT TYPE Y (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 1,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "account_type",
+      "table": "BI_DWH.PIO_ACCOUNT_TYPE",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "ACCT_TYPE": "S"
+      },
+      "values": {
+        "DES_ENG": "ACCOUNT TYPE S (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 1,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "EMPLOYEE"
+      },
+      "values": {
+        "PROF_DESC": "EMPLOYEE"
+      },
+      "source_rows": 20482,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "0"
+      },
+      "values": {
+        "PROF_DESC": "PROFESSION 0 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 3473,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "TEACHER"
+      },
+      "values": {
+        "PROF_DESC": "TEACHER"
+      },
+      "source_rows": 2660,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "CLERK"
+      },
+      "values": {
+        "PROF_DESC": "CLERK"
+      },
+      "source_rows": 1520,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "MANAGER"
+      },
+      "values": {
+        "PROF_DESC": "MANAGER"
+      },
+      "source_rows": 1103,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "PENSIONER"
+      },
+      "values": {
+        "PROF_DESC": "PENSIONER"
+      },
+      "source_rows": 798,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "OFFICER"
+      },
+      "values": {
+        "PROF_DESC": "OFFICER"
+      },
+      "source_rows": 532,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "RETIRED"
+      },
+      "values": {
+        "PROF_DESC": "RETIRED"
+      },
+      "source_rows": 456,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "SOLDIER"
+      },
+      "values": {
+        "PROF_DESC": "SOLDIER"
+      },
+      "source_rows": 380,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "NURSE"
+      },
+      "values": {
+        "PROF_DESC": "NURSE"
+      },
+      "source_rows": 380,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "Others"
+      },
+      "values": {
+        "PROF_DESC": "OTHERS"
+      },
+      "source_rows": 356,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "Other"
+      },
+      "values": {
+        "PROF_DESC": "OTHER"
+      },
+      "source_rows": 277,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "Teacher"
+      },
+      "values": {
+        "PROF_DESC": "TEACHER"
+      },
+      "source_rows": 256,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "SUPERVISOR"
+      },
+      "values": {
+        "PROF_DESC": "SUPERVISOR"
+      },
+      "source_rows": 190,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "SECTION HEAD"
+      },
+      "values": {
+        "PROF_DESC": "SECTION HEAD"
+      },
+      "source_rows": 190,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "RAQEEB"
+      },
+      "values": {
+        "PROF_DESC": "RAQEEB"
+      },
+      "source_rows": 190,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "POLICE MAN"
+      },
+      "values": {
+        "PROF_DESC": "POLICE MAN"
+      },
+      "source_rows": 152,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "PRODUCTION OPERATOR"
+      },
+      "values": {
+        "PROF_DESC": "PRODUCTION OPERATOR"
+      },
+      "source_rows": 114,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "ASSISTANT MANAGER"
+      },
+      "values": {
+        "PROF_DESC": "ASSISTANT MANAGER"
+      },
+      "source_rows": 114,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "WAKEEL"
+      },
+      "values": {
+        "PROF_DESC": "WAKEEL"
+      },
+      "source_rows": 114,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "TECHNICIAN"
+      },
+      "values": {
+        "PROF_DESC": "TECHNICIAN"
+      },
+      "source_rows": 114,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "NAQEEB"
+      },
+      "values": {
+        "PROF_DESC": "NAQEEB"
+      },
+      "source_rows": 114,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "HEAD OF DEPARTMENT"
+      },
+      "values": {
+        "PROF_DESC": "HEAD OF DEPARTMENT"
+      },
+      "source_rows": 76,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "DOCTOR"
+      },
+      "values": {
+        "PROF_DESC": "DOCTOR"
+      },
+      "source_rows": 76,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "RECEPTIONIST"
+      },
+      "values": {
+        "PROF_DESC": "RECEPTIONIST"
+      },
+      "source_rows": 76,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "CONSULTANT"
+      },
+      "values": {
+        "PROF_DESC": "CONSULTANT"
+      },
+      "source_rows": 76,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "BRIGADIER"
+      },
+      "values": {
+        "PROF_DESC": "BRIGADIER"
+      },
+      "source_rows": 76,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "JUNIOR OFFICER"
+      },
+      "values": {
+        "PROF_DESC": "JUNIOR OFFICER"
+      },
+      "source_rows": 76,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "TYPIST"
+      },
+      "values": {
+        "PROF_DESC": "TYPIST"
+      },
+      "source_rows": 76,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "SERGENT"
+      },
+      "values": {
+        "PROF_DESC": "SERGENT"
+      },
+      "source_rows": 76,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "DRILLER"
+      },
+      "values": {
+        "PROF_DESC": "DRILLER"
+      },
+      "source_rows": 76,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "DRIVER"
+      },
+      "values": {
+        "PROF_DESC": "DRIVER"
+      },
+      "source_rows": 76,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "SECRETARY"
+      },
+      "values": {
+        "PROF_DESC": "SECRETARY"
+      },
+      "source_rows": 76,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "ACCOUNTING CLERK"
+      },
+      "values": {
+        "PROF_DESC": "ACCOUNTING CLERK"
+      },
+      "source_rows": 76,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "SUPER VISOR"
+      },
+      "values": {
+        "PROF_DESC": "SUPER VISOR"
+      },
+      "source_rows": 76,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "WAREHOUSEMAN"
+      },
+      "values": {
+        "PROF_DESC": "WAREHOUSEMAN"
+      },
+      "source_rows": 76,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "Business Person"
+      },
+      "values": {
+        "PROF_DESC": "BUSINESS PERSON"
+      },
+      "source_rows": 58,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "Police"
+      },
+      "values": {
+        "PROF_DESC": "POLICE"
+      },
+      "source_rows": 56,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "Security Officer"
+      },
+      "values": {
+        "PROF_DESC": "SECURITY OFFICER"
+      },
+      "source_rows": 55,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "ENGINRING"
+      },
+      "values": {
+        "PROF_DESC": "ENGINRING"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "AM"
+      },
+      "values": {
+        "PROF_DESC": "AM"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "OILFIELD SEPECIALIST"
+      },
+      "values": {
+        "PROF_DESC": "OILFIELD SEPECIALIST"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "SECURITY GUARD"
+      },
+      "values": {
+        "PROF_DESC": "SECURITY GUARD"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "Sinior HR Analyst"
+      },
+      "values": {
+        "PROF_DESC": "SINIOR HR ANALYST"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "CONTRACTS ENGINEER"
+      },
+      "values": {
+        "PROF_DESC": "CONTRACTS ENGINEER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "INVESTMENT MANAGER"
+      },
+      "values": {
+        "PROF_DESC": "INVESTMENT MANAGER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "STAFF ENGINEER"
+      },
+      "values": {
+        "PROF_DESC": "STAFF ENGINEER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "DATA MANAGEMENT TECHNICIAN"
+      },
+      "values": {
+        "PROF_DESC": "DATA MANAGEMENT TECHNICIAN"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "HR staff"
+      },
+      "values": {
+        "PROF_DESC": "HR STAFF"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "ASSISTANT PROFESSOR"
+      },
+      "values": {
+        "PROF_DESC": "ASSISTANT PROFESSOR"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "RESERVATION ASSISTANT"
+      },
+      "values": {
+        "PROF_DESC": "RESERVATION ASSISTANT"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "SOLIDER"
+      },
+      "values": {
+        "PROF_DESC": "SOLIDER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "GEOSCIENCES TECHNICIAN LEAD"
+      },
+      "values": {
+        "PROF_DESC": "GEOSCIENCES TECHNICIAN LEAD"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "HEAD OF COMMUNICATION DEPARTME"
+      },
+      "values": {
+        "PROF_DESC": "HEAD OF COMMUNICATION DEPARTME"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "PILOT"
+      },
+      "values": {
+        "PROF_DESC": "PILOT"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "CUSTOMER SERVICE STAFF"
+      },
+      "values": {
+        "PROF_DESC": "CUSTOMER SERVICE STAFF"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "SALES DRIVER"
+      },
+      "values": {
+        "PROF_DESC": "SALES DRIVER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "EDITOR"
+      },
+      "values": {
+        "PROF_DESC": "EDITOR"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "OPERATION GEOLOGIST III"
+      },
+      "values": {
+        "PROF_DESC": "OPERATION GEOLOGIST III"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "OFFICE STAFF ASSISTANT"
+      },
+      "values": {
+        "PROF_DESC": "OFFICE STAFF ASSISTANT"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "TECHNITION"
+      },
+      "values": {
+        "PROF_DESC": "TECHNITION"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "ACCOUNTANT"
+      },
+      "values": {
+        "PROF_DESC": "ACCOUNTANT"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "MANAGER OF SCHOOL"
+      },
+      "values": {
+        "PROF_DESC": "MANAGER OF SCHOOL"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "PROJECT DEVELOPER"
+      },
+      "values": {
+        "PROF_DESC": "PROJECT DEVELOPER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "CAPTAIN"
+      },
+      "values": {
+        "PROF_DESC": "CAPTAIN"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "INTERIOR DISGNER"
+      },
+      "values": {
+        "PROF_DESC": "INTERIOR DISGNER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "facilities engineer"
+      },
+      "values": {
+        "PROF_DESC": "FACILITIES ENGINEER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "Contracts Administrator Assist"
+      },
+      "values": {
+        "PROF_DESC": "CONTRACTS ADMINISTRATOR ASSIST"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "RELEATIONSHIP"
+      },
+      "values": {
+        "PROF_DESC": "RELEATIONSHIP"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "GENERAL DOCTOR"
+      },
+      "values": {
+        "PROF_DESC": "GENERAL DOCTOR"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "teacher"
+      },
+      "values": {
+        "PROF_DESC": "TEACHER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "holiday's consultant"
+      },
+      "values": {
+        "PROF_DESC": "HOLIDAY'S CONSULTANT"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "Finance Secretary"
+      },
+      "values": {
+        "PROF_DESC": "FINANCE SECRETARY"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "LEGAL NURSE"
+      },
+      "values": {
+        "PROF_DESC": "LEGAL NURSE"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "Asset Intergrity Program Lead"
+      },
+      "values": {
+        "PROF_DESC": "ASSET INTERGRITY PROGRAM LEAD"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "CAPACITY OF OFFICER-RAMP"
+      },
+      "values": {
+        "PROF_DESC": "CAPACITY OF OFFICER-RAMP"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "SENIOR MANAGER"
+      },
+      "values": {
+        "PROF_DESC": "SENIOR MANAGER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "ASS. PHARMACIST"
+      },
+      "values": {
+        "PROF_DESC": "ASS. PHARMACIST"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "WRITER"
+      },
+      "values": {
+        "PROF_DESC": "WRITER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "Faris"
+      },
+      "values": {
+        "PROF_DESC": "FARIS"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "Customer Service Agent"
+      },
+      "values": {
+        "PROF_DESC": "CUSTOMER SERVICE AGENT"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "SALARY SECTION MANAGER"
+      },
+      "values": {
+        "PROF_DESC": "SALARY SECTION MANAGER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "ENGINEER"
+      },
+      "values": {
+        "PROF_DESC": "ENGINEER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "ASSISTANT PHARMACIST"
+      },
+      "values": {
+        "PROF_DESC": "ASSISTANT PHARMACIST"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "SPECIALIST ORAL SURGEON"
+      },
+      "values": {
+        "PROF_DESC": "SPECIALIST ORAL SURGEON"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "GEOSCIENCE TECHNICIAN"
+      },
+      "values": {
+        "PROF_DESC": "GEOSCIENCE TECHNICIAN"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "ADMINISTRATION ASSISTANT"
+      },
+      "values": {
+        "PROF_DESC": "ADMINISTRATION ASSISTANT"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "DESIGNATED PERSON"
+      },
+      "values": {
+        "PROF_DESC": "DESIGNATED PERSON"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "Logistic & Contract Management"
+      },
+      "values": {
+        "PROF_DESC": "LOGISTIC & CONTRACT MANAGEMENT"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "Administration Clerk"
+      },
+      "values": {
+        "PROF_DESC": "ADMINISTRATION CLERK"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "BM"
+      },
+      "values": {
+        "PROF_DESC": "BM"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "TREASURER"
+      },
+      "values": {
+        "PROF_DESC": "TREASURER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "hr staff"
+      },
+      "values": {
+        "PROF_DESC": "HR STAFF"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "SUPERVISOR ACCOUNTS"
+      },
+      "values": {
+        "PROF_DESC": "SUPERVISOR ACCOUNTS"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "SPECIAL SECURTY"
+      },
+      "values": {
+        "PROF_DESC": "SPECIAL SECURTY"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "DRAFTMAN"
+      },
+      "values": {
+        "PROF_DESC": "DRAFTMAN"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "HES ADVISOR"
+      },
+      "values": {
+        "PROF_DESC": "HES ADVISOR"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "PUBLIC RELATIONS OFFICER"
+      },
+      "values": {
+        "PROF_DESC": "PUBLIC RELATIONS OFFICER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "SECURITY"
+      },
+      "values": {
+        "PROF_DESC": "SECURITY"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "NETWORK ADMINSTRATOR"
+      },
+      "values": {
+        "PROF_DESC": "NETWORK ADMINSTRATOR"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "PRINTER MAN"
+      },
+      "values": {
+        "PROF_DESC": "PRINTER MAN"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "ASSITANCE MANAGER"
+      },
+      "values": {
+        "PROF_DESC": "ASSITANCE MANAGER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "ENGINEERING DATA TECH"
+      },
+      "values": {
+        "PROF_DESC": "ENGINEERING DATA TECH"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "LUBRICANTS COORDINATOR"
+      },
+      "values": {
+        "PROF_DESC": "LUBRICANTS COORDINATOR"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "ASSISTENT SPECIALIST DOCTOR"
+      },
+      "values": {
+        "PROF_DESC": "ASSISTENT SPECIALIST DOCTOR"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "TECHNICAL"
+      },
+      "values": {
+        "PROF_DESC": "TECHNICAL"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "AO"
+      },
+      "values": {
+        "PROF_DESC": "AO"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "FIELD OPERATOR"
+      },
+      "values": {
+        "PROF_DESC": "FIELD OPERATOR"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "ARTIFICIAL LIFT ENGINEER"
+      },
+      "values": {
+        "PROF_DESC": "ARTIFICIAL LIFT ENGINEER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "Juarian of library"
+      },
+      "values": {
+        "PROF_DESC": "JUARIAN OF LIBRARY"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "PROJECT GOELOGIST"
+      },
+      "values": {
+        "PROF_DESC": "PROJECT GOELOGIST"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "ASSISTANT OF ACCOUNTING DEPART"
+      },
+      "values": {
+        "PROF_DESC": "ASSISTANT OF ACCOUNTING DEPART"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "account Payable"
+      },
+      "values": {
+        "PROF_DESC": "ACCOUNT PAYABLE"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "training advisor"
+      },
+      "values": {
+        "PROF_DESC": "TRAINING ADVISOR"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "CUSTOMER SERVICE SUPERVISOR"
+      },
+      "values": {
+        "PROF_DESC": "CUSTOMER SERVICE SUPERVISOR"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "GEOLOGIST"
+      },
+      "values": {
+        "PROF_DESC": "GEOLOGIST"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "NATIONAL FUND SUPERVISOR"
+      },
+      "values": {
+        "PROF_DESC": "NATIONAL FUND SUPERVISOR"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "WAREHOUSE HELPER"
+      },
+      "values": {
+        "PROF_DESC": "WAREHOUSE HELPER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "mechanical coordinator"
+      },
+      "values": {
+        "PROF_DESC": "MECHANICAL COORDINATOR"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "NURSE SUPERVISOR"
+      },
+      "values": {
+        "PROF_DESC": "NURSE SUPERVISOR"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "FINANCIAL RESEARCHER"
+      },
+      "values": {
+        "PROF_DESC": "FINANCIAL RESEARCHER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "LEAD OPERATOR"
+      },
+      "values": {
+        "PROF_DESC": "LEAD OPERATOR"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "FINANCE SUPERVISOR"
+      },
+      "values": {
+        "PROF_DESC": "FINANCE SUPERVISOR"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "FINANCE WRITER"
+      },
+      "values": {
+        "PROF_DESC": "FINANCE WRITER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "TRAINER"
+      },
+      "values": {
+        "PROF_DESC": "TRAINER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "IT STAFF"
+      },
+      "values": {
+        "PROF_DESC": "IT STAFF"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "PETROLEUM ENGINEER"
+      },
+      "values": {
+        "PROF_DESC": "PETROLEUM ENGINEER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "ADMINISTRATION INCHARGE"
+      },
+      "values": {
+        "PROF_DESC": "ADMINISTRATION INCHARGE"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "SOCIAL SEARCHING"
+      },
+      "values": {
+        "PROF_DESC": "SOCIAL SEARCHING"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "ARTIST"
+      },
+      "values": {
+        "PROF_DESC": "ARTIST"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "COMMUNICATION MANAGER"
+      },
+      "values": {
+        "PROF_DESC": "COMMUNICATION MANAGER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "JUNIOR PLANINIG TECHNICIAN"
+      },
+      "values": {
+        "PROF_DESC": "JUNIOR PLANINIG TECHNICIAN"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "system analyast"
+      },
+      "values": {
+        "PROF_DESC": "SYSTEM ANALYAST"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "GEOPHYSICIST"
+      },
+      "values": {
+        "PROF_DESC": "GEOPHYSICIST"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "ASS MANAGER"
+      },
+      "values": {
+        "PROF_DESC": "ASS MANAGER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "MUKHAIZNA SUBSURFACE PRODUCTIO"
+      },
+      "values": {
+        "PROF_DESC": "MUKHAIZNA SUBSURFACE PRODUCTIO"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "OPERATOR"
+      },
+      "values": {
+        "PROF_DESC": "OPERATOR"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "Cost Analyst"
+      },
+      "values": {
+        "PROF_DESC": "COST ANALYST"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "SR.ENGINEER"
+      },
+      "values": {
+        "PROF_DESC": "SR.ENGINEER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "SINGER"
+      },
+      "values": {
+        "PROF_DESC": "SINGER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "Debt Collector"
+      },
+      "values": {
+        "PROF_DESC": "DEBT COLLECTOR"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "SUPERVISOR NURSING"
+      },
+      "values": {
+        "PROF_DESC": "SUPERVISOR NURSING"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "STATION OFFICER"
+      },
+      "values": {
+        "PROF_DESC": "STATION OFFICER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "GENERAL SUPERVISOR"
+      },
+      "values": {
+        "PROF_DESC": "GENERAL SUPERVISOR"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "RESEARCH SPECILIST"
+      },
+      "values": {
+        "PROF_DESC": "RESEARCH SPECILIST"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "AREEF"
+      },
+      "values": {
+        "PROF_DESC": "AREEF"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "POLICEMAN"
+      },
+      "values": {
+        "PROF_DESC": "POLICEMAN"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "STATION SUPERVISOR"
+      },
+      "values": {
+        "PROF_DESC": "STATION SUPERVISOR"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "HEAD OF FINANCE DEPARTMENT"
+      },
+      "values": {
+        "PROF_DESC": "HEAD OF FINANCE DEPARTMENT"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "LABOUR"
+      },
+      "values": {
+        "PROF_DESC": "LABOUR"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "PLANING ENGINEER"
+      },
+      "values": {
+        "PROF_DESC": "PLANING ENGINEER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "HDD Helper"
+      },
+      "values": {
+        "PROF_DESC": "HDD HELPER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "TECHER"
+      },
+      "values": {
+        "PROF_DESC": "TECHER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "HR TEAM LEAD MUKHAIZNA"
+      },
+      "values": {
+        "PROF_DESC": "HR TEAM LEAD MUKHAIZNA"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "MAJOR"
+      },
+      "values": {
+        "PROF_DESC": "MAJOR"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "FORKLIFT OPERATOR"
+      },
+      "values": {
+        "PROF_DESC": "FORKLIFT OPERATOR"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "ENGINEERING APPLICATION SUPPOR"
+      },
+      "values": {
+        "PROF_DESC": "ENGINEERING APPLICATION SUPPOR"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "WAREHOUSE MAN"
+      },
+      "values": {
+        "PROF_DESC": "WAREHOUSE MAN"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "ACCOUNTS PAYABLE ACCOUNTANT"
+      },
+      "values": {
+        "PROF_DESC": "ACCOUNTS PAYABLE ACCOUNTANT"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "Nurse"
+      },
+      "values": {
+        "PROF_DESC": "NURSE"
+      },
+      "source_rows": 33,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "Security Guard"
+      },
+      "values": {
+        "PROF_DESC": "SECURITY GUARD"
+      },
+      "source_rows": 33,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "Driver"
+      },
+      "values": {
+        "PROF_DESC": "DRIVER"
+      },
+      "source_rows": 23,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "Record Management Officer"
+      },
+      "values": {
+        "PROF_DESC": "RECORD MANAGEMENT OFFICER"
+      },
+      "source_rows": 22,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "Human Resource Officer"
+      },
+      "values": {
+        "PROF_DESC": "HUMAN RESOURCE OFFICER"
+      },
+      "source_rows": 12,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "Banker"
+      },
+      "values": {
+        "PROF_DESC": "BANKER"
+      },
+      "source_rows": 12,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "Messenger"
+      },
+      "values": {
+        "PROF_DESC": "MESSENGER"
+      },
+      "source_rows": 11,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "Control Room Operator"
+      },
+      "values": {
+        "PROF_DESC": "CONTROL ROOM OPERATOR"
+      },
+      "source_rows": 11,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "Legal Officer"
+      },
+      "values": {
+        "PROF_DESC": "LEGAL OFFICER"
+      },
+      "source_rows": 11,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "Librarian"
+      },
+      "values": {
+        "PROF_DESC": "LIBRARIAN"
+      },
+      "source_rows": 11,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "Special Assignment"
+      },
+      "values": {
+        "PROF_DESC": "SPECIAL ASSIGNMENT"
+      },
+      "source_rows": 11,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "Administrative Officer"
+      },
+      "values": {
+        "PROF_DESC": "ADMINISTRATIVE OFFICER"
+      },
+      "source_rows": 11,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "Bank officer"
+      },
+      "values": {
+        "PROF_DESC": "BANK OFFICER"
+      },
+      "source_rows": 9,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "Medical Officer"
+      },
+      "values": {
+        "PROF_DESC": "MEDICAL OFFICER"
+      },
+      "source_rows": 7,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "Economist"
+      },
+      "values": {
+        "PROF_DESC": "ECONOMIST"
+      },
+      "source_rows": 1,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "Marketing Manager"
+      },
+      "values": {
+        "PROF_DESC": "MARKETING MANAGER"
+      },
+      "source_rows": 1,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "Manager"
+      },
+      "values": {
+        "PROF_DESC": "MANAGER"
+      },
+      "source_rows": 1,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "Personal Secretary"
+      },
+      "values": {
+        "PROF_DESC": "PERSONAL SECRETARY"
+      },
+      "source_rows": 1,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "Medical Doctor"
+      },
+      "values": {
+        "PROF_DESC": "MEDICAL DOCTOR"
+      },
+      "source_rows": 1,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "Civil Engineer"
+      },
+      "values": {
+        "PROF_DESC": "CIVIL ENGINEER"
+      },
+      "source_rows": 1,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "profession",
+      "table": "BI_DWH.PIO_PROFFISSION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "PROF_ID": "Social Affairs"
+      },
+      "values": {
+        "PROF_DESC": "SOCIAL AFFAIRS"
+      },
+      "source_rows": 1,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "EMPLOYEE"
+      },
+      "values": {
+        "DES_ENG": "EMPLOYEE"
+      },
+      "source_rows": 22003,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "EMP"
+      },
+      "values": {
+        "DES_ENG": "EMP"
+      },
+      "source_rows": 2508,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "EMPLOYED"
+      },
+      "values": {
+        "DES_ENG": "EMPLOYED"
+      },
+      "source_rows": 1178,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "SELF EMPLOYED"
+      },
+      "values": {
+        "DES_ENG": "SELF EMPLOYED"
+      },
+      "source_rows": 836,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "SELF-EMPLOYED"
+      },
+      "values": {
+        "DES_ENG": "SELF-EMPLOYED"
+      },
+      "source_rows": 810,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "RETIRED"
+      },
+      "values": {
+        "DES_ENG": "RETIRED"
+      },
+      "source_rows": 722,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "EMPLOYEED"
+      },
+      "values": {
+        "DES_ENG": "EMPLOYEED"
+      },
+      "source_rows": 646,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "STAFF"
+      },
+      "values": {
+        "DES_ENG": "STAFF"
+      },
+      "source_rows": 646,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "employee"
+      },
+      "values": {
+        "DES_ENG": "EMPLOYEE"
+      },
+      "source_rows": 608,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "TEACHER"
+      },
+      "values": {
+        "DES_ENG": "TEACHER"
+      },
+      "source_rows": 570,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "OFFICER"
+      },
+      "values": {
+        "DES_ENG": "OFFICER"
+      },
+      "source_rows": 532,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "CLERK"
+      },
+      "values": {
+        "DES_ENG": "CLERK"
+      },
+      "source_rows": 418,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "EMPLOY"
+      },
+      "values": {
+        "DES_ENG": "EMPLOY"
+      },
+      "source_rows": 380,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "EMPLOYEER"
+      },
+      "values": {
+        "DES_ENG": "EMPLOYEER"
+      },
+      "source_rows": 342,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "MANAGER"
+      },
+      "values": {
+        "DES_ENG": "MANAGER"
+      },
+      "source_rows": 228,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "Self-Employed"
+      },
+      "values": {
+        "DES_ENG": "SELF-EMPLOYED"
+      },
+      "source_rows": 190,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "NURSE"
+      },
+      "values": {
+        "DES_ENG": "NURSE"
+      },
+      "source_rows": 190,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "DIRECTOR"
+      },
+      "values": {
+        "DES_ENG": "DIRECTOR"
+      },
+      "source_rows": 190,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "EMPOLYEE"
+      },
+      "values": {
+        "DES_ENG": "EMPOLYEE"
+      },
+      "source_rows": 152,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "6"
+      },
+      "values": {
+        "DES_ENG": "OCCUPATION 6 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 134,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "15"
+      },
+      "values": {
+        "DES_ENG": "OCCUPATION 15 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 116,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "SUPER FAIZER"
+      },
+      "values": {
+        "DES_ENG": "SUPER FAIZER"
+      },
+      "source_rows": 114,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "BUSINESSMAN"
+      },
+      "values": {
+        "DES_ENG": "BUSINESSMAN"
+      },
+      "source_rows": 114,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "DOCTOR"
+      },
+      "values": {
+        "DES_ENG": "DOCTOR"
+      },
+      "source_rows": 114,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "Employed"
+      },
+      "values": {
+        "DES_ENG": "EMPLOYED"
+      },
+      "source_rows": 114,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "SELF EMPLOYEE"
+      },
+      "values": {
+        "DES_ENG": "SELF EMPLOYEE"
+      },
+      "source_rows": 114,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "HOUSEWIFE"
+      },
+      "values": {
+        "DES_ENG": "HOUSEWIFE"
+      },
+      "source_rows": 114,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "MOE"
+      },
+      "values": {
+        "DES_ENG": "MOE"
+      },
+      "source_rows": 114,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "CHAIRMAN"
+      },
+      "values": {
+        "DES_ENG": "CHAIRMAN"
+      },
+      "source_rows": 114,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "61"
+      },
+      "values": {
+        "DES_ENG": "OCCUPATION 61 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 78,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "SELF EMPLOYEED"
+      },
+      "values": {
+        "DES_ENG": "SELF EMPLOYEED"
+      },
+      "source_rows": 76,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "SUPERVISOR"
+      },
+      "values": {
+        "DES_ENG": "SUPERVISOR"
+      },
+      "source_rows": 76,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "employed"
+      },
+      "values": {
+        "DES_ENG": "EMPLOYED"
+      },
+      "source_rows": 76,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "OXY"
+      },
+      "values": {
+        "DES_ENG": "OXY"
+      },
+      "source_rows": 76,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "UNEMPLOYEED"
+      },
+      "values": {
+        "DES_ENG": "UNEMPLOYEED"
+      },
+      "source_rows": 76,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "DRAIVER"
+      },
+      "values": {
+        "DES_ENG": "DRAIVER"
+      },
+      "source_rows": 76,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "TECHNICIAN"
+      },
+      "values": {
+        "DES_ENG": "TECHNICIAN"
+      },
+      "source_rows": 76,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "SELFEMPLOYED"
+      },
+      "values": {
+        "DES_ENG": "SELFEMPLOYED"
+      },
+      "source_rows": 76,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "MINOR"
+      },
+      "values": {
+        "DES_ENG": "MINOR"
+      },
+      "source_rows": 76,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "11"
+      },
+      "values": {
+        "DES_ENG": "OCCUPATION 11 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 56,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "HOUSE WAIF"
+      },
+      "values": {
+        "DES_ENG": "HOUSE WAIF"
+      },
+      "source_rows": 50,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "PTHER"
+      },
+      "values": {
+        "DES_ENG": "PTHER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "WALI"
+      },
+      "values": {
+        "DES_ENG": "WALI"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "CEO"
+      },
+      "values": {
+        "DES_ENG": "CEO"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "SELF_EMPIOYED"
+      },
+      "values": {
+        "DES_ENG": "SELF_EMPIOYED"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "Retired"
+      },
+      "values": {
+        "DES_ENG": "RETIRED"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "NWSE"
+      },
+      "values": {
+        "DES_ENG": "NWSE"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "PHARMACY"
+      },
+      "values": {
+        "DES_ENG": "PHARMACY"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "FINANCE"
+      },
+      "values": {
+        "DES_ENG": "FINANCE"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "HEAD"
+      },
+      "values": {
+        "DES_ENG": "HEAD"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "POLICE MAN"
+      },
+      "values": {
+        "DES_ENG": "POLICE MAN"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "MOI"
+      },
+      "values": {
+        "DES_ENG": "MOI"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "ASST SALES"
+      },
+      "values": {
+        "DES_ENG": "ASST SALES"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "SICAYRATY"
+      },
+      "values": {
+        "DES_ENG": "SICAYRATY"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "EMPLOYEES"
+      },
+      "values": {
+        "DES_ENG": "EMPLOYEES"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "POLICE"
+      },
+      "values": {
+        "DES_ENG": "POLICE"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "OMAN"
+      },
+      "values": {
+        "DES_ENG": "OMAN"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "MD"
+      },
+      "values": {
+        "DES_ENG": "MD"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "EXE PRESIDENT"
+      },
+      "values": {
+        "DES_ENG": "EXE PRESIDENT"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "HEAD OF MPA"
+      },
+      "values": {
+        "DES_ENG": "HEAD OF MPA"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "DEDUTY CEO"
+      },
+      "values": {
+        "DES_ENG": "DEDUTY CEO"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "MUAMIR DESIUN"
+      },
+      "values": {
+        "DES_ENG": "MUAMIR DESIUN"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "PROPERTIES"
+      },
+      "values": {
+        "DES_ENG": "PROPERTIES"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "PERSIONER"
+      },
+      "values": {
+        "DES_ENG": "PERSIONER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "EMPOYED"
+      },
+      "values": {
+        "DES_ENG": "EMPOYED"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "teching"
+      },
+      "values": {
+        "DES_ENG": "TECHING"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "RITERID"
+      },
+      "values": {
+        "DES_ENG": "RITERID"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "SUPERVAIZAR"
+      },
+      "values": {
+        "DES_ENG": "SUPERVAIZAR"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "employ"
+      },
+      "values": {
+        "DES_ENG": "EMPLOY"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "SOLIDER"
+      },
+      "values": {
+        "DES_ENG": "SOLIDER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "MINSTRY OF INF"
+      },
+      "values": {
+        "DES_ENG": "MINSTRY OF INF"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "ASST MANAGER"
+      },
+      "values": {
+        "DES_ENG": "ASST MANAGER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "E"
+      },
+      "values": {
+        "DES_ENG": "E"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "HEAD OF INVEST"
+      },
+      "values": {
+        "DES_ENG": "HEAD OF INVEST"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "PANTION"
+      },
+      "values": {
+        "DES_ENG": "PANTION"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "FEED INSPECTOR"
+      },
+      "values": {
+        "DES_ENG": "FEED INSPECTOR"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "DRIVER"
+      },
+      "values": {
+        "DES_ENG": "DRIVER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "MANEGEER"
+      },
+      "values": {
+        "DES_ENG": "MANEGEER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "EMPLOUED"
+      },
+      "values": {
+        "DES_ENG": "EMPLOUED"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "POLICEMEN"
+      },
+      "values": {
+        "DES_ENG": "POLICEMEN"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "MINISTER"
+      },
+      "values": {
+        "DES_ENG": "MINISTER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "FINNCAIL ACT"
+      },
+      "values": {
+        "DES_ENG": "FINNCAIL ACT"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "TACHER"
+      },
+      "values": {
+        "DES_ENG": "TACHER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "Employer"
+      },
+      "values": {
+        "DES_ENG": "EMPLOYER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "OTHER"
+      },
+      "values": {
+        "DES_ENG": "OTHER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "WIRE LINE OPRTR"
+      },
+      "values": {
+        "DES_ENG": "WIRE LINE OPRTR"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "ENGINEER"
+      },
+      "values": {
+        "DES_ENG": "ENGINEER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "N"
+      },
+      "values": {
+        "DES_ENG": "N"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "EMPLOYER"
+      },
+      "values": {
+        "DES_ENG": "EMPLOYER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "OMANMOBILE"
+      },
+      "values": {
+        "DES_ENG": "OMANMOBILE"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "DICATR"
+      },
+      "values": {
+        "DES_ENG": "DICATR"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "MANEGER"
+      },
+      "values": {
+        "DES_ENG": "MANEGER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "SELF -EMPLOYED"
+      },
+      "values": {
+        "DES_ENG": "SELF -EMPLOYED"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "BUSN."
+      },
+      "values": {
+        "DES_ENG": "BUSN."
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "SCHOOL"
+      },
+      "values": {
+        "DES_ENG": "SCHOOL"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "SELFEMPLOYEE"
+      },
+      "values": {
+        "DES_ENG": "SELFEMPLOYEE"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "manager"
+      },
+      "values": {
+        "DES_ENG": "MANAGER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "FINANCE RESEARC"
+      },
+      "values": {
+        "DES_ENG": "FINANCE RESEARC"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "TEAM LEADER"
+      },
+      "values": {
+        "DES_ENG": "TEAM LEADER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "PENSION"
+      },
+      "values": {
+        "DES_ENG": "PENSION"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "DECTOR"
+      },
+      "values": {
+        "DES_ENG": "DECTOR"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "SECURITY"
+      },
+      "values": {
+        "DES_ENG": "SECURITY"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "RAAD"
+      },
+      "values": {
+        "DES_ENG": "RAAD"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "EMLOYEED"
+      },
+      "values": {
+        "DES_ENG": "EMLOYEED"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "SALES VENDOR"
+      },
+      "values": {
+        "DES_ENG": "SALES VENDOR"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "SELES ADVAICER"
+      },
+      "values": {
+        "DES_ENG": "SELES ADVAICER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "EMPLOEEY"
+      },
+      "values": {
+        "DES_ENG": "EMPLOEEY"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "INVESTOR"
+      },
+      "values": {
+        "DES_ENG": "INVESTOR"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "X RAY TECHNICIO"
+      },
+      "values": {
+        "DES_ENG": "X RAY TECHNICIO"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "EMPLYEER"
+      },
+      "values": {
+        "DES_ENG": "EMPLYEER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "RETAIRD"
+      },
+      "values": {
+        "DES_ENG": "RETAIRD"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "DRC"
+      },
+      "values": {
+        "DES_ENG": "DRC"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "SATFF"
+      },
+      "values": {
+        "DES_ENG": "SATFF"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "EPOLYER"
+      },
+      "values": {
+        "DES_ENG": "EPOLYER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "BUSSINESS"
+      },
+      "values": {
+        "DES_ENG": "BUSSINESS"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "DOCTORE"
+      },
+      "values": {
+        "DES_ENG": "DOCTORE"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "STAF"
+      },
+      "values": {
+        "DES_ENG": "STAF"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "EMPOYEE"
+      },
+      "values": {
+        "DES_ENG": "EMPOYEE"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "BUSINESS"
+      },
+      "values": {
+        "DES_ENG": "BUSINESS"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "RETAIRED"
+      },
+      "values": {
+        "DES_ENG": "RETAIRED"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "STUFF"
+      },
+      "values": {
+        "DES_ENG": "STUFF"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "GAURD"
+      },
+      "values": {
+        "DES_ENG": "GAURD"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "HOST"
+      },
+      "values": {
+        "DES_ENG": "HOST"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "ADM MANAGER"
+      },
+      "values": {
+        "DES_ENG": "ADM MANAGER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "BISSINES"
+      },
+      "values": {
+        "DES_ENG": "BISSINES"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "EPLOYEE"
+      },
+      "values": {
+        "DES_ENG": "EPLOYEE"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "ENG."
+      },
+      "values": {
+        "DES_ENG": "ENG."
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "EMPLOYEEE"
+      },
+      "values": {
+        "DES_ENG": "EMPLOYEEE"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "TRESURY SPRVS"
+      },
+      "values": {
+        "DES_ENG": "TRESURY SPRVS"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "TRADER"
+      },
+      "values": {
+        "DES_ENG": "TRADER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "SELF EMPLOYER"
+      },
+      "values": {
+        "DES_ENG": "SELF EMPLOYER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "CENIOR ACCOUNTA"
+      },
+      "values": {
+        "DES_ENG": "CENIOR ACCOUNTA"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "LAWYER"
+      },
+      "values": {
+        "DES_ENG": "LAWYER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "solder"
+      },
+      "values": {
+        "DES_ENG": "SOLDER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "EMPLOED"
+      },
+      "values": {
+        "DES_ENG": "EMPLOED"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "SOLDIER"
+      },
+      "values": {
+        "DES_ENG": "SOLDIER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "STOR KEAPER"
+      },
+      "values": {
+        "DES_ENG": "STOR KEAPER"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "MOH"
+      },
+      "values": {
+        "DES_ENG": "MOH"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "SECTION HEAD"
+      },
+      "values": {
+        "DES_ENG": "SECTION HEAD"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "ROYAL COUR"
+      },
+      "values": {
+        "DES_ENG": "ROYAL COUR"
+      },
+      "source_rows": 38,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "24"
+      },
+      "values": {
+        "DES_ENG": "OCCUPATION 24 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 12,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "5"
+      },
+      "values": {
+        "DES_ENG": "OCCUPATION 5 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 11,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "ADMINISTRATION"
+      },
+      "values": {
+        "DES_ENG": "ADMINISTRATION"
+      },
+      "source_rows": 11,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "AFISA UTUMISHI"
+      },
+      "values": {
+        "DES_ENG": "AFISA UTUMISHI"
+      },
+      "source_rows": 11,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "ARTISAN I"
+      },
+      "values": {
+        "DES_ENG": "ARTISAN I"
+      },
+      "source_rows": 11,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "40"
+      },
+      "values": {
+        "DES_ENG": "OCCUPATION 40 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 10,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "70"
+      },
+      "values": {
+        "DES_ENG": "OCCUPATION 70 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 6,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "23"
+      },
+      "values": {
+        "DES_ENG": "OCCUPATION 23 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 6,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "0"
+      },
+      "values": {
+        "DES_ENG": "OCCUPATION 0 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 6,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "66"
+      },
+      "values": {
+        "DES_ENG": "OCCUPATION 66 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 6,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "89"
+      },
+      "values": {
+        "DES_ENG": "OCCUPATION 89 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 5,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "59"
+      },
+      "values": {
+        "DES_ENG": "OCCUPATION 59 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 5,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "12"
+      },
+      "values": {
+        "DES_ENG": "OCCUPATION 12 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 5,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "60"
+      },
+      "values": {
+        "DES_ENG": "OCCUPATION 60 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 4,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "39"
+      },
+      "values": {
+        "DES_ENG": "OCCUPATION 39 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 2,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "105"
+      },
+      "values": {
+        "DES_ENG": "OCCUPATION 105 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 2,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "119"
+      },
+      "values": {
+        "DES_ENG": "OCCUPATION 119 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 2,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "13"
+      },
+      "values": {
+        "DES_ENG": "OCCUPATION 13 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 2,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "71"
+      },
+      "values": {
+        "DES_ENG": "OCCUPATION 71 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 2,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "RECONCILIATION OFFICER"
+      },
+      "values": {
+        "DES_ENG": "RECONCILIATION OFFICER"
+      },
+      "source_rows": 1,
+      "basis": "the stored text itself"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "133"
+      },
+      "values": {
+        "DES_ENG": "OCCUPATION 133 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 1,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "43"
+      },
+      "values": {
+        "DES_ENG": "OCCUPATION 43 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 1,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "49"
+      },
+      "values": {
+        "DES_ENG": "OCCUPATION 49 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 1,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "occupation",
+      "table": "BI_DWH.PIO_CUSTOMER_OCCUPATION",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUST_OCCUP": "97"
+      },
+      "values": {
+        "DES_ENG": "OCCUPATION 97 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 1,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "marital_status",
+      "table": "BI_DWH.PIO_MARITAL_STATUS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "ST_CODE": "Married"
+      },
+      "values": {
+        "DESC_ENG": "Married"
+      },
+      "source_rows": 21585,
+      "basis": "the stored text, normalized"
+    },
+    {
+      "attribute": "marital_status",
+      "table": "BI_DWH.PIO_MARITAL_STATUS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "ST_CODE": "Unmarried"
+      },
+      "values": {
+        "DESC_ENG": "Single"
+      },
+      "source_rows": 3306,
+      "basis": "the stored text, normalized"
+    },
+    {
+      "attribute": "marital_status",
+      "table": "BI_DWH.PIO_MARITAL_STATUS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "ST_CODE": "M"
+      },
+      "values": {
+        "DESC_ENG": "Married"
+      },
+      "source_rows": 1114,
+      "basis": "the stored text, normalized"
+    },
+    {
+      "attribute": "marital_status",
+      "table": "BI_DWH.PIO_MARITAL_STATUS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "ST_CODE": "S"
+      },
+      "values": {
+        "DESC_ENG": "Single"
+      },
+      "source_rows": 480,
+      "basis": "the stored text, normalized"
+    },
+    {
+      "attribute": "marital_status",
+      "table": "BI_DWH.PIO_MARITAL_STATUS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "ST_CODE": "Other"
+      },
+      "values": {
+        "DESC_ENG": "Other"
+      },
+      "source_rows": 380,
+      "basis": "the stored text, normalized"
+    },
+    {
+      "attribute": "marital_status",
+      "table": "BI_DWH.PIO_MARITAL_STATUS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "ST_CODE": "Divorced"
+      },
+      "values": {
+        "DESC_ENG": "Divorced"
+      },
+      "source_rows": 304,
+      "basis": "the stored text, normalized"
+    },
+    {
+      "attribute": "marital_status",
+      "table": "BI_DWH.PIO_MARITAL_STATUS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "ST_CODE": "MARRIED"
+      },
+      "values": {
+        "DESC_ENG": "Married"
+      },
+      "source_rows": 266,
+      "basis": "the stored text, normalized"
+    },
+    {
+      "attribute": "marital_status",
+      "table": "BI_DWH.PIO_MARITAL_STATUS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "ST_CODE": "SINGLE"
+      },
+      "values": {
+        "DESC_ENG": "Single"
+      },
+      "source_rows": 114,
+      "basis": "the stored text, normalized"
+    },
+    {
+      "attribute": "marital_status",
+      "table": "BI_DWH.PIO_MARITAL_STATUS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "ST_CODE": "0"
+      },
+      "values": {
+        "DESC_ENG": "MARITAL STATUS 0 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 38,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "marital_status",
+      "table": "BI_DWH.PIO_MARITAL_STATUS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "ST_CODE": "MARRIGED"
+      },
+      "values": {
+        "DESC_ENG": "Married"
+      },
+      "source_rows": 38,
+      "basis": "the stored text, normalized"
+    },
+    {
+      "attribute": "marital_status",
+      "table": "BI_DWH.PIO_MARITAL_STATUS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "ST_CODE": "MERED"
+      },
+      "values": {
+        "DESC_ENG": "Married"
+      },
+      "source_rows": 38,
+      "basis": "the stored text, normalized"
+    },
+    {
+      "attribute": "marital_status",
+      "table": "BI_DWH.PIO_MARITAL_STATUS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "ST_CODE": "5"
+      },
+      "values": {
+        "DESC_ENG": "MARITAL STATUS 5 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 19,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "HH"
+      },
+      "values": {
+        "DES_ENG": "CUSTOMER CLASSIFICATION HH (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 41369,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "2"
+      },
+      "values": {
+        "DES_ENG": "CUSTOMER CLASSIFICATION 2 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 13124,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "SM"
+      },
+      "values": {
+        "DES_ENG": "CUSTOMER CLASSIFICATION SM (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 12578,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "CO"
+      },
+      "values": {
+        "DES_ENG": "CUSTOMER CLASSIFICATION CO (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 9777,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "EMPL_GOVT"
+      },
+      "values": {
+        "DES_ENG": "EMPL GOVT"
+      },
+      "source_rows": 871,
+      "basis": "the stored code text"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "FP"
+      },
+      "values": {
+        "DES_ENG": "CUSTOMER CLASSIFICATION FP (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 342,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "EMPL_PRIV"
+      },
+      "values": {
+        "DES_ENG": "EMPL PRIV"
+      },
+      "source_rows": 339,
+      "basis": "the stored code text"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "3"
+      },
+      "values": {
+        "DES_ENG": "CUSTOMER CLASSIFICATION 3 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 318,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "FF"
+      },
+      "values": {
+        "DES_ENG": "CUSTOMER CLASSIFICATION FF (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 304,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "FA"
+      },
+      "values": {
+        "DES_ENG": "CUSTOMER CLASSIFICATION FA (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 266,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "GW"
+      },
+      "values": {
+        "DES_ENG": "CUSTOMER CLASSIFICATION GW (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 266,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "CHAP_CHAP"
+      },
+      "values": {
+        "DES_ENG": "CHAP CHAP"
+      },
+      "source_rows": 264,
+      "basis": "the stored code text"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "6"
+      },
+      "values": {
+        "DES_ENG": "CUSTOMER CLASSIFICATION 6 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 239,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "QG"
+      },
+      "values": {
+        "DES_ENG": "CUSTOMER CLASSIFICATION QG (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 228,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "GP"
+      },
+      "values": {
+        "DES_ENG": "CUSTOMER CLASSIFICATION GP (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 190,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "FI"
+      },
+      "values": {
+        "DES_ENG": "CUSTOMER CLASSIFICATION FI (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 152,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "5"
+      },
+      "values": {
+        "DES_ENG": "CUSTOMER CLASSIFICATION 5 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 128,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "4"
+      },
+      "values": {
+        "DES_ENG": "CUSTOMER CLASSIFICATION 4 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 121,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "EMPL_INFR"
+      },
+      "values": {
+        "DES_ENG": "EMPL INFR"
+      },
+      "source_rows": 78,
+      "basis": "the stored code text"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "FC"
+      },
+      "values": {
+        "DES_ENG": "CUSTOMER CLASSIFICATION FC (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 76,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "FG"
+      },
+      "values": {
+        "DES_ENG": "CUSTOMER CLASSIFICATION FG (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 76,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "FO"
+      },
+      "values": {
+        "DES_ENG": "CUSTOMER CLASSIFICATION FO (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 76,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "38"
+      },
+      "values": {
+        "DES_ENG": "CUSTOMER CLASSIFICATION 38 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 67,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "BANKS"
+      },
+      "values": {
+        "DES_ENG": "BANKS"
+      },
+      "source_rows": 30,
+      "basis": "the stored code text"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "34"
+      },
+      "values": {
+        "DES_ENG": "CUSTOMER CLASSIFICATION 34 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 28,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "7"
+      },
+      "values": {
+        "DES_ENG": "CUSTOMER CLASSIFICATION 7 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 28,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "CORP_LARGE"
+      },
+      "values": {
+        "DES_ENG": "CORP LARGE"
+      },
+      "source_rows": 28,
+      "basis": "the stored code text"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "15"
+      },
+      "values": {
+        "DES_ENG": "CUSTOMER CLASSIFICATION 15 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 26,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "8"
+      },
+      "values": {
+        "DES_ENG": "CUSTOMER CLASSIFICATION 8 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 22,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "MSME"
+      },
+      "values": {
+        "DES_ENG": "MSME"
+      },
+      "source_rows": 22,
+      "basis": "the stored code text"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "GOVT_MP"
+      },
+      "values": {
+        "DES_ENG": "GOVT MP"
+      },
+      "source_rows": 22,
+      "basis": "the stored code text"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "39"
+      },
+      "values": {
+        "DES_ENG": "CUSTOMER CLASSIFICATION 39 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 22,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "42"
+      },
+      "values": {
+        "DES_ENG": "CUSTOMER CLASSIFICATION 42 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 17,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "46"
+      },
+      "values": {
+        "DES_ENG": "CUSTOMER CLASSIFICATION 46 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 13,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "GOVT_LOCAL"
+      },
+      "values": {
+        "DES_ENG": "GOVT LOCAL"
+      },
+      "source_rows": 11,
+      "basis": "the stored code text"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "STUDENTS"
+      },
+      "values": {
+        "DES_ENG": "STUDENTS"
+      },
+      "source_rows": 11,
+      "basis": "the stored code text"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "GROUP_INFR"
+      },
+      "values": {
+        "DES_ENG": "GROUP INFR"
+      },
+      "source_rows": 11,
+      "basis": "the stored code text"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "NBF_INST"
+      },
+      "values": {
+        "DES_ENG": "NBF INST"
+      },
+      "source_rows": 11,
+      "basis": "the stored code text"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "PENSIONERS"
+      },
+      "values": {
+        "DES_ENG": "PENSIONERS"
+      },
+      "source_rows": 11,
+      "basis": "the stored code text"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "40"
+      },
+      "values": {
+        "DES_ENG": "CUSTOMER CLASSIFICATION 40 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 9,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "24"
+      },
+      "values": {
+        "DES_ENG": "CUSTOMER CLASSIFICATION 24 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 7,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "11"
+      },
+      "values": {
+        "DES_ENG": "CUSTOMER CLASSIFICATION 11 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 7,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "20"
+      },
+      "values": {
+        "DES_ENG": "CUSTOMER CLASSIFICATION 20 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 6,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "33"
+      },
+      "values": {
+        "DES_ENG": "CUSTOMER CLASSIFICATION 33 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 4,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "32"
+      },
+      "values": {
+        "DES_ENG": "CUSTOMER CLASSIFICATION 32 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 4,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "41"
+      },
+      "values": {
+        "DES_ENG": "CUSTOMER CLASSIFICATION 41 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 2,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "23"
+      },
+      "values": {
+        "DES_ENG": "CUSTOMER CLASSIFICATION 23 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 2,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "35"
+      },
+      "values": {
+        "DES_ENG": "CUSTOMER CLASSIFICATION 35 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 2,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "0"
+      },
+      "values": {
+        "DES_ENG": "CUSTOMER CLASSIFICATION 0 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 2,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "21"
+      },
+      "values": {
+        "DES_ENG": "CUSTOMER CLASSIFICATION 21 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 2,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "99"
+      },
+      "values": {
+        "DES_ENG": "CUSTOMER CLASSIFICATION 99 (MEANING UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 1,
+      "basis": "placeholder: meaning not in the database"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "EMp_PRV"
+      },
+      "values": {
+        "DES_ENG": "EMP PRV"
+      },
+      "source_rows": 1,
+      "basis": "the stored code text"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "CIND"
+      },
+      "values": {
+        "DES_ENG": "CIND"
+      },
+      "source_rows": 1,
+      "basis": "the stored code text"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "CORPORATE"
+      },
+      "values": {
+        "DES_ENG": "CORPORATE"
+      },
+      "source_rows": 1,
+      "basis": "the stored code text"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "NMB_SNR"
+      },
+      "values": {
+        "DES_ENG": "NMB SNR"
+      },
+      "source_rows": 1,
+      "basis": "the stored code text"
+    },
+    {
+      "attribute": "customer_class",
+      "table": "BI_DWH.PIO_CUSTOMER_CLASSIFICATIONS",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CUS_CLASS": "FOXCLASS"
+      },
+      "values": {
+        "DES_ENG": "FOXCLASS"
+      },
+      "source_rows": 1,
+      "basis": "the stored code text"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "R101"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE R101 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 12923,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "C101"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE C101 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 10232,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "N101"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE N101 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 9728,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "R102"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE R102 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 6194,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "R201"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE R201 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 5396,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "R501"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE R501 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 4370,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "S101"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE S101 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 4332,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "H700"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE H700 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 4256,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "R601"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE R601 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 2736,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "R301"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE R301 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 2508,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "R401"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE R401 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 2432,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "N501"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE N501 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 1216,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "V101"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE V101 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 950,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "702"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE 702 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 820,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "800"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE 800 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 750,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "C-1"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE C-1 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 740,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "100"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE 100 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 649,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "P101"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE P101 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 532,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "S501"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE S501 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 494,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "9999"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE 9999 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 377,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "300"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE 300 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 340,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "S201"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE S201 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 228,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "209"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE 209 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 181,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "8826"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE 8826 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 151,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "C-2"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE C-2 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 150,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "S202"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE S202 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 114,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "S105"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE S105 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 114,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "C-4"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE C-4 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 112,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "C-7"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE C-7 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 99,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "0"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE 0 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 95,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "C-15"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE C-15 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 92,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "C-3"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE C-3 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 90,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "C-18"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE C-18 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 88,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "C-5"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE C-5 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 79,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "C-22"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE C-22 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 79,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "S104"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE S104 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 76,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "S601"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE S601 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 76,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "R105"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE R105 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 76,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "C-6"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE C-6 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 65,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "104"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE 104 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 60,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "C-14"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE C-14 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 56,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "C-11"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE C-11 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 55,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "8400"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE 8400 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 48,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "C-21"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE C-21 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 47,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "R103"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE R103 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 38,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "R202"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE R202 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 38,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "H010"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE H010 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 38,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "P501"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE P501 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 38,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "N103"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE N103 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 38,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "N104"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE N104 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 38,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "P202"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE P202 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 38,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "P103"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE P103 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 38,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "S103"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE S103 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 38,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "R104"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE R104 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 38,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "C-16"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE C-16 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 34,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "C-8"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE C-8 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 27,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "C-29"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE C-29 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 24,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "C-9"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE C-9 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 22,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "C-10"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE C-10 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 20,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "703"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE 703 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 13,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "C-12"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE C-12 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 11,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "C-23"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE C-23 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 11,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "704"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE 704 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 10,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "2005"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE 2005 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 7,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "8422"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE 8422 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 6,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "210"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE 210 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 5,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "68"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE 68 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 4,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "8124"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE 8124 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 4,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "221"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE 221 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 3,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "8300"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE 8300 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 2,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "153"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE 153 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 2,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "44"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE 44 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 2,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "85"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE 85 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 2,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "103"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE 103 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 1,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "200"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE 200 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 1,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "1017"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE 1017 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 1,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "75"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE 75 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 1,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "72"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE 72 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 1,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "8250"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE 8250 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 1,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "5005"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE 5005 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 1,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "8434"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE 8434 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 1,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "66"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE 66 (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 1,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "city",
+      "table": "BI_DWH.PIO_CITIES",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "CITY_CODE": "KE"
+      },
+      "values": {
+        "DES_ENG": "CITY CODE KE (NAME UNKNOWN - DEMO FILL)"
+      },
+      "source_rows": 1,
+      "basis": "placeholder: no name in the database"
+    },
+    {
+      "attribute": "debit_credit",
+      "table": "BI_DWH.PIO_DEP_CRED_LOOKUP",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "DEBIT_CREDIT_IND": "1"
+      },
+      "values": {
+        "DES_ENG": "Debit",
+        "DES_NAT_LAN": "مدين"
+      },
+      "source_rows": 1558621,
+      "basis": "cash deposits post the cash ledger 1000 as '1', the customer as '2' (OPENBI2)"
+    },
+    {
+      "attribute": "debit_credit",
+      "table": "BI_DWH.PIO_DEP_CRED_LOOKUP",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "DEBIT_CREDIT_IND": "2"
+      },
+      "values": {
+        "DES_ENG": "Credit",
+        "DES_NAT_LAN": "دائن"
+      },
+      "source_rows": 1111427,
+      "basis": "cash deposits post the cash ledger 1000 as '1', the customer as '2' (OPENBI2)"
+    },
+    {
+      "attribute": "debit_credit",
+      "table": "BI_DWH.PIO_DEP_CRED_LOOKUP",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "DEBIT_CREDIT_IND": "D"
+      },
+      "values": {
+        "DES_ENG": "Debit",
+        "DES_NAT_LAN": "مدين"
+      },
+      "source_rows": 671,
+      "basis": "letter code for debit"
+    },
+    {
+      "attribute": "debit_credit",
+      "table": "BI_DWH.PIO_DEP_CRED_LOOKUP",
+      "key": {
+        "COUNTRY_CODE": 400,
+        "INST_CODE": 1,
+        "DEBIT_CREDIT_IND": "C"
+      },
+      "values": {
+        "DES_ENG": "Credit",
+        "DES_NAT_LAN": "دائن"
+      },
+      "source_rows": 587,
+      "basis": "letter code for credit"
+    }
+  ]
+}

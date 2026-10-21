@@ -94,6 +94,14 @@ async def deploy_scenario(request: DeployRequest):
                             payload = json.loads(content_str)
                             if "raw_sql" in payload and not raw_sql:
                                 raw_sql = payload.get("raw_sql")
+                                # SQL generated from an auto-corrected intent is saved with that
+                                # corrected intent, so the description matches what the SQL checks.
+                                if isinstance(payload.get("corrected_intent"), dict) and not intent_dict:
+                                    intent_dict = payload["corrected_intent"]
+                                    logger.warning(
+                                        "[DEPLOY] Using the auto-corrected intent: %s",
+                                        [c.get("original") for c in (payload.get("auto_corrections") or payload.get("audit_auto_corrections") or [])],
+                                    )
                             if "sql" in payload and not raw_sql:
                                 raw_sql = payload.get("sql")
                             if "enriched_intent" in payload and not intent_dict:

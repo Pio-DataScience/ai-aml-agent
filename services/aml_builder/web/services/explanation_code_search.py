@@ -11,7 +11,7 @@ import os
 import pickle
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Final, FrozenSet, List, Optional
 
 import numpy as np
 from langchain_openai import OpenAIEmbeddings
@@ -231,6 +231,53 @@ def _select_codes_for_single_type(
         return fallback
 
 
+# Commission and fee codes the catalog search returns for "cash withdrawal" (OPENBI2, country 400 / inst 1).
+# They are charges on a withdrawal, not the withdrawal itself.
+CASH_WITHDRAWAL_FEE_CODES: Final[FrozenSet[str]] = frozenset(
+    {"119", "141", "340", "429", "2109", "2110", "2116", "2119", "2143", "2146", "3020"}
+)
+_WITHDRAWAL_RE: Final = re.compile(r"\bwithdraw(?:al|als|n|ing|s)?\b", re.IGNORECASE)
+_FEE_RE: Final = re.compile(r"\bcomm\b|commission|\bfees?\b|\bcharges?\b", re.IGNORECASE)
+
+
+def is_cash_withdrawal_type(transaction_type: str) -> bool:
+    """Whether a transaction type asks for cash withdrawals (not their fees, not transfers).
+
+    Args:
+        transaction_type (str): One transaction type phrase, e.g. 'CASH WITHDRAWAL', 'ATM withdrawal'.
+
+    Returns:
+        bool: True for a withdrawal type that does not itself name a fee, commission or transfer.
+    """
+    text = str(transaction_type or "")
+    return bool(_WITHDRAWAL_RE.search(text)) and not _FEE_RE.search(text) and "transfer" not in text.lower()
+
+
+def drop_withdrawal_fee_codes(codes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Remove commission and fee codes from the codes selected for a cash-withdrawal type.
+
+    Args:
+        codes (List[Dict[str, Any]]): Selected codes, each with 'code' and 'description'.
+
+    Returns:
+        List[Dict[str, Any]]: The codes without CASH_WITHDRAWAL_FEE_CODES and without any code whose
+            description names a commission, fee or charge.
+    """
+    kept: List[Dict[str, Any]] = []
+    for c in codes:
+        code = str(c.get("code", "")).strip()
+        if code in CASH_WITHDRAWAL_FEE_CODES or _FEE_RE.search(str(c.get("description") or c.get("desc_eng") or "")):
+            continue
+        kept.append(c)
+    if len(kept) != len(codes):
+        logger.info(
+            "[EXPL_SEARCH] Dropped %d commission/fee codes from a cash-withdrawal type: %s",
+            len(codes) - len(kept),
+            sorted({str(c.get("code")) for c in codes} - {str(c.get("code")) for c in kept}),
+        )
+    return kept
+
+
 def select_relevant_explanation_codes(
     transaction_type: Any, min_similarity: float = 0.55
 ) -> List[Dict[str, Any]]:
@@ -261,6 +308,8 @@ def select_relevant_explanation_codes(
 
     for tx in types_list:
         codes = _select_codes_for_single_type(tx, min_similarity=min_similarity)
+        if is_cash_withdrawal_type(tx):
+            codes = drop_withdrawal_fee_codes(codes)
         for c in codes:
             code_val = str(c.get("code", "")).strip()
             if code_val and code_val not in seen_codes:

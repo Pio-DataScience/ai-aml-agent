@@ -9,6 +9,9 @@ predictable document regardless of which model produced the intent.
 import re
 from typing import Optional
 
+from services.aml_builder.web.services.attribute_filters import describe_filters
+from services.aml_builder.web.services.business_dates import period_of
+
 
 def _clean_explanation_checkpoint(checkpoint: Optional[str]) -> Optional[str]:
     """
@@ -39,6 +42,25 @@ def _clean_explanation_checkpoint(checkpoint: Optional[str]) -> Optional[str]:
 
     result = "\n".join(cleaned_lines).rstrip()
     return result if result.strip() else None
+
+
+def _threshold_value(threshold: dict) -> str:
+    """A threshold's value for the plan; a ratio reads as "50% of `account_balance`".
+
+    Args:
+        threshold (dict): One threshold.
+
+    Returns:
+        str: The markdown cell text.
+    """
+    value = threshold.get("value_from")
+    if threshold.get("kind") == "ratio":
+        try:
+            percent = f"{float(value) * 100:g}%"
+        except (TypeError, ValueError):
+            percent = str(value)
+        return f"`{percent}` of `{threshold.get('relative_to')}`"
+    return f"`{value}`"
 
 
 def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]) -> str:
@@ -79,7 +101,6 @@ def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]
     lines.append("| Field | Value |")
     lines.append("|---|---|")
     lines.append(f"| **Scenario Name** | {intent.get('scenario_name', '—')} |")
-    lines.append(f"| **Scenario Type** | `{intent.get('scenario_type', '—')}` |")
     tx_types = intent.get("transaction_types")
     tx_type = intent.get("transaction_type")
     if tx_types and isinstance(tx_types, list):
@@ -91,8 +112,31 @@ def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]
     if segs:
         lines.append(f"| **Customer Segments** | {', '.join(f'`{s}`' for s in segs)} |")
 
+    for line in describe_filters(intent.get("attribute_filters") or []):
+        label, values = line.split(": ", 1)
+        lines.append(f"| **{label}** | `{values}` |")
+
     anchor = intent.get("anchor_date")
-    lines.append(f"| **Evaluation Mode** | {'🕐 Shadow Test — Anchor: `' + anchor + '`' if anchor else '🟢 Production (SYSDATE)'} |")
+    period = period_of(intent)
+    sliding = intent.get("evaluation_period") if not period else None
+    window = intent.get("time_window") or {}
+    if sliding and isinstance(sliding, dict) and sliding.get("start"):
+        unit = str(window.get("unit", "")).lower()
+        unit = unit[:-1] if str(window.get("value")) == "1" and unit.endswith("s") else unit
+        lines.append(
+            f"| **Evaluation Mode** | 📅 Any `{window.get('value')} {unit}` window "
+            f"within `{sliding.get('start')}` to `{sliding.get('end')}` |"
+        )
+    elif period:
+        lines.append(
+            f"| **Evaluation Mode** | 📅 Fixed period `{period[0].isoformat()}` to `{period[1].isoformat()}`"
+            f" (evaluation date `{period[1].isoformat()}`) |"
+        )
+    else:
+        lines.append(
+            f"| **Evaluation Mode** | {'🕐 Business date: `' + anchor + '`' if anchor else '🟢 Business date of each run'}"
+            " (windows count business days, Sun–Thu) |"
+        )
     lines.append("")
 
     # ─────────────────────────────────────────
@@ -111,11 +155,16 @@ def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]
     # ─────────────────────────────────────────
     lines.append("---")
     lines.append("")
-    lines.append("## 3. Observation Window & Time Parameters")
+    lines.append("## 3. Monitoring Time")
     lines.append("")
     tw = intent.get("time_window")
     if tw:
-        rolling_label = "Rolling (from SYSDATE)" if tw.get("is_rolling") else "Fixed Calendar Period"
+        if period:
+            rolling_label = f"Fixed Calendar Period ({period[0].isoformat()} to {period[1].isoformat()})"
+        elif tw.get("is_rolling"):
+            rolling_label = "Rolling (back from the business date)"
+        else:
+            rolling_label = "Fixed Calendar Period"
         provenance_tw = tw.get("provenance", "stated")
         prov_badge = " *(assumed default)*" if provenance_tw == "assumed_default" else ""
         lines.append(f"- **Window Size:** `{tw.get('value')} {tw.get('unit')}`{prov_badge}")
@@ -177,7 +226,7 @@ def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]
                 lines.append("| # | Field | Operator | Value | Channel / Codes | Provenance |")
                 lines.append("|---|---|---|---|---|---|")
                 for i, t in enumerate(detail_thresholds, 1):
-                    val = f"`{t.get('value_from')}`"
+                    val = _threshold_value(t)
                     if t.get("operator") == "BETWEEN" and t.get("value_to") is not None:
                         val = f"`{t.get('value_from')}` — `{t.get('value_to')}`"
                     prov = t.get("provenance", "stated")
@@ -189,7 +238,7 @@ def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]
                 lines.append("| # | Field | Operator | Value | Provenance |")
                 lines.append("|---|---|---|---|---|")
                 for i, t in enumerate(detail_thresholds, 1):
-                    val = f"`{t.get('value_from')}`"
+                    val = _threshold_value(t)
                     if t.get("operator") == "BETWEEN" and t.get("value_to") is not None:
                         val = f"`{t.get('value_from')}` — `{t.get('value_to')}`"
                     prov = t.get("provenance", "stated")
@@ -205,7 +254,7 @@ def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]
                 lines.append("| # | Field | Operator | Value | Channel / Codes | Provenance |")
                 lines.append("|---|---|---|---|---|---|")
                 for i, t in enumerate(aggregate_thresholds, 1):
-                    val = f"`{t.get('value_from')}`"
+                    val = _threshold_value(t)
                     if t.get("operator") == "BETWEEN" and t.get("value_to") is not None:
                         val = f"`{t.get('value_from')}` — `{t.get('value_to')}`"
                     prov = t.get("provenance", "stated")
@@ -217,7 +266,7 @@ def build_plan_markdown(intent: dict, explanation_code_checkpoint: Optional[str]
                 lines.append("| # | Field | Operator | Value | Provenance |")
                 lines.append("|---|---|---|---|---|")
                 for i, t in enumerate(aggregate_thresholds, 1):
-                    val = f"`{t.get('value_from')}`"
+                    val = _threshold_value(t)
                     if t.get("operator") == "BETWEEN" and t.get("value_to") is not None:
                         val = f"`{t.get('value_from')}` — `{t.get('value_to')}`"
                     prov = t.get("provenance", "stated")

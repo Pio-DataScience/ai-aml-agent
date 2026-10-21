@@ -14,6 +14,7 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 
+from services.aml_builder.web.services.clarification import clarification_event_data
 from services.aml_builder.web.services.graph import get_tool_driven_graph
 from services.aml_builder.web.services.schemas import (
     ChatHistoryResponse,
@@ -67,6 +68,8 @@ async def get_chat_history(project_id: str, chat_id: str, user_id: str):
             pending_plan_artifact = None
             pending_scenario_result = None
             pending_metadata_catalog = None
+            pending_escalation_report = None
+            pending_clarification = None
 
             for msg in messages_data:
                 msg_class = msg.__class__.__name__
@@ -104,9 +107,14 @@ async def get_chat_history(project_id: str, chat_id: str, user_id: str):
                     if not meta_cat and pending_metadata_catalog:
                         meta_cat = pending_metadata_catalog
                         pending_metadata_catalog = None
+                    if not esc_rep and pending_escalation_report:
+                        esc_rep = pending_escalation_report
+                        pending_escalation_report = None
+                    clar_req = pending_clarification
+                    pending_clarification = None
 
                     # Skip if message is entirely empty (no text and no artifacts)
-                    if not content.strip() and not (plan_art or val_res or esc_rep or meta_cat):
+                    if not content.strip() and not (plan_art or val_res or esc_rep or meta_cat or clar_req):
                         continue
 
                     chat_messages.append(ChatMessage(
@@ -116,6 +124,7 @@ async def get_chat_history(project_id: str, chat_id: str, user_id: str):
                         scenario_metadata_catalog=meta_cat,
                         scenario_result=val_res,
                         escalation_report=esc_rep,
+                        clarification_request=clar_req,
                         timestamp=msg.additional_kwargs.get("timestamp") if hasattr(msg, "additional_kwargs") else None
                     ))
                 elif msg_class == "ToolMessage" or getattr(msg, "type", None) == "tool":
@@ -126,7 +135,9 @@ async def get_chat_history(project_id: str, chat_id: str, user_id: str):
                         try:
                             payload = json.loads(content_raw) if isinstance(content_raw, str) else content_raw
                             if isinstance(payload, dict):
-                                if tool_name == "generate_scenario_execution_plan" or "plan_artifact" in payload:
+                                if payload.get("status") == "NEEDS_CLARIFICATION":
+                                    pending_clarification = clarification_event_data(payload)
+                                elif tool_name == "generate_scenario_execution_plan" or "plan_artifact" in payload:
                                     if payload.get("plan_artifact"):
                                         pending_plan_artifact = payload.get("plan_artifact")
                                 elif tool_name == "prepare_scenario_metadata_for_persistence" or "fields" in payload:
@@ -136,6 +147,9 @@ async def get_chat_history(project_id: str, chat_id: str, user_id: str):
                                     if not pending_metadata_catalog:
                                         from services.aml_builder.web.services.scenario_metadata import build_metadata_catalog
                                         pending_metadata_catalog = build_metadata_catalog(payload["scenario_metadata"])
+                                elif payload.get("rejection"):
+                                    # PioTech generated no SQL: nothing to show in the side panel.
+                                    pass
                                 elif tool_name in ("persist_and_validate_scenario_in_dwh", "execute_oracle_dwh_shadow_test") or "write_success" in payload or "header_alert_count" in payload:
                                     pending_scenario_result = payload
                         except (json.JSONDecodeError, Exception):

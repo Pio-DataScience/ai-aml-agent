@@ -20,6 +20,7 @@ from services.aml_builder.web.services.oracle import (
     run_shadow_readonly,
 )
 from services.aml_builder.web.services.settings import settings
+from services.aml_builder.web.services.sql_dates import anchor_sql, bind_values
 
 logger = logging.getLogger(__name__)
 
@@ -96,33 +97,40 @@ def get_active_scenarios(scenario_id: Optional[str] = None) -> List[Dict[str, An
 def execute_scenario_query(
     raw_sql: str, eval_date: Optional[date] = None
 ) -> Tuple[List[str], List[Tuple[Any, ...]]]:
-    """Execute scenario RAW_SQL against BI_DWH shadow database.
+    """Execute scenario RAW_SQL against BI_DWH for one business date.
+
+    The SQL never reads Oracle's clock: any SYSDATE form (in rules saved before business-date
+    anchoring) is rewritten to the business-date binds, and the binds are filled from
+    ``eval_date`` with windows counted across business days (see ``sql_dates``).
 
     Args:
         raw_sql (str): SQL statement to execute.
-        eval_date (Optional[date]): Target evaluation date. If supplied and different
-            from current date, replaces TRUNC(SYSDATE) with target date literal.
+        eval_date (Optional[date]): The business date to evaluate for. Defaults to the run date.
 
     Returns:
         Tuple[List[str], List[Tuple[Any, ...]]]: (column_names, rows).
-    """
-    executable_sql = raw_sql.strip()
-    if eval_date:
-        date_str = eval_date.strftime("%Y-%m-%d")
-        # Replace TRUNC(SYSDATE) with date literal for historical simulation
-        executable_sql = executable_sql.replace(
-            "TRUNC(SYSDATE)", f"DATE '{date_str}'"
-        ).replace("SYSDATE", f"DATE '{date_str}'")
 
-    logger.info("[ALERT_ENGINE] Executing scenario query on BI_DWH (length=%d chars)...", len(executable_sql))
+    Raises:
+        ValueError: If the SQL still references the clock in a form that cannot be anchored.
+    """
+    anchor = eval_date or date.today()
+    executable_sql = anchor_sql(raw_sql.strip())
+    binds = bind_values(executable_sql, anchor)
+
+    logger.info(
+        "[ALERT_ENGINE] Executing scenario query on BI_DWH for business date %s (length=%d chars, binds=%s)...",
+        anchor,
+        len(executable_sql),
+        {k: v.isoformat() for k, v in binds.items()},
+    )
     try:
-        cols, rows = run_shadow_readonly(executable_sql)
+        cols, rows = run_shadow_readonly(executable_sql, binds)
         logger.info("[ALERT_ENGINE] Query returned %d rows, %d columns.", len(rows), len(cols))
         return [c.upper() for c in cols], rows
     except Exception as exc:
         logger.error("[ALERT_ENGINE] Error executing query against shadow pool: %s", exc)
         # Fallback to primary readonly pool if shadow pool fails
-        cols, rows = run_readonly(executable_sql)
+        cols, rows = run_readonly(executable_sql, binds)
         return [c.upper() for c in cols], rows
 
 

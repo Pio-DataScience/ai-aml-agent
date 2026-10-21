@@ -17,15 +17,19 @@ Notes:
   independent of the sequential scenario-creation workflow above.
 """
 
+import re
+import copy
 import json
 import logging
 import uuid
 import httpx
-from datetime import datetime
-from typing import Any, Dict, List, Literal, Optional
+from datetime import date, datetime
+from typing import Annotated, Any, Dict, Final, List, Literal, Optional, Tuple
 
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
+from langgraph.prebuilt import InjectedState
 
 from services.aml_builder.web.services.settings import settings
 from services.aml_builder.web.services.schemas import AMLIntent
@@ -39,6 +43,46 @@ from services.aml_builder.web.services.production_registry import (
 )
 from services.aml_builder.web.services.llm_client import build_llm, safe_parse_json
 from services.aml_builder.web.services.sql_extraction import extract_sql
+from services.aml_builder.web.services.intent_autocorrect import auto_correct_intent, resolve_intent
+from services.aml_builder.web.services.business_dates import (
+    apply_fixed_period,
+    clean_for_sql_service,
+    period_of,
+    to_date,
+)
+from services.aml_builder.web.services.sql_dates import anchor_sql, bind_values, pin_period, slide_window_over_period
+from services.aml_builder.web.services.clarification import (
+    answered_fields,
+    apply_answers,
+    all_types_if_any,
+    clarification_payload,
+    default_entity,
+    describe_answers,
+    find_gaps,
+    pending_clarification,
+    apply_ratio_conditions,
+    balance_capability_refusal,
+    for_sql_service,
+    invalid_rule_message,
+    parse_ratio_conditions,
+    plain_text,
+    validate_conditions,
+)
+from services.aml_builder.web.services.attribute_filters import (
+    apply_attribute_filters,
+    drop_covered_transaction_types,
+    resolve_attribute_filters,
+    strip_attribute_phrases,
+    top_level_clauses,
+    validate_filters,
+)
+from services.aml_builder.web.services.piotech_report import (
+    build_http_rejection,
+    build_rejection,
+    build_unavailable_rejection,
+    normalize_scenario_report,
+    summarize_rejection,
+)
 from services.aml_builder.web.services.plan_renderer import build_plan_markdown
 from services.aml_builder.web.services.prompts.loader import load_prompt
 from services.aml_builder.web.services.scenario_metadata import (
@@ -54,6 +98,41 @@ from services.aml_builder.web.services.scenario_registry_analytics import (
 )
 
 logger = logging.getLogger(__name__)
+
+_ALL_TRANSACTION_SCOPE_LABELS = {
+    "ALL",
+    "ALL TRANSACTION",
+    "ALL TRANSACTIONS",
+    "ALL TYPES",
+    "ALL TRANSACTION TYPES",
+    "ANY",
+    "ANY TRANSACTION",
+    "ANY TRANSACTIONS",
+    "ANY TYPE",
+    "ANY TYPES",
+    "ANY TRANSACTION TYPE",
+    "ANY TRANSACTION TYPES",
+}
+
+
+def _specific_transaction_types(transaction_type: Any) -> List[str]:
+    """Return specific transaction types, excluding all/any scope labels.
+
+    Args:
+        transaction_type: One transaction type or a list of transaction types.
+
+    Returns:
+        Specific transaction types that can be used for code discovery.
+    """
+    values = (
+        transaction_type if isinstance(transaction_type, list) else [transaction_type]
+    )
+    return [
+        normalized
+        for value in values
+        if value and (normalized := " ".join(str(value).strip().upper().split()))
+        and normalized not in _ALL_TRANSACTION_SCOPE_LABELS
+    ]
 
 
 # =============================================================================
@@ -128,11 +207,17 @@ def analyze_intent_and_discover_explanation_codes(
     user_prompt: str,
     existing_intent_json: Optional[str] = None,
     existing_metadata_json: Optional[str] = None,
+    state: Annotated[Optional[Dict[str, Any]], InjectedState] = None,
+    config: RunnableConfig = None,  # type: ignore[assignment]
 ) -> str:
-    """Analyze the user's compliance scenario prompt, extract structured scenario parameters (AMLIntent),
-    run vector similarity search against the domain explanation codes catalog (top 70% relative
-    cutoff), and deterministically seed the PIO_AML_SCENARIO governance metadata (period, country/
-    institution codes, description, etc.) that will later be needed at persistence time.
+    """Extract scenario intent, conditionally discover codes, and seed governance metadata.
+
+    For specific transaction types, code discovery uses vector similarity search against the domain
+    explanation-code catalog (top 70% relative cutoff). It also seeds PIO_AML_SCENARIO metadata
+    (period, country/institution codes, description, etc.) for later persistence.
+
+    ALL/ANY transaction scope does not need explanation-code discovery. Do not search the catalog
+    for ALL/ANY or unspecified transaction types; only search for one or more specific types.
 
     IMPORTANT: Always invoke `generate_scenario_execution_plan` immediately after this tool in the
     same turn to render the implementation plan artifact in the side panel before responding to the user.
@@ -146,13 +231,41 @@ def analyze_intent_and_discover_explanation_codes(
             accumulated so far (side panel clicks, prior turns). Already-set values are never
             overwritten by re-seeding — pass this on every refinement turn so officer picks persist.
 
+        state: Injected agent state (never passed by the model); used to find an open clarification.
+        config: Injected run config (never passed by the model); carries the clarification-form
+            answers of this turn under configurable.clarification_answers.
+
     Returns:
-        str: JSON object containing 'enriched_intent' dict, 'explanation_code_checkpoint' markdown
-             table, and 'scenario_metadata' dict (PIO_AML_SCENARIO field values seeded so far).
+        str: JSON object containing 'status': 'COMPLETE', 'enriched_intent' dict,
+             'explanation_code_checkpoint' markdown table, and 'scenario_metadata' dict
+             (PIO_AML_SCENARIO field values seeded so far). When a mandatory parameter (target
+             entity, threshold amount, timeframe, channels) is not stated: 'status':
+             'NEEDS_CLARIFICATION' with 'understood_summary', 'missing_fields' and 'questions';
+             then STOP and do not call any other tool.
     """
     logger.info(
         "[TOOL: INTENT] Extracting scenario parameters and running vector search..."
     )
+    # Clarification answers (from the form) complete the request that asked for them.
+    answers = ((config or {}).get("configurable") or {}).get("clarification_answers") or None
+    pending = pending_clarification((state or {}).get("messages", [])) if answers else None
+    original_request = user_prompt
+    known_intent: Optional[Dict[str, Any]] = None
+    if pending:
+        earlier = str(pending.get("original_request") or "").strip()
+        if earlier and earlier not in user_prompt:
+            original_request = earlier
+            user_prompt = earlier + "\n\n" + describe_answers(answers)
+        if not existing_intent_json and pending.get("partial_intent"):
+            existing_intent_json = json.dumps(pending["partial_intent"], ensure_ascii=False)
+    elif existing_intent_json:
+        try:
+            known_intent = json.loads(existing_intent_json)
+        except json.JSONDecodeError:
+            known_intent = None
+    # Answer turn: the request was already parsed; the answers fill its slots (no new LLM guess).
+    base_intent = (copy.deepcopy(pending["partial_intent"])
+                   if pending and isinstance(pending.get("partial_intent"), dict) else None)
     llm = build_llm()
 
     system_instruction = load_prompt("intent_extraction.md")
@@ -165,29 +278,32 @@ def analyze_intent_and_discover_explanation_codes(
     ]
 
     try:
-        res = llm.invoke(messages)
-        raw_text = str(res.content).strip() if res.content else ""
-        if not raw_text and hasattr(res, "additional_kwargs") and res.additional_kwargs:
-            raw_text = str(
-                res.additional_kwargs.get("reasoning_content", "")
-                or res.additional_kwargs.get("content", "")
-            ).strip()
+        if base_intent is not None:
+            intent_dict = base_intent
+        else:
+            res = llm.invoke(messages)
+            raw_text = str(res.content).strip() if res.content else ""
+            if not raw_text and hasattr(res, "additional_kwargs") and res.additional_kwargs:
+                raw_text = str(
+                    res.additional_kwargs.get("reasoning_content", "")
+                    or res.additional_kwargs.get("content", "")
+                ).strip()
 
-        if not raw_text:
-            logger.error("[TOOL: INTENT] Sub-LLM returned empty output content.")
-            return json.dumps(
-                {"error": "Sub-LLM returned empty response during intent extraction."}
-            )
+            if not raw_text:
+                logger.error("[TOOL: INTENT] Sub-LLM returned empty output content.")
+                return json.dumps(
+                    {"error": "Sub-LLM returned empty response during intent extraction."}
+                )
 
-        intent_dict = safe_parse_json(raw_text)
-        if "AMLIntent" in intent_dict and isinstance(intent_dict["AMLIntent"], dict):
-            intent_dict = intent_dict["AMLIntent"]
-        elif "aml_intent" in intent_dict and isinstance(
-            intent_dict["aml_intent"], dict
-        ):
-            intent_dict = intent_dict["aml_intent"]
-        elif "intent" in intent_dict and isinstance(intent_dict["intent"], dict):
-            intent_dict = intent_dict["intent"]
+            intent_dict = safe_parse_json(raw_text)
+            if "AMLIntent" in intent_dict and isinstance(intent_dict["AMLIntent"], dict):
+                intent_dict = intent_dict["AMLIntent"]
+            elif "aml_intent" in intent_dict and isinstance(
+                intent_dict["aml_intent"], dict
+            ):
+                intent_dict = intent_dict["aml_intent"]
+            elif "intent" in intent_dict and isinstance(intent_dict["intent"], dict):
+                intent_dict = intent_dict["intent"]
 
         # Sanitize optional dict/model fields that might be serialized as "" or invalid empty types
         for dict_field in ("baseline_window", "aggregation", "time_window"):
@@ -288,10 +404,48 @@ def analyze_intent_and_discover_explanation_codes(
         elif tx_type:
             intent_dict["transaction_type"] = tx_type
 
+        # Attribute filters first ("dormant accounts", "corporate customers", "credit transactions"),
+        # resolved against the lookup tables. They take priority over explanation codes: a "type" that is
+        # only a filter's value (CREDIT, DEBIT) is handled by the filter and never searched as codes.
+        attribute_filters = resolve_attribute_filters(user_prompt, *_period_texts(intent_dict))
+        intent_dict["attribute_filters"] = attribute_filters
+        intent_dict, dropped_types = drop_covered_transaction_types(intent_dict, attribute_filters)
+        if dropped_types:
+            tx_types = intent_dict.get("transaction_types")
+            tx_type = intent_dict.get("transaction_type")
+
+        # "X% of Y" is ONE ratio condition, not an amount plus an empty comparison.
+        intent_dict = apply_ratio_conditions(intent_dict, parse_ratio_conditions(original_request))
+        # Data capability: a rule on the account balance needs balance history on this database.
+        refusal = balance_capability_refusal(intent_dict, original_request)
+        if refusal:
+            logger.info("[TOOL: INTENT] Refused: needs balance_history, not available on %s", refusal["database"])
+            return json.dumps(refusal, ensure_ascii=False, indent=2)
+
+        # Clarification flow: never guess a mandatory parameter the user did not state.
+        if answers:
+            intent_dict = apply_answers(intent_dict, answers, questions=(pending or {}).get("questions"))
+            tx_types = intent_dict.get("transaction_types")
+            tx_type = intent_dict.get("transaction_type")
+        if settings.AML_CLARIFICATION_FLOW:
+            # Business decision: what is monitored is per customer unless the request says otherwise.
+            intent_dict = default_entity(intent_dict, user_prompt)
+            intent_dict = all_types_if_any(intent_dict, user_prompt)
+            gaps = find_gaps(intent_dict, user_prompt, known=known_intent, answered=answered_fields(answers))
+            if gaps:
+                logger.info("[TOOL: INTENT] Clarification needed for: %s", gaps)
+                return json.dumps(
+                    clarification_payload(intent_dict, gaps, original_request),
+                    ensure_ascii=False, indent=2, default=str,
+                )
+
         explicit_codes = intent_dict.get("explanation_codes")
 
         discovered_codes = []
         expl_checkpoint = None
+
+        target_types = tx_types if tx_types else tx_type
+        specific_types = _specific_transaction_types(target_types)
 
         # If user explicitly confirmed/selected codes via LLM resolution, preserve them & skip re-discovery checkpoint
         if (
@@ -303,38 +457,62 @@ def analyze_intent_and_discover_explanation_codes(
                 "[TOOL: INTENT] User/LLM confirmed explicit explanation codes: %s",
                 explicit_codes,
             )
+        elif specific_types:
+            # Search only for explicitly named transaction types. ALL/ANY is
+            # a scope choice, not a catalog query.
+            search_types: Any = (
+                specific_types if isinstance(target_types, list) else specific_types[0]
+            )
+            discovered_codes = select_relevant_explanation_codes(search_types)
+            if discovered_codes:
+                expl_checkpoint = format_explanation_code_checkpoint(
+                    search_types, discovered_codes
+                )
+                code_strings = [
+                    str(c.get("code")).strip()
+                    for c in discovered_codes
+                    if c.get("code")
+                ]
+                intent_dict["explanation_codes"] = code_strings
+
+                # Build explanation_codes_by_type partitioning
+                codes_by_type: Dict[str, List[str]] = {}
+                for c in discovered_codes:
+                    tx_key = c.get("channel") or c.get("transaction_type") or (search_types[0] if isinstance(search_types, list) else str(search_types))
+                    codes_by_type.setdefault(tx_key, []).append(str(c.get("code")).strip())
+                intent_dict["explanation_codes_by_type"] = codes_by_type
+
+                # Bind channel-specific explanation codes directly to individual thresholds and semantic conditions
+                _bind_channels_and_codes_to_intent(intent_dict, discovered_codes, codes_by_type)
+
+                logger.info(
+                    "[TOOL: INTENT] Vector search discovered %d codes across %d channels: %s",
+                    len(code_strings),
+                    len(codes_by_type),
+                    list(codes_by_type.keys()),
+                )
+
         else:
-            target_types = tx_types if tx_types else (tx_type if tx_type else None)
-            if target_types:
-                # Run vector search discovery for single or multiple types
-                discovered_codes = select_relevant_explanation_codes(target_types)
-                if discovered_codes:
-                    expl_checkpoint = format_explanation_code_checkpoint(
-                        target_types, discovered_codes
-                    )
-                    code_strings = [
-                        str(c.get("code")).strip()
-                        for c in discovered_codes
-                        if c.get("code")
-                    ]
-                    intent_dict["explanation_codes"] = code_strings
+            # Do not let model-generated codes turn an ALL/ANY request into a
+            # restricted transaction population. Explicit user-selected codes
+            # are handled by the branch above.
+            intent_dict["explanation_codes"] = None
+            intent_dict["explanation_codes_by_type"] = None
+            for condition_field in ("thresholds", "semantic_conditions"):
+                conditions = intent_dict.get(condition_field)
+                if isinstance(conditions, list):
+                    for condition in conditions:
+                        if isinstance(condition, dict):
+                            condition["explanation_codes"] = None
 
-                    # Build explanation_codes_by_type partitioning
-                    codes_by_type: Dict[str, List[str]] = {}
-                    for c in discovered_codes:
-                        tx_key = c.get("channel") or c.get("transaction_type") or (target_types[0] if isinstance(target_types, list) else str(target_types))
-                        codes_by_type.setdefault(tx_key, []).append(str(c.get("code")).strip())
-                    intent_dict["explanation_codes_by_type"] = codes_by_type
-
-                    # Bind channel-specific explanation codes directly to individual thresholds and semantic conditions
-                    _bind_channels_and_codes_to_intent(intent_dict, discovered_codes, codes_by_type)
-
-                    logger.info(
-                        "[TOOL: INTENT] Vector search discovered %d codes across %d channels: %s",
-                        len(code_strings),
-                        len(codes_by_type),
-                        list(codes_by_type.keys()),
-                    )
+        # An explicit period ("between 2016 and 2022", "in 2019") sets the evaluation date to its
+        # last day and the window to its exact length, instead of a window back from today.
+        intent_dict, fixed_period = apply_fixed_period(intent_dict, user_prompt, *_period_texts(intent_dict))
+        if fixed_period:
+            logger.info("[TOOL: INTENT] Fixed period %s to %s", fixed_period[0], fixed_period[1])
+            # A shorter window inside the period slides over it; the plan says so.
+            if period_of(intent_dict) != fixed_period:
+                intent_dict["evaluation_period"] = {"start": fixed_period[0].isoformat(), "end": fixed_period[1].isoformat()}
 
         intent = AMLIntent(**intent_dict)
 
@@ -358,6 +536,7 @@ def analyze_intent_and_discover_explanation_codes(
 
         return json.dumps(
             {
+                "status": "COMPLETE",
                 "enriched_intent": intent.model_dump(),
                 "explanation_code_checkpoint": expl_checkpoint,
                 "discovered_explanation_codes": discovered_codes,
@@ -460,6 +639,309 @@ def generate_scenario_execution_plan(
         return json.dumps({"error": str(exc)})
 
 
+_latest_transaction_date: Optional[date] = None
+
+
+# Per-customer count columns a rule aggregated per customer may return.
+_RESULT_COUNT_COLUMNS: Final = ("EVENT_COUNT", "TXN_COUNT", "TRANSACTION_COUNT", "TRA_COUNT")
+# Columns that only a per-transaction result has.
+_TRANSACTION_COLUMNS: Final = ("TRA_SEQ1", "TRA_SEQ2", "TRA_DATE")
+
+
+def _shadow_metrics(sql: str, binds: Dict[str, Any]) -> Dict[str, Any]:
+    """Measure what a scenario's SQL matches: transaction rows and distinct customers.
+
+    The result is either one row per transaction (it has TRA_DATE / TRA_SEQ1) or one row per
+    customer with a count column such as EVENT_COUNT. The alert engine raises one header alert per
+    distinct customer, so ``header_alert_count`` is the distinct customer count.
+
+    Args:
+        sql (str): The anchored scenario SQL.
+        binds (Dict[str, Any]): Its business-date bind values.
+
+    Returns:
+        Dict[str, Any]: 'matched_transaction_count' (None when a per-customer result carries no
+            count column), 'alerted_customer_count' (None without CUS_NUM), 'result_row_count',
+            'header_alert_count', 'transaction_detail_count', 'alert_density_ratio' (transactions
+            per customer) and 'metrics_summary' (e.g. '120 transactions across 65 distinct customers').
+
+    Raises:
+        Exception: Any database error from the read-only queries.
+    """
+    columns, _ = run_shadow_readonly(f"SELECT * FROM ({sql}) shadow_query WHERE 1 = 0", binds)
+    names = {str(c).upper() for c in columns}
+    count_column = next((c for c in _RESULT_COUNT_COLUMNS if c in names), None)
+    per_transaction = any(c in names for c in _TRANSACTION_COLUMNS)
+
+    selects = ["COUNT(*)"]
+    if "CUS_NUM" in names:
+        selects.append("COUNT(DISTINCT shadow_query.CUS_NUM)")
+    if not per_transaction and count_column:
+        selects.append(f"SUM(shadow_query.{count_column})")
+    _, rows = run_shadow_readonly(f"SELECT {', '.join(selects)} FROM ({sql}) shadow_query", binds)
+    values = list(rows[0]) if rows else [0] * len(selects)
+
+    row_count = int(values[0] or 0)
+    customers = int(values[1] or 0) if "CUS_NUM" in names else None
+    transactions: Optional[int] = None
+    if per_transaction:
+        transactions = row_count
+    elif count_column:
+        transactions = int(values[-1] or 0)
+    elif "CUS_NUM" in names:
+        # One row per customer and no count column: count the rule's own rows for those customers.
+        count_sql = _transactions_behind_customers_sql(sql)
+        if count_sql:
+            _, count_rows = run_shadow_readonly(count_sql, binds)
+            transactions = int(count_rows[0][0] or 0) if count_rows else 0
+
+    if transactions is not None and customers is not None:
+        summary = f"{transactions:,} transactions across {customers:,} distinct customers"
+    elif customers is not None:
+        summary = f"{customers:,} distinct customers (the rule returns one row per customer, without a transaction count)"
+    else:
+        summary = f"{row_count:,} matching rows"
+    ratio = round(transactions / customers, 2) if transactions is not None and customers else None
+
+    return {
+        "matched_transaction_count": transactions,
+        "alerted_customer_count": customers,
+        "result_row_count": row_count,
+        "header_alert_count": customers if customers is not None else row_count,
+        "transaction_detail_count": transactions,
+        "alert_density_ratio": ratio,
+        "metrics_summary": summary,
+    }
+
+
+def _transactions_behind_customers_sql(sql: str) -> Optional[str]:
+    """Build a count of the rule's own rows for the customers a per-customer rule returns.
+
+    ``SELECT t.CUS_NUM FROM T t WHERE <filters> GROUP BY ... [HAVING ...]`` becomes
+    ``SELECT COUNT(*) FROM T t WHERE <filters> AND t.CUS_NUM IN (SELECT CUS_NUM FROM (<rule>))``:
+    the transactions that put each alerted customer in the result.
+
+    Args:
+        sql (str): The anchored scenario SQL, aggregated per customer.
+
+    Returns:
+        Optional[str]: The count SQL, or None when the rule has no top-level GROUP BY on a
+            CUS_NUM column, or is not a single-table SELECT.
+    """
+    clauses = top_level_clauses(sql)
+    if not clauses or "GROUP BY" not in clauses:
+        return None
+    group_start, group_end = clauses["GROUP BY"]
+    customer = next(
+        (e.strip() for e in sql[group_start + len("GROUP BY"):group_end].split(",") if re.search(r"\bCUS_NUM\s*$", e.strip(), re.I)),
+        None,
+    )
+    if not customer:
+        return None
+    from_start = clauses["FROM"][0]
+    body = sql[from_start:clauses["WHERE"][1]] if "WHERE" in clauses else sql[from_start:clauses["FROM"][1]]
+    link = "AND" if "WHERE" in clauses else "WHERE"
+    return (
+        f"SELECT COUNT(*) {body.rstrip()} {link} {customer} IN "
+        f"(SELECT shadow_query.CUS_NUM FROM ({sql}) shadow_query)"
+    )
+
+
+def _period_texts(intent: Dict[str, Any]) -> List[str]:
+    """Free text of an intent that can state an explicit period.
+
+    Args:
+        intent (Dict[str, Any]): The scenario intent.
+
+    Returns:
+        List[str]: The detection logic, then the scenario name, then each condition phrase.
+    """
+    texts = [str(intent.get("detection_logic") or ""), str(intent.get("scenario_name") or "")]
+    for condition in intent.get("semantic_conditions") or []:
+        if isinstance(condition, dict):
+            texts.append(str(condition.get("raw_phrase") or ""))
+    return texts
+
+
+def _shadow_anchor(intent: Dict[str, Any]) -> Tuple[date, str]:
+    """Choose the business date a shadow test is evaluated for.
+
+    Order: the scenario's ``anchor_date``; the ``SHADOW_ANCHOR_DATE`` setting; the latest
+    transaction date in PIO_TRANSACTIONS for the configured country and institution (looked
+    up once per process, read-only); today, only if no transaction date can be found.
+
+    Args:
+        intent (Dict[str, Any]): The scenario intent sent to PioTech.
+
+    Returns:
+        Tuple[date, str]: The business date and a short description of where it came from.
+    """
+    global _latest_transaction_date
+    for value, source in ((intent.get("anchor_date"), "scenario anchor_date"),
+                          (settings.SHADOW_ANCHOR_DATE, "SHADOW_ANCHOR_DATE setting")):
+        try:
+            parsed = to_date(value)
+        except ValueError:
+            logger.warning("[TOOL: SQL_BRIDGE] Ignoring invalid %s: %r", source, value)
+            parsed = None
+        if parsed:
+            return parsed, source
+    if _latest_transaction_date is None:
+        try:
+            _, rows = run_shadow_readonly(
+                "SELECT MAX(TRA_DATE) FROM BI_DWH.PIO_TRANSACTIONS WHERE COUNTRY_CODE = :cc AND INST_CODE = :ic",
+                {"cc": settings.AML_COUNTRY_CODE, "ic": settings.AML_INST_CODE},
+            )
+            _latest_transaction_date = to_date(rows[0][0]) if rows and rows[0][0] else None
+        except Exception as exc:  # any lookup failure falls back to today rather than failing the test
+            logger.warning("[TOOL: SQL_BRIDGE] Could not read the latest transaction date: %s", exc)
+    if _latest_transaction_date:
+        return _latest_transaction_date, "latest transaction date in the data"
+    return date.today(), "today (no transaction date found)"
+
+
+def _request_piotech_sql(intent_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """Send one AML_SCENARIO_GENERATION request to PioTech AI and collect its answer.
+
+    Args:
+        intent_dict (Dict[str, Any]): The AMLIntent to generate SQL for.
+
+    Returns:
+        Dict[str, Any]: 'sql' (str, "" if none), 'report' (normalized scenario_report or
+            None) and 'rejection' (structured rejection when no SQL came back, else None).
+    """
+    # -----------------------------------------------------------
+    # Step 2: Call PioTech AI text-to-SQL SSE service
+    # -----------------------------------------------------------
+    payload_content = json.dumps(
+        {"request_type": "AML_SCENARIO_GENERATION", "intent": intent_dict},
+        indent=2,
+        ensure_ascii=False,
+    )
+    chat_id = f"aml_tool_{uuid.uuid4().hex[:8]}"
+    payload = {
+        "messages": [{"role": "user", "content": payload_content}],
+        "metadata": {
+            "user_id": settings.PIOTECH_AI_USER_ID,
+            "project_id": settings.PIOTECH_AI_PROJECT_ID,
+            "chat_id": chat_id,
+        },
+        "reasoning_mode": "instant",
+    }
+
+    collected_text: List[str] = []
+    final_answer_text: Optional[str] = None
+    scenario_report: Optional[Dict[str, Any]] = None
+    upstream_error: Optional[str] = None
+
+    try:
+        with httpx.Client(timeout=settings.PIOTECH_AI_TIMEOUT_SECONDS) as client:
+            with client.stream(
+                "POST",
+                settings.PIOTECH_AI_URL,
+                json=payload,
+                headers={
+                    "Accept": "text/event-stream",
+                    "Content-Type": "application/json",
+                },
+            ) as response:
+                if response.status_code >= 400:
+                    # The service answered but refused the request (e.g. 422 when the
+                    # intent breaks its contract). Show its own explanation; this is
+                    # not an availability problem.
+                    body = response.read().decode("utf-8", errors="replace")
+                    logger.error(
+                        "[TOOL: SQL_BRIDGE] PioTech AI rejected the request: HTTP %d %s",
+                        response.status_code,
+                        body[:500],
+                    )
+                    return {
+                        "sql": "",
+                        "report": None,
+                        "rejection": build_http_rejection(response.status_code, body),
+                    }
+                for line in response.iter_lines():
+                    if not line or not line.startswith("data:"):
+                        continue
+                    raw = line[5:].strip()
+                    if raw == "[DONE]":
+                        break
+                    try:
+                        event = json.loads(raw)
+                        event_type = event.get("type", "")
+                        if event_type == "final_answer":
+                            final_answer_text = event.get("text", "")
+                        elif event_type == "content":
+                            collected_text.append(event.get("text", ""))
+                        elif event_type == "scenario_report":
+                            scenario_report = normalize_scenario_report(event)
+                        elif event_type == "error":
+                            upstream_error = str(
+                                event.get("message") or event.get("text") or ""
+                            ).strip()
+                    except json.JSONDecodeError:
+                        continue
+    except httpx.HTTPError as exc:
+        logger.error("[TOOL: SQL_BRIDGE] HTTP error calling PioTech AI: %s", exc)
+        return {
+            "sql": "",
+            "report": None,
+            "rejection": build_unavailable_rejection(settings.PIOTECH_AI_URL, str(exc)),
+        }
+
+    # -----------------------------------------------------------
+    # Step 3: Extract SQL from the SSE stream response
+    # -----------------------------------------------------------
+    sql = ""
+    if final_answer_text and final_answer_text.strip():
+        sql = extract_sql(final_answer_text)
+
+    if not sql:
+        full_stream_text = "".join(collected_text).strip()
+        sql = extract_sql(full_stream_text)
+
+    if not sql:
+        rejection = build_rejection(upstream_error, scenario_report)
+        logger.error(
+            "[TOOL: SQL_BRIDGE] PioTech AI returned no SQL: %s", summarize_rejection(rejection)
+        )
+        return {"sql": "", "report": scenario_report, "rejection": rejection}
+    return {"sql": sql, "report": scenario_report, "rejection": None}
+
+
+def _rejection_result(
+    rejection: Dict[str, Any],
+    scenario_report: Optional[Dict[str, Any]],
+    corrections: Optional[List[Dict[str, Any]]] = None,
+) -> str:
+    """Serialize a PioTech rejection as the shadow-test tool's result.
+
+    Args:
+        rejection (Dict[str, Any]): Output of build_rejection / build_unavailable_rejection.
+        scenario_report (Optional[Dict[str, Any]]): The normalized PioTech report, kept for
+            traceability, or None if the service sent none.
+        corrections (Optional[List[Dict[str, Any]]]): Automatic corrections already tried
+            before this final refusal, if any.
+
+    Returns:
+        str: JSON with 'error' (one-line summary), 'rejection' (structured) and
+            'scenario_report' (raw, may be null).
+    """
+    reason = next((plain_text(r.get("reason", "")) for r in rejection.get("reasons") or [] if r.get("reason")), "")
+    user_message = "SQL could not be generated for this rule." + (f" {reason.split('.')[0].strip()}." if reason else "")
+    return json.dumps(
+        {
+            "error": plain_text(f"PioTech AI did not generate SQL: {summarize_rejection(rejection)}"),
+            "user_message": user_message,
+            "rejection": rejection,
+            "scenario_report": scenario_report,
+            "auto_corrections_tried": corrections or [],
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+
+
 @tool
 def execute_oracle_dwh_shadow_test(intent_json: str) -> str:
     """Generate production-grade Oracle DWH SQL via PioTech AI text-to-SQL service and execute
@@ -468,12 +950,25 @@ def execute_oracle_dwh_shadow_test(intent_json: str) -> str:
     ONLY call this tool AFTER the user has explicitly confirmed, accepted, or approved the
     implementation plan generated by generate_scenario_execution_plan.
 
+    The result may carry 'corrected_intent': the scenario exactly as the SQL was generated. Use
+    it, not the original, for every later step including persistence, and do not comment on how
+    it differs. Only if 'auto_correction_warnings' is present, show those items verbatim.
+
+    If PioTech AI still does not generate SQL, the result carries a 'rejection' object with the
+    service's own explanation: 'blocked_by' (the condition(s) that stopped it), 'reasons',
+    'suggestions', 'implementable_without' and 'warnings'. You MUST present those to the user
+    as given (see the system prompt) and MUST NOT invent another cause or retry this tool with
+    the same intent.
+
     Args:
         intent_json (str): Serialized AMLIntent payload dictionary JSON string.
 
     Returns:
-        str: JSON containing 'raw_sql', 'header_alert_count', 'transaction_detail_count',
-             'alert_density_ratio', and 'validation_success'.
+        str: JSON containing 'raw_sql', the measured counts ('matched_transaction_count',
+             'alerted_customer_count', 'header_alert_count' = distinct customers,
+             'transaction_detail_count', 'alert_density_ratio' = transactions per customer,
+             'metrics_summary'), and 'validation_success'. When no SQL was generated:
+             JSON with 'error' (one-line summary) and 'rejection' (structured explanation).
     """
     logger.info("[TOOL: SQL_BRIDGE] Requesting SQL generation from PioTech AI...")
 
@@ -501,76 +996,81 @@ def execute_oracle_dwh_shadow_test(intent_json: str) -> str:
         return json.dumps({"error": f"Invalid intent JSON: {exc}"})
 
     # -----------------------------------------------------------
-    # Step 2: Call PioTech AI text-to-SQL SSE service
+    # Step 2-3: Generate SQL via PioTech AI, auto-correcting refusals that a change to the
+    # intent can clear: NOT_IMPLEMENTABLE (unsupported condition), UNRESOLVED (ambiguous or
+    # contradictory phrase, open question) and REQUEST_REJECTED (invalid value such as a 0 window)
     # -----------------------------------------------------------
-    payload_content = json.dumps(
-        {"request_type": "AML_SCENARIO_GENERATION", "intent": intent_dict},
-        indent=2,
-        ensure_ascii=False,
-    )
-    chat_id = f"aml_tool_{uuid.uuid4().hex[:8]}"
-    payload = {
-        "messages": [{"role": "user", "content": payload_content}],
-        "metadata": {
-            "user_id": settings.PIOTECH_AI_USER_ID,
-            "project_id": settings.PIOTECH_AI_PROJECT_ID,
-            "chat_id": chat_id,
-        },
-        "reasoning_mode": "instant",
+    correctors = {
+        "NOT_IMPLEMENTABLE": auto_correct_intent,
+        "UNRESOLVED": resolve_intent,
+        "REQUEST_REJECTED": resolve_intent,
     }
-
-    collected_text: List[str] = []
-    final_answer_text: Optional[str] = None
-
-    try:
-        with httpx.Client(timeout=settings.PIOTECH_AI_TIMEOUT_SECONDS) as client:
-            with client.stream(
-                "POST",
-                settings.PIOTECH_AI_URL,
-                json=payload,
-                headers={
-                    "Accept": "text/event-stream",
-                    "Content-Type": "application/json",
-                },
-            ) as response:
-                response.raise_for_status()
-                for line in response.iter_lines():
-                    if not line or not line.startswith("data:"):
-                        continue
-                    raw = line[5:].strip()
-                    if raw == "[DONE]":
-                        break
-                    try:
-                        event = json.loads(raw)
-                        event_type = event.get("type", "")
-                        if event_type == "final_answer":
-                            final_answer_text = event.get("text", "")
-                        elif event_type == "content":
-                            collected_text.append(event.get("text", ""))
-                    except json.JSONDecodeError:
-                        continue
-    except httpx.HTTPError as exc:
-        logger.error("[TOOL: SQL_BRIDGE] HTTP error calling PioTech AI: %s", exc)
-        return json.dumps({"error": f"PioTech AI HTTP error: {exc}"})
-
-    # -----------------------------------------------------------
-    # Step 3: Extract SQL from the SSE stream response
-    # -----------------------------------------------------------
-    sql = ""
-    if final_answer_text and final_answer_text.strip():
-        sql = extract_sql(final_answer_text)
-
-    if not sql:
-        full_stream_text = "".join(collected_text).strip()
-        sql = extract_sql(full_stream_text)
-
-    if not sql:
-        logger.error("[TOOL: SQL_BRIDGE] PioTech AI did not return a valid SQL query.")
-        return json.dumps(
-            {
-                "error": "PioTech AI did not return a valid SQL query. Try refining the scenario intent."
-            }
+    # Never send an incomplete rule for SQL generation, and never show its raw expression to the user.
+    problems = validate_conditions(intent_dict)
+    if problems:
+        message = invalid_rule_message(problems, str(intent_dict.get("detection_logic") or ""))
+        logger.warning("[TOOL: SQL_BRIDGE] Rule not sent for SQL generation: %s", problems)
+        return json.dumps({"error": message, "user_message": message, "validation_errors": problems,
+                           "validation_success": False}, ensure_ascii=False, indent=2)
+    sent_intent, fixed_period = apply_fixed_period(intent_dict, *_period_texts(intent_dict))
+    # Attribute filters are applied by the AML Builder (below), never by PioTech.
+    attribute_filters = validate_filters(intent_dict.get("attribute_filters"))
+    corrections: List[Dict[str, Any]] = []
+    attempts = 0
+    while True:
+        # Period wording is removed from the text PioTech reads, so its years are never taken
+        # for amounts; the period itself travels in anchor_date and time_window. Attribute
+        # phrases are removed too, so PioTech neither refuses nor re-applies them.
+        to_piotech = clean_for_sql_service(sent_intent) if fixed_period else sent_intent
+        outcome = _request_piotech_sql(for_sql_service(strip_attribute_phrases(to_piotech, attribute_filters)))
+        if outcome["sql"]:
+            break
+        rejection = outcome["rejection"]
+        corrector = correctors.get(rejection["kind"])
+        if (
+            not settings.PIOTECH_AUTO_CORRECT
+            or corrector is None
+            or attempts >= settings.PIOTECH_AUTO_CORRECT_MAX_ATTEMPTS
+        ):
+            return _rejection_result(rejection, outcome["report"], corrections)
+        corrected, applied = corrector(sent_intent, rejection)
+        if not applied:
+            logger.warning(
+                "[TOOL: SQL_BRIDGE] Auto-correction found nothing to change for: %s",
+                summarize_rejection(rejection),
+            )
+            return _rejection_result(rejection, outcome["report"], corrections)
+        attempts += 1
+        corrections += applied
+        sent_intent = corrected
+        logger.warning(
+            "[TOOL: SQL_BRIDGE] Auto-correction attempt %d: %s",
+            attempts,
+            "; ".join(f"{c['action']} \"{c['original']}\"" for c in applied),
         )
+
+    sql = outcome["sql"]
+    correction_fields: Dict[str, Any] = {}
+    if corrections:
+        if settings.PIOTECH_SHOW_AUTO_CORRECTIONS:
+            correction_fields = {
+                "corrected_intent": sent_intent,
+                "auto_corrections": corrections,
+                "auto_correction_warnings": [c["warning"] for c in corrections],
+            }
+        else:
+            # Hidden by configuration: the model receives only the scenario as generated, with
+            # nothing describing what changed. The audit trail is the server log.
+            correction_fields = {
+                "corrected_intent": {k: v for k, v in sent_intent.items() if k != "auto_corrections"}
+            }
+            logger.warning(
+                "[TOOL: SQL_BRIDGE] AUDIT auto-corrections (hidden from user): %s",
+                json.dumps(
+                    [{k: c[k] for k in ("original", "action", "replacement", "reason")} for c in corrections],
+                    ensure_ascii=False,
+                ),
+            )
 
     logger.info(
         "[TOOL: SQL_BRIDGE] SQL extracted (%d chars). Executing shadow test...",
@@ -578,32 +1078,76 @@ def execute_oracle_dwh_shadow_test(intent_json: str) -> str:
     )
 
     # -----------------------------------------------------------
-    # Step 4: Execute shadow test — wrap in COUNT query for volume metrics
+    # Step 3b: Anchor the SQL to a business date (no SYSDATE, Sun-Thu business-day windows)
     # -----------------------------------------------------------
     try:
-        shadow_sql = f"SELECT COUNT(*) FROM ({sql}) shadow_query"
-        _, shadow_rows = run_shadow_readonly(shadow_sql)
-        header_count = shadow_rows[0][0] if shadow_rows else 0
-
-        # Estimate transaction detail rows (4x matches QB engine output ratio)
-        detail_count = header_count * 4
-        ratio = (
-            round(detail_count / max(header_count, 1), 2) if header_count > 0 else 0.0
+        sql = anchor_sql(sql, sent_intent)
+    except ValueError as exc:
+        logger.error("[TOOL: SQL_BRIDGE] Could not anchor SQL to a business date: %s", exc)
+        return json.dumps(
+            {"raw_sql": sql, "validation_success": False, "error": f"Date anchoring failed: {exc}", **correction_fields},
+            ensure_ascii=False,
+            indent=2,
         )
-
-        logger.info(
-            "[TOOL: SQL_BRIDGE] Shadow test complete. header_alerts=%d, detail_txns=%d, ratio=%.2f",
-            header_count,
-            detail_count,
-            ratio,
+    # Pin only when the window is the period itself; a shorter stated window ("within 7 days")
+    # stays a window ending on the period's last day.
+    pinned = False
+    window_slides = False
+    if fixed_period and period_of(sent_intent) == fixed_period:
+        sql, pinned = pin_period(sql, fixed_period[0], fixed_period[1])
+        if not pinned:
+            logger.warning(
+                "[TOOL: SQL_BRIDGE] Fixed period %s to %s not pinned: the SQL has no single window start",
+                fixed_period[0],
+                fixed_period[1],
+            )
+    elif fixed_period:
+        # A short window inside the period ("3 deposits in one week, in 2019"): any window of the period counts.
+        sql, window_slides = slide_window_over_period(
+            sql, fixed_period[0], fixed_period[1], sent_intent.get("time_window") or {}
         )
+        pinned = window_slides
+        if not window_slides:
+            logger.warning(
+                "[TOOL: SQL_BRIDGE] Window not slid over %s to %s (rule form not supported): last window only",
+                fixed_period[0],
+                fixed_period[1],
+            )
+    sql, filters_applied = apply_attribute_filters(sql, attribute_filters)
+    if filters_applied:
+        logger.info("[TOOL: SQL_BRIDGE] Attribute filters applied: %s", filters_applied)
+    anchor, anchor_source = _shadow_anchor(sent_intent)
+    binds = bind_values(sql, anchor)
+    date_fields: Dict[str, Any] = {
+        "evaluation_date": anchor.isoformat(),
+        "evaluation_date_source": anchor_source,
+        "window_dates": {name: value.isoformat() for name, value in binds.items()},
+    }
+    if fixed_period:
+        date_fields["fixed_period"] = {
+            "start": fixed_period[0].isoformat(),
+            "end": fixed_period[1].isoformat(),
+            "pinned_in_sql": pinned,
+            "window_slides_over_period": window_slides,
+        }
+    if filters_applied:
+        # Returned with the dates so both the success and the failure result carry them.
+        date_fields["attribute_filters_applied"] = filters_applied
+    logger.info("[TOOL: SQL_BRIDGE] Business date %s (%s); window binds %s", anchor, anchor_source, date_fields["window_dates"])
+
+    # -----------------------------------------------------------
+    # Step 4: Execute shadow test — measured transaction and customer counts
+    # -----------------------------------------------------------
+    try:
+        metrics = _shadow_metrics(sql, binds)
+        logger.info("[TOOL: SQL_BRIDGE] Shadow test complete: %s", metrics["metrics_summary"])
         return json.dumps(
             {
                 "raw_sql": sql,
-                "header_alert_count": header_count,
-                "transaction_detail_count": detail_count,
-                "alert_density_ratio": ratio,
+                **metrics,
                 "validation_success": True,
+                **date_fields,
+                **correction_fields,
             },
             ensure_ascii=False,
             indent=2,
@@ -616,17 +1160,56 @@ def execute_oracle_dwh_shadow_test(intent_json: str) -> str:
                 "raw_sql": sql,
                 "header_alert_count": None,
                 "transaction_detail_count": None,
+                "matched_transaction_count": None,
+                "alerted_customer_count": None,
                 "alert_density_ratio": None,
                 "validation_success": False,
                 "error": str(exc),
+                **date_fields,
+                **correction_fields,
             },
             ensure_ascii=False,
             indent=2,
         )
 
 
+def _latest_shadow_corrections(state: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Return the automatic corrections of the most recent successful shadow test, if any.
+
+    The latest shadow test that produced SQL decides: if it needed no correction (for example
+    after the user rephrased the scenario), earlier corrections no longer apply.
+
+    Args:
+        state (Optional[Dict[str, Any]]): The agent graph state injected by LangGraph.
+
+    Returns:
+        Optional[Dict[str, Any]]: 'warnings' (List[str]), 'corrected_intent' (Dict) and
+            'raw_sql' (str) of that shadow test, or None if it had no corrections.
+    """
+    for message in reversed((state or {}).get("messages") or []):
+        if getattr(message, "type", "") != "tool" or getattr(message, "name", "") != "execute_oracle_dwh_shadow_test":
+            continue
+        try:
+            payload = json.loads(getattr(message, "content", "") or "{}")
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(payload, dict) or not payload.get("raw_sql"):
+            continue
+        if not isinstance(payload.get("corrected_intent"), dict):
+            return None
+        return {
+            "warnings": list(payload.get("auto_correction_warnings") or []),
+            "corrected_intent": payload.get("corrected_intent"),
+            "raw_sql": payload.get("raw_sql"),
+        }
+    return None
+
+
 @tool
-def prepare_scenario_metadata_for_persistence(metadata_json: str) -> str:
+def prepare_scenario_metadata_for_persistence(
+    metadata_json: str,
+    state: Annotated[Optional[Dict[str, Any]], InjectedState] = None,
+) -> str:
     """Build the live PIO_AML_SCENARIO governance field catalog for the side panel / chat fallback.
 
     Call this ONLY after the user has approved the shadow test results and before calling
@@ -649,10 +1232,14 @@ def prepare_scenario_metadata_for_persistence(metadata_json: str) -> str:
         metadata_json (str): Serialized JSON of the scenario metadata accumulated so far (from
             the 'scenario_metadata' field of analyze_intent_and_discover_explanation_codes, merged
             with any side panel clicks or chat-provided values).
+        state (Optional[Dict[str, Any]]): Agent graph state, injected by LangGraph (not an LLM
+            argument); used to find automatic corrections made by the latest shadow test.
 
     Returns:
         str: JSON containing 'metadata' (current values), 'fields' (full catalog with live
-             lookup options), 'missing_mandatory_fields', and 'ready_for_persistence'.
+             lookup options), 'missing_mandatory_fields', and 'ready_for_persistence'. When the
+             scenario was auto-corrected, also 'auto_correction_warnings' and 'notice_to_user':
+             you MUST show these warnings verbatim at the top of your reply.
     """
     logger.info("[TOOL: METADATA] Building PIO_AML_SCENARIO field catalog...")
 
@@ -669,6 +1256,14 @@ def prepare_scenario_metadata_for_persistence(metadata_json: str) -> str:
             catalog["missing_mandatory_fields"],
             catalog["ready_for_persistence"],
         )
+        corrections = _latest_shadow_corrections(state)
+        if corrections and corrections["warnings"]:   # empty when hidden by PIOTECH_SHOW_AUTO_CORRECTIONS
+            catalog["auto_correction_warnings"] = corrections["warnings"]
+            catalog["notice_to_user"] = (
+                "Before reviewing governance, the user must see that this scenario was automatically "
+                "corrected. Start your reply with '⚠ Automatic corrections' and list every item of "
+                "auto_correction_warnings verbatim."
+            )
         return json.dumps(catalog, ensure_ascii=False, indent=2, default=str)
     except Exception as exc:
         logger.error("[TOOL: METADATA] Catalog build failed: %s", exc)
@@ -677,7 +1272,10 @@ def prepare_scenario_metadata_for_persistence(metadata_json: str) -> str:
 
 @tool
 def persist_and_validate_scenario_in_dwh(
-    intent_json: str, raw_sql: str, metadata_json: str
+    intent_json: str,
+    raw_sql: str,
+    metadata_json: str,
+    state: Annotated[Optional[Dict[str, Any]], InjectedState] = None,
 ) -> str:
     """Persist the confirmed, shadow-tested AML scenario atomically into both
     PIO_AML_PRODUCTION_SCENARIOS (for the automated daily ETL runner) and
@@ -697,11 +1295,18 @@ def persist_and_validate_scenario_in_dwh(
     or allowed-value set before anything is written — if validation fails, NOTHING is written
     to either table and the problems are returned for you to relay to the user.
 
+    If the shadow test returned 'corrected_intent' (automatic corrections were applied), pass
+    THAT as intent_json, never the original intent, so the saved description matches the SQL.
+
     Args:
-        intent_json (str): Serialized AMLIntent payload dictionary JSON string.
+        intent_json (str): Serialized AMLIntent payload dictionary JSON string — the shadow
+            test's 'corrected_intent' when it returned one.
         raw_sql (str): Production-grade Oracle SQL statement from the shadow test.
         metadata_json (str): Serialized PIO_AML_SCENARIO metadata JSON — the merged output of
             prepare_scenario_metadata_for_persistence plus any officer picks.
+        state (Optional[Dict[str, Any]]): Agent graph state, injected by LangGraph (not an LLM
+            argument); if the latest shadow test was auto-corrected and the intent passed here
+            is not the corrected one, the corrected intent is used instead.
 
     Returns:
         str: JSON containing 'scenario_id', 'scenario_name', 'write_success',
@@ -717,6 +1322,20 @@ def persist_and_validate_scenario_in_dwh(
     except json.JSONDecodeError as exc:
         logger.error("[TOOL: PERSISTER] Invalid intent JSON: %s", exc)
         return json.dumps({"error": f"Invalid intent JSON: {exc}"})
+
+    # A rule whose SQL was generated from an auto-corrected intent must be saved with that
+    # corrected intent, so its description matches what the SQL checks.
+    corrections = _latest_shadow_corrections(state)
+    if (
+        corrections
+        and isinstance(corrections.get("corrected_intent"), dict)
+        and isinstance(intent_dict, dict)
+        and not intent_dict.get("auto_corrections")
+    ):
+        logger.warning(
+            "[TOOL: PERSISTER] Using the auto-corrected intent from the latest shadow test instead of the original."
+        )
+        intent_dict = corrections["corrected_intent"]
 
     try:
         metadata_dict = json.loads(metadata_json) if metadata_json else {}

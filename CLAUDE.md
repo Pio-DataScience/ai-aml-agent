@@ -96,7 +96,7 @@ Each conversation is isolated by `thread_id = "{project_id}_{chat_id}_{user_id}"
 
 ### External dependency
 
-`execute_oracle_dwh_shadow_test` calls a **separate PioTech AI DWH service** (text-to-SQL agent) at `PIOTECH_AI_URL` (default `http://localhost:8001/chat/stream`). That service must be running independently for SQL generation to work.
+`execute_oracle_dwh_shadow_test` calls a **separate PioTech AI DWH service** (text-to-SQL agent) at `PIOTECH_AI_URL` (default `http://localhost:8006/chat/stream`). That service must be running independently for SQL generation to work.
 
 ---
 

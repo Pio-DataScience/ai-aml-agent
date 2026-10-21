@@ -27,7 +27,14 @@ Get-Content $envFile | ForEach-Object {
     if ($line -and -not $line.StartsWith("#") -and $line -like "*=*") {
         $key, $value = $line.Split("=", 2)
         $key = $key.Trim()
-        $value = $value.Trim().Trim('"').Trim("'")
+        $value = $value.Trim()
+        if ($value -match '^"([^"]*)"' -or $value -match "^'([^']*)'") {
+            # Quoted: keep only the text inside the quotes
+            $value = $Matches[1]
+        } else {
+            # Unquoted: drop an inline comment (a '#' preceded by whitespace)
+            $value = ($value -replace '\s+#.*$', '').Trim()
+        }
         [System.Environment]::SetEnvironmentVariable($key, $value)
     }
 }

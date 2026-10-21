@@ -6,7 +6,7 @@ Never hardcode secrets or connection strings — per SOLID Dependency Inversion.
 """
 
 from functools import lru_cache
-from typing import Optional
+from typing import Dict, Optional
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -135,7 +135,7 @@ class Settings(BaseSettings):
 
     # ─── PioTech AI (SQL Bridge) ───────────────────────────────────────────────
     PIOTECH_AI_URL: str = Field(
-        default="http://localhost:8001/chat/stream",
+        default="http://localhost:8006/chat/stream",
         description="PioTech AI DWH agent streaming endpoint (text-to-SQL).",
     )
     PIOTECH_AI_TIMEOUT_SECONDS: int = Field(
@@ -149,6 +149,89 @@ class Settings(BaseSettings):
     PIOTECH_AI_PROJECT_ID: str = Field(
         default="0",
         description="project_id sent in PioTech AI requests.",
+    )
+    BUSINESS_WEEKEND_DAYS: str = Field(
+        default="FRI,SAT",
+        description=(
+            "Comma-separated weekend days skipped when scenario windows count business days "
+            "backward from the business date (default: Sunday-Thursday business week)."
+        ),
+    )
+    SHADOW_ANCHOR_DATE: Optional[str] = Field(
+        default=None,
+        description=(
+            "Business date (YYYY-MM-DD) shadow tests are evaluated for when the scenario has no "
+            "anchor_date. Unset: the latest transaction date in PIO_TRANSACTIONS for "
+            "AML_COUNTRY_CODE / AML_INST_CODE."
+        ),
+    )
+    PIOTECH_AUTO_CORRECT: bool = Field(
+        default=True,
+        description=(
+            "When PioTech refuses a scenario (NOT_IMPLEMENTABLE, UNRESOLVED or REQUEST_REJECTED), "
+            "correct the intent and retry automatically. False restores the hard stop."
+        ),
+    )
+    PIOTECH_AUTO_CORRECT_MAX_ATTEMPTS: int = Field(
+        default=3,
+        description="Maximum automatic correction rounds per shadow test before the refusal is shown.",
+    )
+    AML_CLARIFICATION_FLOW: bool = Field(
+        default=True,
+        description=(
+            "Ask the user for the mandatory scenario parameters (target entity, threshold amount, timeframe, "
+            "channel) when the request does not state them, instead of assuming defaults. False restores the "
+            "assumed-default behaviour."
+        ),
+    )
+    CLARIFICATION_DEFAULT_AMOUNT: float = Field(
+        default=10000.0, description="'Apply Industry Defaults' value for the threshold amount (JOD)."
+    )
+    CLARIFICATION_DEFAULT_WINDOW_DAYS: int = Field(
+        default=30, description="'Apply Industry Defaults' value for the lookback window (days)."
+    )
+    CLARIFICATION_DEFAULT_CHANNELS: str = Field(
+        default="CASH DEPOSIT,CASH WITHDRAWAL",
+        description="'Apply Industry Defaults' value for the channels (comma-separated transaction types).",
+    )
+    CLARIFICATION_DEFAULT_ENTITY: str = Field(
+        default="CUSTOMER",
+        description="Target entity used when a request does not state one (business decision: per customer).",
+    )
+    CLARIFICATION_ASK_ENTITY: bool = Field(
+        default=False,
+        description=(
+            "Ask 'What should be monitored?' in the clarification form. False (business decision): never ask; a "
+            "request that does not name accounts, customers or single transactions is monitored per customer."
+        ),
+    )
+    DATA_CAPABILITIES: Dict[str, Dict[str, bool]] = Field(
+        default_factory=lambda: {"OPENBI2": {"balance_history": False}},
+        description=(
+            "What each database can support, keyed by database name (the service name at the end of "
+            "ORACLE_DSN, e.g. OPENBI2). balance_history: true only when the warehouse provides a daily "
+            "account snapshot (previous-day balance in JOD); balance-comparison rules are refused otherwise. "
+            "Enable a bank by setting it here (JSON in .env), no code change."
+        ),
+    )
+    ACTIVE_DATABASE: Optional[str] = Field(
+        default=None,
+        description="Database name used to look up DATA_CAPABILITIES; defaults to the service name of ORACLE_DSN.",
+    )
+    AML_SCOPE_GUARD: bool = Field(
+        default=True,
+        description=(
+            "Decline messages clearly unrelated to AML scenarios (sport, general knowledge, poems, ...) "
+            "with a fixed refusal before the agent runs. False switches the check off."
+        ),
+    )
+    PIOTECH_SHOW_AUTO_CORRECTIONS: bool = Field(
+        default=False,
+        description=(
+            "Show the automatic-correction warnings to the user (shadow test, governance, save). "
+            "False hides them from the chat; corrections are still applied, logged at WARNING level "
+            "and kept in the tool result as 'auto_corrections'."
+        ),
     )
 
     # ─── LangGraph / State ────────────────────────────────────────────────────
@@ -178,6 +261,28 @@ class Settings(BaseSettings):
         default="ai-aml-agent",
         description="LangSmith project name for trace grouping.",
     )
+
+    def database_name(self) -> str:
+        """The name of the database the rules run on.
+
+        Returns:
+            str: ACTIVE_DATABASE, else the service name at the end of ORACLE_DSN (e.g. 'OPENBI2'), upper case.
+        """
+        name = self.ACTIVE_DATABASE or (self.ORACLE_DSN or "").rsplit("/", 1)[-1]
+        return name.strip().upper()
+
+    def has_capability(self, capability: str) -> bool:
+        """Whether the active database supports a data capability (e.g. 'balance_history').
+
+        Extension point: a bank whose warehouse provides the data gets the capability by configuration.
+
+        Args:
+            capability (str): Capability name.
+
+        Returns:
+            bool: The configured value; False when the database or the capability is not configured.
+        """
+        return bool((self.DATA_CAPABILITIES.get(self.database_name()) or {}).get(capability, False))
 
     @field_validator("LLM_PROVIDER")
     @classmethod

@@ -4,6 +4,29 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 ---
 
+## Canonical project overview
+
+[`PROJECT_OVERVIEW.md`](PROJECT_OVERVIEW.md) is the canonical repository-level technical overview. Read it after the applicable `AGENTS.md` instructions when work requires project architecture, business logic, cross-cutting workflows, repository structure, or system-wide behavior.
+
+Use the overview for navigation and context, not as a substitute for inspecting the implementation relevant to the task. Current code, tests, schemas, and configuration remain the ultimate source of truth.
+
+### Keep it synchronized
+
+Update `PROJECT_OVERVIEW.md` in the same change when a material change affects documented architecture, module boundaries, entry points, major abstractions, business rules, data models or persistence, important workflows, APIs or external integrations, authentication/authorization, configuration or runtime behavior, background processing, build/test/deployment behavior, or important invariants. Do not update it for trivial implementation details that do not alter the useful project mental model.
+
+When updating it:
+
+1. Verify the new description against the implementation.
+2. Edit the affected sections instead of appending disconnected notes.
+3. Remove or correct claims made obsolete by the change.
+4. Keep paths and symbol references current.
+5. Distinguish verified behavior from genuine uncertainty.
+6. Avoid temporary details unless future work materially depends on them.
+
+This maintenance contract is intended to prevent the canonical overview from drifting into another stale documentation artifact.
+
+---
+
 ## Commands
 
 ### Run the service (recommended)
@@ -30,20 +53,24 @@ PYTHONPATH=services/aml_builder uvicorn web.api.main:app --reload --port 8005 --
 ### Install dependencies
 
 ```bash
-pip install -r services/aml_builder/requirements.txt
+pip install -r requirements.txt
 ```
 
-### Run tests
+### Verification and tests
 
-```bash
-# All tests
-PYTHONPATH=services/aml_builder pytest
+```powershell
+# Safe structural verification. The DEBUG override avoids collisions with
+# unrelated ambient DEBUG variables and applies only to this shell process.
+$env:DEBUG = "false"
+.\.venv\Scripts\python.exe -m compileall -q services app.py run_alert_engine.py
+.\.venv\Scripts\python.exe -m pytest --collect-only -q
+```
 
-# Single test file
-PYTHONPATH=services/aml_builder pytest tests/test_decomposer.py
+Pytest currently collects no test cases. The only test file is a manually run live integration check that requires configured Oracle/OpenAI access and may query live systems:
 
-# With async support (required for agent tests)
-PYTHONPATH=services/aml_builder pytest --asyncio-mode=auto
+```powershell
+$env:DEBUG = "false"
+.\.venv\Scripts\python.exe services\aml_builder\tests\test_registry_analytics.py
 ```
 
 ### API docs
@@ -54,7 +81,7 @@ PYTHONPATH=services/aml_builder pytest --asyncio-mode=auto
 
 ## Architecture
 
-The service is a single autonomous **LangGraph ReAct tool-driven agent** exposed via a FastAPI SSE endpoint (`POST /chat/stream`). All source code lives under `services/aml_builder/` with `PYTHONPATH` set to that directory, so all imports are `web.*`. There is no multi-node graph and no routing logic in Python — the LLM decides tool invocation order via a goal-oriented system prompt. Full detail: [`Docs/01_architecture.md`](Docs/01_architecture.md) and [`Docs/02_module_layout_refactor.md`](Docs/02_module_layout_refactor.md).
+The service is a single autonomous **LangGraph ReAct tool-driven agent** exposed via a FastAPI SSE endpoint (`POST /chat/stream`). All source code lives under `services/aml_builder/`; the development launcher exposes `web.api.main` through `PYTHONPATH`, while implementation imports generally use the full `services.aml_builder.*` package path. There is no multi-node graph and no routing logic in Python — the LLM decides tool invocation order via a goal-oriented system prompt. Use [`PROJECT_OVERVIEW.md`](PROJECT_OVERVIEW.md) for current architecture; [`Docs/01_architecture.md`](Docs/01_architecture.md) and [`Docs/02_module_layout_refactor.md`](Docs/02_module_layout_refactor.md) are historical context.
 
 ### The six tools (`web/services/tools.py`)
 
@@ -64,7 +91,7 @@ The service is a single autonomous **LangGraph ReAct tool-driven agent** exposed
 | `generate_scenario_execution_plan`              | Deterministic (zero-LLM) markdown renderer producing the side-panel implementation plan.                                                                                                                                                                  |
 | `execute_oracle_dwh_shadow_test`                | Calls the**external PioTech AI DWH agent** (`PIOTECH_AI_URL`) via HTTP SSE to get production Oracle SQL, then shadow-tests it (`SELECT COUNT(*) FROM (...)`) against `BI_DWH` (via the dedicated shadow connection pool).                     |
 | `prepare_scenario_metadata_for_persistence`     | Deterministic + live Oracle lookups: builds the`PIO_AML_SCENARIO` field catalog (risk degree, category, etc.) with currently valid options, reports missing mandatory fields.                                                                           |
-| `persist_and_validate_scenario_in_dwh`          | Validates the merged metadata, then atomically writes the confirmed scenario into`PIO_AML_PRODUCTION_SCENARIOS` (for the daily ETL runner) **and** `PIO_AML_SCENARIO` (business metadata for downstream compliance modules) in one transaction. |
+| `persist_and_validate_scenario_in_dwh`          | Validates the merged metadata, then atomically writes the confirmed scenario into `PIO_AML_PRODUCTION_SCENARIOS` (consumed by the on-demand alert engine) **and** `PIO_AML_SCENARIO` (business metadata for downstream compliance modules) in one transaction. |
 | `query_production_scenario_registry`            | Read-only lookup over already-persisted scenarios: `semantic_search` (live per-query embeddings, no cache), `get_statistics`, `get_alert_metrics`, `get_scenario_detail`. Independent of the sequential creation workflow above.                        |
 
 ### Key modules
@@ -92,11 +119,11 @@ The service is a single autonomous **LangGraph ReAct tool-driven agent** exposed
 
 ### Thread isolation
 
-Each conversation is isolated by `thread_id = "{project_id}_{chat_id}_{user_id}"`, persisted via LangGraph's `AsyncSqliteSaver` at `artifacts/checkpoints.sqlite`.
+LangGraph conversation state is isolated by `thread_id = "{project_id}_{chat_id}_{user_id}"`, persisted via `AsyncSqliteSaver` at `artifacts/checkpoints.sqlite`. The separate `chat_sessions` sidebar table is keyed only by `chat_id`; see `PROJECT_OVERVIEW.md` before changing session identity behavior.
 
 ### External dependency
 
-`execute_oracle_dwh_shadow_test` calls a **separate PioTech AI DWH service** (text-to-SQL agent) at `PIOTECH_AI_URL` (default `http://localhost:8001/chat/stream`). That service must be running independently for SQL generation to work.
+`execute_oracle_dwh_shadow_test` calls a **separate PioTech AI DWH service** (text-to-SQL agent) at `PIOTECH_AI_URL` (default `http://localhost:8006/chat/stream`). That service must be running independently for SQL generation to work.
 
 ---
 
@@ -105,7 +132,7 @@ Each conversation is isolated by `thread_id = "{project_id}_{chat_id}_{user_id}"
 Required:
 
 - `ORACLE_USER`, `ORACLE_PASSWORD`, `ORACLE_DSN`
-- `OPENAI_API_KEY`
+- `OPENAI_API_KEY` for OpenAI chat and all embedding-backed operations (it is optional at settings-validation time, and LM Studio can replace chat calls but not the direct embedding clients)
 
 Optional LLM:
 
@@ -127,7 +154,7 @@ Optional shadow-test DB (falls back to the primary `ORACLE_*` values if unset):
 
 - **Google-style docstrings** on every function/class/module — include Args, Returns, and Raises sections.
 - **100% type hints** — use `Final`, `Literal`, `Protocol` where applicable.
-- **Async-first** for all I/O. The Oracle pool is synchronous but wrapped; LangGraph nodes are sync (LangGraph calls them from its async executor).
+- **Async-first** for new I/O. Several current Oracle, LLM, HTTP, and alert-engine paths are synchronous; inspect the canonical overview before changing request concurrency.
 - **PEP 8** — code must pass `flake8` and `black`.
 - **No bare `except`** — always catch specific exception types.
 - **No hardcoded secrets** — all config through `settings`.
@@ -136,13 +163,13 @@ Optional shadow-test DB (falls back to the primary `ORACLE_*` values if unset):
 
 - Before major tasks, briefly state the intended approach for a sanity check.
 - Never provide partial implementations or `# ... rest of code here` placeholders.
-- After every fix, update `CHANGELOG.md`.
+- After every fix, update `CHANGELOG.MD`.
 - After every major feature/refactor/phase, create a `.md` doc in `Docs/` covering: what & why, how to run it with exact commands, and relevant configuration parameters.
 
 ---
 
 ## Known issues
 
-No open issues specific to the current tool-driven architecture.
+See `PROJECT_OVERVIEW.md` sections 15-16 for code-verified risks, technical debt, and unresolved infrastructure questions. Do not treat historical `Docs/known_issues.md` as this repository's active issue register.
 
 ## Imported Claude Cowork project instructions

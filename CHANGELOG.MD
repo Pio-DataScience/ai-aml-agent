@@ -5,6 +5,472 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-10-19] fix: "X% of the balance" rules - one ratio, percentages, slot-bound answers, plain errors, balance capability
+
+### What
+- **Bug 1 (ratio split)**: `Threshold` could not express "factor x other field", so the LLM produced
+  `transaction_amount > 0.5` + `account_balance < None`. Now `Threshold.kind = "ratio"` + `relative_to`;
+  `clarification.parse_ratio_conditions` (English and Arabic) and `apply_ratio_conditions` replace the split with one
+  condition (`deposit_amount > 0.5 * account_balance`, see `condition_sql`); sent to PioTech as
+  `<left>_to_<right>_ratio` (`for_sql_service`). Intent prompt rule 7a.
+- **Bug 2 (percentages)**: `_NUMBER` required a word boundary after `%`, so no format (not even "50%") was read as 0.5.
+  `normalize_text` (Arabic-Indic digits, ٪, "percent", "بالمئة") + `percentages_in`; `numbers_in` uses them.
+- **Bug 3 (answer leak)**: `apply_answers` wrote the amount into every field matching `...|balance`. Thresholds now have
+  `slot_id`; the amount question carries the one slot it fills (`amount_slot`: plain amounts only, never balance, ratio,
+  count); the answer turn builds from the stored partial intent (no new LLM parse), so slots stay stable.
+- **Bug 4 (raw errors)**: `validate_conditions` runs before SQL generation; an incomplete rule is not sent and the user
+  gets `user_message` ("I can't build this rule yet: the value for the account balance is missing ..."). Refusal texts
+  pass `plain_text` (no `x < None`); the agent shows `user_message` verbatim.
+- **Balance capability**: `settings.DATA_CAPABILITIES` (`{"OPENBI2": {"balance_history": false}}`) + `has_capability`.
+  A balance rule without balance history returns `NOT_SUPPORTED` with only the plain refusal, in the user's language
+  ("Balances on this database aren't kept day by day, so I can't build rules that compare deposits with the account
+  balance."). No other rule is suggested and no follow-up question is asked, since that would change the meaning of the
+  request. Enabling a bank later = set `balance_history: true` for it (extension point: `balance_capability_refusal`).
+- Tests: 30 added to `test_clarification.py` (2 existing expectations updated: slot ids; no second LLM parse);
+  full suite 240 passed. Live: the original sentence → refusal + alternative; "yes" → plan with one ratio condition.
+
+---
+
+## [2026-10-19] fix: "3 high cash deposits in one week in 2019" - amount asked, every week of 2019 checked
+
+### What
+- **Problem**: the generated SQL had `EQU_TRA_AMT >= 0` (no amount for "high") and checked only the last 5 working
+  days of 2019 (`:bd_minus_5` .. 2019-12-31): 0 customers. Correct (any week of 2019, deposits >= 10,000): 6 customers.
+- **Amount** (`clarification._threshold_stated`): a count ("3 deposits") is not an amount; "high / large / big ..."
+  without a number asks for the amount (pre-filled 10,000 JOD). "high-risk" is not an amount word; count-only rules
+  ("more than 20 withdrawals in a month") still ask nothing.
+- **Window inside a period** (`sql_dates.slide_window_over_period`): a per-customer / per-account rule with HAVING whose
+  window is shorter than the stated period now checks every window of the period: moving `COUNT/SUM ... OVER (PARTITION
+  BY ... ORDER BY TRA_DATE RANGE ...)` limited to the period, flagged on the best window. Weeks and months exact; N
+  working days as about N*7/5 calendar days. Not rewritten (last window only, as before): DISTINCT counts, "fewer than"
+  conditions, ORDER BY, per-transaction rules. Shadow result: `fixed_period.window_slides_over_period`.
+- **Plan**: `AMLIntent.evaluation_period`; Evaluation Mode reads "Any `1 week` window within `2019-01-01` to `2019-12-31`".
+- Tests: +15 (`test_business_dates.py`, `test_clarification.py`); full suite 210 passed. Live (port 8005): form asks only
+  the amount → plan "any 1-week window within 2019" → shadow test 6 customers (= hand query). No new files.
+
+---
+
+## [2026-10-19] fix: Side panel form always shown; banking questions answered
+
+### What
+- **Problem 1**: "Flag transactions in the last 90 days." got "please complete the form in the side panel" but no form:
+  the agent (`gpt-5.4-mini`) wrote the sentence without calling the intent tool. Then "give me the side panel" was
+  refused by the scope guard.
+- **Fix** (`routes/chat.py`): a reply that promises a form when the intent tool was not called triggers the tool
+  server-side; the form is sent and recorded in the conversation. "give me the side panel" / "show the form" /
+  "أين النموذج" re-sends the open form (else the latest plan) without the scope guard or the LLM. The prompt no
+  longer contains the example sentence, and requires the intent tool for every scenario request.
+- **Frontend** (`ChatBubble.tsx`): a "Complete scenario details" button on the message that asked reopens the form.
+- **Problem 2**: banking questions were refused. **Fix**: the scope guard has a `banking` category (transactions,
+  customers, accounts, cards, loans, branches, products, codes, the bank's data) and treats screen requests as about
+  the assistant; only messages outside banking are refused (new refusal text). The agent no longer refuses anything
+  itself; questions about the bank's own records go through the plan → read-only shadow test.
+- Tests: `test_clarification.py` (+12), `test_scope_guard.py` (+5); full suite 195 passed; `tsc` clean. Live: the five
+  messages above behave as described. No new files.
+
+---
+
+## [2026-10-19] fix: Clarification never re-asks what the user wrote; form starts pre-filled
+
+### What
+- **Problem**: "Flag any above 50,000 JOD" could ask for the amount again (the LLM's provenance label is inconsistent:
+  a written amount or window came back as `assumed_default`), and asked for the channel although the user said "any".
+- **Fix** (`clarification.py`): the user's words decide. A threshold whose number is in the text and a timeframe
+  phrase in the text count as stated whatever the label; "any / all" with no type named = all transaction types
+  (`all_types_if_any` sets the scope to ALL).
+- **Form** (`ClarificationForm.tsx`): every question starts filled with its default (30 days, cash deposit + withdrawal,
+  10,000 JOD), so the user only changes what differs; stated values are never asked and show in "What I understood".
+- Live: "Flag any above 50,000 JOD" asks only the timeframe; "... within 7 days" asks nothing.
+- Tests: 2 added to `test_clarification.py`; backend 179 passed; frontend 8 passed, `tsc` clean. No new files.
+
+---
+
+## [2026-10-19] change: Clarification form - per customer always, quarters, typed transaction types
+
+### What
+- **Business decision: monitor per customer.** "What should be monitored?" is no longer asked
+  (`CLARIFICATION_ASK_ENTITY=false`); `clarification.default_entity` sets per customer when the request does not
+  name accounts, customers or single transactions.
+- **Quarter options** in the timeframe question (First / Second / Third / Last quarter) with a year question
+  (`quarter_year`, shown only for a quarter) → a fixed 3-month period ending on the quarter's last day.
+- **Other transaction type**: `OTHER` option + `other_channels` text question (shown only when Other is picked);
+  typed types are added to the channels and searched in the code catalog.
+- `show_if` now supports `equals`, `in` and `includes` (schema field added; frontend `isVisible` updated).
+- No new files: changes in `clarification.py`, `settings.py`, `schemas.py`, `tools.py`, the existing tests, and in
+  `AI_AML_INTERFACE` `clarificationForm.ts`, `ClarificationForm.tsx`, `types/clarification.ts`, `clarification-form.test.cjs`.
+- Tests: backend 177 passed; frontend form tests 8 passed, speech 8 passed, `tsc` clean. Live: "Flag suspicious deposits"
+  → form without the entity question → Q1 2019 + "LOAN REPAYMENT" → plan with 2019-01-01..2019-03-31 and loan-repayment codes.
+
+---
+
+## [2026-10-18] feat: Clarification Question Flow; one run per conversation
+
+### What
+- **Ask, never guess**: when a request does not state the target entity, threshold amount, timeframe or channels,
+  the intent tool returns `NEEDS_CLARIFICATION` (understood summary, missing fields, questions with industry defaults:
+  per customer, 10,000 JOD, 30 days, cash deposit + withdrawal) before code discovery, the plan and the shadow test.
+  The gap decision is made in code (`web/services/clarification.py`); an LLM-filled value the user did not write is a gap.
+- **Answers**: `ChatRequest.clarification_answers` → run config → the intent tool restores the original request and
+  applies the answers (they override the LLM); the chat shows them as a readable "Clarification answers: …" message.
+- **API/SSE**: new `clarification_request` event; history restores the form on its message (`ChatMessage.clarification_request`).
+- **Schemas**: `ClarificationQuestion`, `ClarificationResponse`, `ScenarioIntentResponse`; complete intents carry `status: COMPLETE`.
+- **Prompts**: intent rules 15 (gap analysis / provenance) and 16 (answers); agent: on NEEDS_CLARIFICATION stop and
+  reply in one sentence.
+- **One run per conversation** (`routes/chat.py`): a second request for a busy chat gets a notice instead of a second
+  concurrent run (the duplicate "go ahead" answer of 2026-10-18 10:33).
+- **Frontend** (`AI_AML_INTERFACE`, branch `feat/clarification-flow`): `ClarificationForm` side panel with Apply Industry
+  Defaults; answers sent with the next request; hook-level send lock; Enter auto-repeat ignored. `tsc` clean, `next build`
+  OK, `npm run test:clarification` 6 passed.
+- Settings: `AML_CLARIFICATION_FLOW` (default true), `CLARIFICATION_DEFAULT_*`.
+- Supersedes, for these four parameters only, the 2026-10-17 assumed-default behaviour; PioTech auto-correction unchanged.
+- Tests: `tests/test_clarification.py` (24); full suite 169 passed. Live on port 8005: vague request → form →
+  defaults submitted → plan; 5 fully stated demo prompts pass without questions. Doc: `Docs/11_clarification_flow.md`.
+
+---
+
+## [2026-10-18] change: Attribute filters take priority over explanation codes
+
+### What
+- **Problem**: "credit transactions above 500,000 JOD in 2019" produced both `Transaction Types: CREDIT, DEBIT` and
+  the `Debit / credit` filter. The code search then picked 30 loosely related codes (credit cards, transfers ...),
+  so the SQL kept only credit legs of those codes: 8 transactions / 2 customers.
+- **Fix**: the intent tool resolves attribute filters before the explanation-code search, and
+  `attribute_filters.drop_covered_transaction_types` removes every transaction type that is only a filter's value
+  (CREDIT, DEBIT, "credit transactions"), with its codes and its tag on thresholds and conditions. Real types that
+  share a word (CREDIT CARD, CREDIT TRANSFER) and other types (CASH WITHDRAWAL) keep their codes. No type left = all
+  transaction types, restricted by the filter.
+- Result: 543 transactions / 68 customers, equal to a hand query; the plan shows only `Debit / credit`.
+- Tests: 12 added to `tests/test_attribute_filters.py`; full suite 145 passed.
+
+---
+
+## [2026-10-18] feat: Customer, account and transaction attribute filters; demo lookup fill
+
+### What
+- **New `web/services/attribute_filters.py`**: 11 attributes next to the explanation-code filter: account status,
+  nature, product, type; individual/corporate (fixed list); profession, occupation, marital status, classification,
+  city; debit/credit. Resolved at intent time by the fast LLM against the live country-400 catalogs (codes validated),
+  stored as `AMLIntent.attribute_filters`, shown in the plan, removed from the text sent to PioTech, and added to the
+  generated SQL as semi-joins on each account's / customer's latest snapshot. Result: `attribute_filters_applied`.
+- **Live findings fixed on the way**: PioTech re-applied "dormant" as an inactivity rule and refused a threshold
+  `account_status = CLOSED` restated by the intent LLM; restriction words are now removed from every free-text field
+  and restating thresholds dropped. `business_dates`: a singular unit from the LLM (`YEAR`) was read as days, so
+  "between 2016 and 2022" became 2017-2022; units are normalized.
+- **Demo lookup fill** (`fill_demo_lookups.py`, insert-only, `NOT EXISTS`-guarded): 513 rows for country 400 / inst 1
+  in 9 lookups. Record `demo_data/lookup_fills_20261018_095008.json`, rollback script (not executed) next to it.
+  Nothing updated or deleted.
+- **Coverage**: account filters work (79% of transacting accounts are in `PIO_ACCOUNTS`); customer filters match few
+  customers (1,067 of 154,254 transacting customers are in `PIO_CUSTOMERS`).
+- Tests: `tests/test_attribute_filters.py` (26) + 1 in `test_business_dates.py`; full suite 133 passed. Live:
+  "cash deposit above 10,000 JOD into closed accounts between 2016 and 2019" = 48 transactions / 31 customers, equal
+  to a hand query. Doc: `Docs/10_attribute_filters.md`.
+
+---
+
+## [2026-10-17] fix: Measured shadow-test metrics; no commission codes in cash-withdrawal scenarios
+
+### What
+- **Problem 1**: the shadow test reported `COUNT(*)` of the rule's rows as "header alerts" and an invented
+  `transaction_detail_count = header_count * 4` (ratio always 4.0). For "single cash withdrawal above 50,000
+  between 2016 and 2022" it showed 120 alerts / 480 details; the data has 120 transactions from 65 customers.
+- **Fix** (`tools._shadow_metrics`): probes the result columns (`WHERE 1 = 0`), then measures
+  - `alerted_customer_count` = `COUNT(DISTINCT CUS_NUM)`; `header_alert_count` now equals it (the alert engine raises
+    one header per customer);
+  - `matched_transaction_count` (= `transaction_detail_count`): the row count of a per-transaction result,
+    `SUM(EVENT_COUNT)` of a per-customer result, or, for a per-customer result without a count column, the rule's own
+    `FROM ... WHERE` rows for the customers it returns (single-table rules only; otherwise null, never estimated);
+  - `alert_density_ratio` = transactions per customer; `metrics_summary` e.g. "120 transactions across 65 distinct
+    customers". The prompt tells the agent to present these labels and never call transactions "alerts".
+- **Problem 2**: code discovery for "CASH WITHDRAWAL" returned 11 commission/fee codes
+  (119, 141, 340, 429, 2109, 2110, 2116, 2119, 2143, 2146, 3020).
+- **Fix** (`explanation_code_search`): `is_cash_withdrawal_type` + `drop_withdrawal_fee_codes` remove those codes,
+  and any code whose description names a commission, fee or charge, only for withdrawal types. Kept: 2, 466, 467,
+  2164, 2114, 2108, 3. Deposits, transfers, an explicit "withdrawal commission/fees" request and user-confirmed codes
+  are unaffected.
+- Tests: 22 added (`test_business_dates.py`, `test_all_transaction_code_scope.py`); full suite 106 passed.
+  Live read-only check on OPENBI2: tool 120 transactions / 65 customers = independent hand query. No database changes.
+
+---
+
+## [2026-10-17] feat: Explicit fixed date ranges ("between 2016 and 2022", "in 2019")
+
+### What
+- **Problem**: "Flag any single cash withdrawal above 50,000 between 2016 and 2022" got a 7-year window with no
+  `anchor_date`, so the shadow test counted 7 years back from the latest transaction (2019-01-13 to 2026-01-13).
+- **`business_dates.py`**: `find_fixed_period` (year, month and day ranges and single periods; amounts such as
+  "8,000 and 9,999", "2000 JOD", "$2000" are never read as years), `window_for_period` (exact YEARS/MONTHS/DAYS,
+  non-rolling), `period_of`, `apply_fixed_period`, `clean_for_sql_service`.
+- **Intent tool**: a stated period sets `anchor_date` to its last day (e.g. 2022-12-31) and `time_window` to its
+  exact length. A stated window much shorter than the period ("within 7 days") is kept.
+- **Shadow test**: period wording is removed from the text sent to PioTech; the anchored SQL is pinned to
+  `DATE 'start'` / `DATE 'end'` by the new `sql_dates.pin_period`; the result adds `fixed_period`.
+- **Plan**: Evaluation Mode shows "Fixed period `start` to `end`"; "Rolling (from SYSDATE)" now reads
+  "Rolling (back from the business date)".
+- Tests: 28 added to `tests/test_business_dates.py` (now 43); `test_intent_autocorrect.py` updated (the "from 2020 into 2022"
+  case is now evaluated on 2022-12-31). Full suite 84 passed. Live read-only check on OPENBI2: SQL bounded to
+  2016-01-01..2022-12-31, evaluation date 2022-12-31, 65 customers. No database changes.
+
+---
+
+## [2026-10-17] change: Escalation report removed; UNRESOLVED and REQUEST_REJECTED are auto-corrected too
+
+### What
+- **Problem**: a request such as "… within 7 days from 2020 into 2022" sent "from 2020 into 2022" to PioTech as a free-text
+  condition; PioTech read 2020/2022 as amounts conflicting with the 10,000 threshold and refused it as `UNRESOLVED`.
+  Auto-correction covered only `NOT_IMPLEMENTABLE`, so the officer got the escalation report and no scenario.
+- **Escalation report removed**: `routes/chat.py` no longer emits the `escalation_report` side panel for a rejection,
+  `routes/sessions.py` no longer restores it, and the shadow-test result no longer carries `rejection_report`.
+  The prompt no longer asks for "Blocked by / Reason / Suggestion"; for the rare refusal that remains, the agent
+  replies in one or two plain sentences.
+- **New `intent_autocorrect.resolve_intent`** (retry loop in `tools.py` now dispatches by refusal kind):
+  - `UNRESOLVED`: removes every free-text semantic condition the refusal quotes (structured thresholds, window and
+    types are kept), turns `provenance: needs_user` into `assumed_default`, and clears open clarifications.
+  - `REQUEST_REJECTED`: a time window of 0 or less becomes 1 business day; an empty baseline window is dropped.
+- Corrections follow `PIOTECH_SHOW_AUTO_CORRECTIONS` (hidden by default; audit in `logs/app.log`).
+  `PIOTECH_AUTO_CORRECT_MAX_ATTEMPTS` default raised from 2 to 3 (one refusal can reveal another on retry).
+- `sql_dates.py`: `ADD_MONTHS(TRUNC(SYSDATE, 'YYYY'), -N)` is now recognised as a window start and gets the upper bound.
+- Still a stop: `SERVICE_UNAVAILABLE`, and refusals that 3 correction rounds cannot clear.
+
+### Note
+A dropped phrase is not applied: "from 2020 into 2022" is removed, so the rule runs on its own 7-day window at the
+business date. To test a past period, give one date ("test it as of 30 June 2019") or set `SHADOW_ANCHOR_DATE`.
+
+### Verify
+- 59 unit tests pass (new: the real 2020/2022 refusal, needs_user values, a 0 window, UNRESOLVED end to end; the
+  rejection test now asserts no report is returned).
+- Live: the user's refused intent, replayed through the tool against PioTech/OPENBI2, now returns SQL. Through
+  `/chat/stream` the same request completes the shadow test and no `escalation_report` event is sent.
+
+## [2026-10-16] feat: Scenario SQL bound to a business date, with Sunday–Thursday business-day windows
+
+### What
+- **Problem**: generated SQL used `SYSDATE` (`TRA_DATE >= SYSDATE - 30`), so every rule depended on the moment it ran;
+  the shadow test always looked at "today" (0 alerts on historical data) and the alert engine patched the text.
+- New `web/services/sql_dates.py`: rewrites every clock form in scenario SQL to business-date binds —
+  `SYSDATE - N` / `TRUNC(SYSDATE) - N` / `SYSDATE - INTERVAL 'N' DAY` → `:bd_minus_N`;
+  `ADD_MONTHS(SYSDATE, -N)` → `ADD_MONTHS(:as_of_date, -N)`; `TRUNC(SYSDATE, 'MM')` → `TRUNC(:as_of_date, 'MM')`;
+  any remaining `SYSDATE` / `CURRENT_DATE` / `SYSTIMESTAMP` → `:as_of_date`. Each window lower bound also gets
+  `col < :as_of_date + 1`, so a past business date never counts later data. String literals are never edited;
+  the rewrite is idempotent. Weeks count 5 business days; months/years stay calendar.
+- New `web/services/business_dates.py`: windows count backward over business days (weekend from
+  `BUSINESS_WEEKEND_DAYS`, default `FRI,SAT`). A window of N business days covers the business date plus the N−1
+  business days before it; from a weekend date, counting starts at the previous business day.
+- `tools.py` (shadow test): the PioTech SQL is anchored before it is tested, shown or saved; the COUNT runs with the
+  binds. Business date: the scenario's `anchor_date` → `SHADOW_ANCHOR_DATE` → latest `TRA_DATE` in
+  `PIO_TRANSACTIONS` for `AML_COUNTRY_CODE`/`AML_INST_CODE` (one read-only lookup per process) → today. The result
+  reports `evaluation_date`, `evaluation_date_source` and `window_dates`.
+- `alert_engine.py`: `execute_scenario_query` anchors the saved `RAW_SQL` the same way (so rules saved with
+  `SYSDATE` are handled) and binds the evaluation date, replacing the old text replacement.
+- `plan_renderer.py` / `schemas.py`: wording updated — Evaluation Mode now says "Business date …".
+- `settings.py`: `BUSINESS_WEEKEND_DAYS` (default `FRI,SAT`), `SHADOW_ANCHOR_DATE` (default unset).
+
+### Not changed
+- No database tables or data. Saved rules are rewritten when executed, not in storage.
+- No frontend change.
+- Out of scope: event-to-event gaps inside sequence rules (`in_date + 1`, written by PioTech without `SYSDATE`) stay
+  calendar days; `SYSDATE` used by the alert engine as the INSERT timestamp of an alert row.
+- PioTech still generates `SYSDATE` (its checks require it); the AML Builder rewrites it. Making PioTech emit the
+  binds directly is optional.
+
+### Verify
+- `test_business_dates.py`: 14 tests (business-day counting incl. weekend anchors, every SQL form, literals untouched,
+  weeks, exact binds, shadow test runs anchored SQL with the right binds, setting fallback, alert engine anchors a
+  legacy `SYSDATE` rule). Two auto-correction tests updated to expect the anchored SQL. Full suite: 54 pass.
+- Live on OPENBI2 (2026-10-17, read-only, nothing saved):
+  - Shadow test through PioTech for business date 2019-06-30: SQL returned with no `SYSDATE`
+    (`:bd_minus_7` = 2019-06-20, `:as_of_date` = 2019-06-30); 121 customers, equal to a hand-written query.
+  - All 14 saved rules (each still containing `SYSDATE`) ran through `execute_scenario_query` for 2019-06-30 without
+    error.
+  - Daily data, December 2011: for Thursday 2011-12-08 the 7-business-day window starts Wednesday 2011-11-30 and finds
+    45 customers; the old 7-calendar-day window (from 2011-12-01) found 0 — the weekend days are skipped as intended.
+
+## [2026-10-15] change: "Scenario Type" row removed from the plan's Scenario Overview
+
+### What
+- `plan_renderer.py`: the Scenario Overview table no longer shows "Scenario Type". Display only — `scenario_type`
+  stays in the intent and still decides per-customer vs per-account grouping in the generated SQL.
+
+## [2026-10-15] change: Plan section 3 renamed to "Monitoring Time"
+
+### What
+- `plan_renderer.py`: the implementation-plan heading "3. Observation Window & Time Parameters" is now
+  "3. Monitoring Time". Content unchanged (window size and window type). No other code or UI refers to the old text.
+
+## [2026-10-15] feat: Scope guard — decline questions unrelated to AML scenarios
+
+### What
+- **Problem**: the agent answered anything — "who is Real Madrid", "who won the 2014 World Cup".
+- New `web/services/scope_guard.py`, adapted from PioTech-AI's AML-module guard: before the agent runs, the fast
+  model puts the message in one category — `scenario_building`, `scenario_registry`, `aml_knowledge`, `assistant`,
+  `unsure` or `unrelated`. Only `unrelated` is declined, with a fixed refusal in English or Arabic.
+- It errs towards answering: short replies inside a conversation ("proceed", "yes") are not judged; a failed, slow
+  (8 s) or senseless judge reply lets the turn continue; decisions are cached per (conversation tail, message).
+- `routes/chat.py`: the refusal is streamed as normal `content` and the exchange is written to the conversation state,
+  so it appears in chat history. Sidebar governance submissions (`metadata_json`) are never judged.
+- `prompts/tool_driven_system.md`: new SCOPE section. The agent answers AML concepts and greetings directly and refuses
+  only clearly unrelated requests. (A first, stricter wording made the agent itself refuse "What is structuring?" and
+  "Hello, what can you do?", which the guard had let through; reworded.)
+- `settings.py`: `AML_SCOPE_GUARD` (default `true`).
+
+### Verify
+- `test_scope_guard.py`: 15 tests (football questions declined, Arabic refusal, every in-scope category continues,
+  short replies skipped, judge failures continue, switch off, route declines without running the agent and records
+  the exchange, route runs the agent for scenario requests). Full suite: 37 pass.
+- Live with the real model: declined — "who is real madrid", "who is the team that won in the world cup in 2014",
+  the same in Arabic, "Write me a poem about the sea", "As an AML analyst, write me a poem about Barcelona";
+  answered — "What is structuring in AML?", "What is a PEP?", "Explain smurfing", "what does KYC mean",
+  "Hello, what can you do?", "who are you?", "thanks", a registry question and a scenario request.
+
+## [2026-10-14] change: Hide automatic-correction warnings from the user (configurable)
+
+### What
+- New setting `PIOTECH_SHOW_AUTO_CORRECTIONS` (default `false`). When false, the shadow-test result carries only
+  `corrected_intent` (without its `auto_corrections` notes) — no warnings and no audit record the model could relay
+  — and the governance result carries no warning.
+- Prompt: the agent uses `corrected_intent` for later steps but must not compare it with the original or say that
+  anything was removed, replaced or differs. (A first version left an "audit" record in the result and a prompt line
+  telling the agent to say the rule "differs from the original wording"; the agent then added a note about the
+  removed PEP condition. Both removed.)
+- The audit trail is the server log: `[TOOL: SQL_BRIDGE] AUDIT auto-corrections (hidden from user): [...]` at WARNING
+  level, with the original phrase, action, replacement and PioTech's reason. The **corrected intent is still what
+  gets saved** (agent persistence and the sidebar Deploy button).
+- `PIOTECH_SHOW_AUTO_CORRECTIONS=true` restores the warnings at shadow test, governance and save.
+
+### Note
+In the default mode the officer is not told when a condition was removed. A scenario asked for "politically
+exposed customers" is shown and deployed as a rule over all customers with no on-screen indication.
+
+### Verify
+24 unit tests pass (2 for hidden mode). Live on OPENBI2 (no persist), the PEP scenario was run twice: both returned
+SQL, and neither the shadow-test nor the governance reply contained any correction wording. Both corrections appear in
+`logs/app.log` as `AUDIT auto-corrections` lines.
+
+## [2026-10-14] feat: Auto-correct NOT_IMPLEMENTABLE scenarios instead of stopping
+
+### What
+- When PioTech refuses a condition as `NOT_IMPLEMENTABLE`, the shadow-test tool now removes or replaces that
+  condition and retries automatically, so the officer gets SQL instead of a hard stop. Every change is reported.
+- New `web/services/intent_autocorrect.py` (pure): removes the refused condition from `semantic_conditions`,
+  `customer_segments` and `thresholds`, and from the `detection_logic` wording. A balance-retention phrase on a
+  scenario with money in and money out is **replaced** by `total withdrawals at least 90% of total deposits`
+  (threshold `total_withdrawals_to_total_deposits_ratio >= 0.9`, `provenance: assumed_default`), the substitute
+  PioTech itself recommends. Each correction carries a warning: *The unsupported phrase "X" was automatically
+  bypassed/replaced to generate a valid operational query*, plus "flags a wider population" when the removed
+  condition limited who the rule covers (PEP, risk level, segment, ...).
+- `tools.py`: PioTech call moved into `_request_piotech_sql`; retry loop bounded by
+  `PIOTECH_AUTO_CORRECT_MAX_ATTEMPTS`. Results carry `auto_corrections`, `auto_correction_warnings` and
+  `corrected_intent`; a final refusal carries `auto_corrections_tried`.
+- Enforced in code, not only in the prompt: `prepare_scenario_metadata_for_persistence` and
+  `persist_and_validate_scenario_in_dwh` read the latest shadow test from the agent state (`InjectedState`).
+  The governance result repeats the warnings; persistence saves the **corrected** intent, so the saved description
+  matches the saved SQL. `routes/deploy.py` (sidebar "Deploy" button) does the same.
+- `settings.py`: `PIOTECH_AUTO_CORRECT` (default `True`; `False` restores the hard stop) and
+  `PIOTECH_AUTO_CORRECT_MAX_ATTEMPTS` (default `2`).
+- Unchanged on purpose: `UNRESOLVED` (ambiguous meaning), `REQUEST_REJECTED` (missing value such as the time
+  window) and `SERVICE_UNAVAILABLE` still stop with the rejection report — correcting them would mean inventing a
+  value or choosing a meaning, not removing a phrase.
+
+### Note
+Removing a condition changes the rule. A scenario asked for "politically exposed customers" is generated and
+deployable as a rule over **all** customers, with a warning. Set `PIOTECH_AUTO_CORRECT=false` to restore the stop.
+
+### Verify
+- 22 unit tests pass (`test_intent_autocorrect.py`: correction logic, retry to success, switch off, bounded rounds,
+  governance warning from state, superseded corrections).
+- Live on OPENBI2 (no persist): the balance scenario returns SQL with the 90% comparison and the replacement
+  warning; the PEP scenario returns SQL with the "wider population" warning, and the governance step repeats it.
+- Not exercised live: persistence and the sidebar Deploy button (they write to the database).
+
+## [2026-10-14] fix: HTTP 4xx/5xx from PioTech was reported as "service unreachable"
+
+### What
+- **Root Cause**: the rejection passthrough below caught every `httpx.HTTPError`, including the
+  `HTTPStatusError` raised by `raise_for_status()`, as `SERVICE_UNAVAILABLE`, and advised starting the service.
+  Seen live: the intent for "High-value transactions on dormant accounts" carried `time_window.value = 0`; the
+  running PioTech service answered **422** (`time_window.value: Input should be greater than 0`), and the officer
+  was told to start a service that was already up.
+- **Fix Applied**:
+  - `tools.py`: an HTTP status ≥ 400 is handled before streaming; the body is read and passed to the new
+    `build_http_rejection`. Only transport errors (connection refused, timeout) remain `SERVICE_UNAVAILABLE`.
+  - `piotech_report.py`: new kind `REQUEST_REJECTED` for 4xx, showing PioTech's own validation detail and a
+    plain-language hint for the field it names (time window, baseline window, thresholds). 5xx is reported as a
+    fault in the SQL service, not in the scenario.
+  - `tool_driven_system.md`: on `REQUEST_REJECTED` the agent asks the user for the missing value and never fills it in.
+
+### Note
+The underlying cause is upstream of this fix: intent extraction invented `time_window.value = 0` and a threshold of
+`>= 0` for a request that stated neither, and marked both `provenance: "stated"`. That is still open.
+
+### Verify
+13 tests pass (`test_piotech_rejection.py` adds 422 and 500 cases). The real failing intent, replayed through the
+fixed tool against the running PioTech service, now shows "Blocked by: the time window of the scenario" with the 422
+detail and "State the period to look over, for example 'within 30 days'".
+
+## [2026-10-14] feat: Pass the PioTech rejection report through to the officer
+
+### What
+- **Problem**: when the PioTech DWH Scenario Agent refused a scenario, it streamed a `scenario_report` and an
+  `error` event naming the blocking condition, the reason and how to get past it. The shadow-test tool ignored
+  both and returned "PioTech AI did not return a valid SQL query", so the agent guessed a cause ("needs a small
+  refinement", "too complex to combine deposits AND withdrawals"), retried the same intent up to five times, and
+  sometimes moved on to the governance step with no SQL.
+- **Fix**:
+  - New `web/services/piotech_report.py`: turns the PioTech report + error into a structured rejection
+    (`kind`, `blocked_by`, `reasons`, `suggestions`, `implementable_without`, `warnings`) and a markdown panel.
+    Kinds: `NOT_IMPLEMENTABLE`, `UNRESOLVED`, `VALIDATION_FAILED`, `NO_SQL`, `SERVICE_UNAVAILABLE`.
+    Suggestions reuse PioTech's own advice sentences; a generic one is added only when it gave none.
+  - `tools.py` (`execute_oracle_dwh_shadow_test`): captures `scenario_report` and `error` from the stream and
+    returns `error` (one-line summary), `rejection`, `rejection_report` (markdown) and `scenario_report`. A refused
+    connection now returns a `SERVICE_UNAVAILABLE` rejection that says the scenario was not evaluated.
+  - `routes/chat.py`: emits the markdown as an `escalation_report` SSE event, which the existing UI already renders
+    in the side panel (no frontend change). `routes/sessions.py`: restores that panel from chat history.
+  - `prompts/tool_driven_system.md`: the agent must present Blocked by / Reason / Suggestion as given, never invent a
+    cause, never re-call the shadow test with the same intent, and never proceed to governance without SQL.
+- Successful shadow tests are unchanged.
+
+### Verify
+- `PYTHONPATH=services/aml_builder pytest services/aml_builder/tests/test_piotech_rejection.py` — 10 tests: parsing of
+  real OPENBI2 report shapes, markdown sections, and the tool end to end against a mocked PioTech stream (refusal,
+  unreachable service, unchanged success path). Existing `test_all_transaction_code_scope.py` still passes.
+- End to end on the live services (OPENBI2, no persist): the pass-through scenario with "without maintaining a
+  balance" now shows the blocker, PioTech's reason and its 90% alternative in chat and in the side panel; asking to
+  proceed to governance is refused; the panel is restored from `/chat/.../history`.
+- `flake8`/`black` are not installed in `.venv`, so they were not run.
+
+## [2026-10-13] fix: Skip explanation-code discovery for all transaction scope
+
+### What
+- Treat `ANY`/`ALL` transaction labels as scope markers rather than code-search terms in the intent tool.
+- Clear non-explicit discovered code fields for all/any or unspecified transaction scopes, and clarify the extraction and agent instructions.
+- Add an offline regression check that verifies no explanation-code search runs for an `ANY` request.
+
+### Verification
+- `pytest -q services/aml_builder/tests/test_all_transaction_code_scope.py` — 1 passed.
+
+## [2026-10-05] docs: Canonical code-verified project overview
+
+### What
+- Added root `PROJECT_OVERVIEW.md` as the canonical repository-level technical and onboarding reference, verified against current API, agent, persistence, Oracle, alert-engine, session, configuration, prompt, and test implementation paths.
+- Updated `README.md` to align local setup, endpoints, agent workflow, alert-engine behavior, configuration, security boundary, and verification guidance with the canonical overview.
+- Documented current trust boundaries, approval enforcement limits, data ownership, external dependencies, runtime commands, known risks, documentation drift, and unresolved live-infrastructure questions.
+- Added the overview maintenance contract to root `AGENTS.md` so material system changes keep the canonical description synchronized with implementation.
+
+### Verification
+- Traced the principal request, scenario-authoring, direct-deployment, dual-write, registry-query, session-history, and alert-execution workflows from entry point through persistence/integration boundaries.
+- Compared current paths and symbols with `ONBOARDING.md`, repository instructions, runtime prompts, configuration, tests, and specialized/historical documentation.
+- Confirmed Python compilation, imported the FastAPI/OpenAPI surface and six registered tool symbols with a command-local configuration override, and verified that pytest currently collects no test cases. Also documented the ambient `DEBUG` variable collision discovered during collection.
+
+---
+
+## [2026-09-15] docs: Enterprise Architecture Deep-Dive & Onboarding Specification
+
+### What
+- Authored [`Docs/SYSTEM_ARCHITECTURE_OVERVIEW.md`](file:///c:/Users/abura/Development/AI_AML_AGENT/Docs/SYSTEM_ARCHITECTURE_OVERVIEW.md) detailing the complete system stack, 5-phase lifecycle, directory structure, data contracts, and operational runbook for Service A (`AI_AML_AGENT`) and its frontend interface.
+- Structured for presentation generation and technical onboarding of new engineering hires.
+- Formatted with explicit component topologies, data contract listings (`AMLIntent`, `SSEEvent`, DDL mappings), database pools (`AIDB` vs `AMLDB`), and CLI/API operational commands.
+
+---
+
 ## [2026-09-08] feat: Multi-Transaction Type Schema Support, Multi-Type Vector Search & Deterministic Channel-to-Code Binding
 
 ### What
