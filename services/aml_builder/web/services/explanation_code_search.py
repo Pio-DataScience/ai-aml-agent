@@ -236,7 +236,13 @@ def _select_codes_for_single_type(
 CASH_WITHDRAWAL_FEE_CODES: Final[FrozenSet[str]] = frozenset(
     {"119", "141", "340", "429", "2109", "2110", "2116", "2119", "2143", "2146", "3020"}
 )
+# Commission codes the catalog search returns for "cash deposit" (OPENBI2, country 400 / inst 1).
+# A commission is its own posting and cannot be linked to the deposit it was charged for; on the credit
+# leg it is the bank's income, not the customer's deposit. Counted as deposits, it inflates the total
+# and counts one event twice, so it is kept out of the deposit transaction set.
+CASH_DEPOSIT_FEE_CODES: Final[FrozenSet[str]] = frozenset({"118", "3019"})
 _WITHDRAWAL_RE: Final = re.compile(r"\bwithdraw(?:al|als|n|ing|s)?\b", re.IGNORECASE)
+_DEPOSIT_RE: Final = re.compile(r"\bdeposit(?:s|ed|ing)?\b", re.IGNORECASE)
 _FEE_RE: Final = re.compile(r"\bcomm\b|commission|\bfees?\b|\bcharges?\b", re.IGNORECASE)
 
 
@@ -253,6 +259,47 @@ def is_cash_withdrawal_type(transaction_type: str) -> bool:
     return bool(_WITHDRAWAL_RE.search(text)) and not _FEE_RE.search(text) and "transfer" not in text.lower()
 
 
+def is_cash_deposit_type(transaction_type: str) -> bool:
+    """Whether a transaction type asks for cash deposits (not their fees, not transfers).
+
+    Args:
+        transaction_type (str): One transaction type phrase, e.g. 'CASH DEPOSIT', 'e-branch deposits'.
+
+    Returns:
+        bool: True for a deposit type that does not itself name a fee, commission or transfer.
+    """
+    text = str(transaction_type or "")
+    return bool(_DEPOSIT_RE.search(text)) and not _FEE_RE.search(text) and "transfer" not in text.lower()
+
+
+def _drop_fee_codes(codes: List[Dict[str, Any]], known: FrozenSet[str], kind: str) -> List[Dict[str, Any]]:
+    """Remove commission and fee codes from the codes selected for one transaction type.
+
+    Args:
+        codes (List[Dict[str, Any]]): Selected codes, each with 'code' and 'description'.
+        known (FrozenSet[str]): Fee codes known for this type on the connected database.
+        kind (str): The type, for the log line (e.g. 'cash-withdrawal').
+
+    Returns:
+        List[Dict[str, Any]]: The codes without ``known`` and without any code whose description names
+            a commission, fee or charge.
+    """
+    kept: List[Dict[str, Any]] = []
+    for c in codes:
+        code = str(c.get("code", "")).strip()
+        if code in known or _FEE_RE.search(str(c.get("description") or c.get("desc_eng") or "")):
+            continue
+        kept.append(c)
+    if len(kept) != len(codes):
+        logger.info(
+            "[EXPL_SEARCH] Dropped %d commission/fee codes from a %s type: %s",
+            len(codes) - len(kept),
+            kind,
+            sorted({str(c.get("code")) for c in codes} - {str(c.get("code")) for c in kept}),
+        )
+    return kept
+
+
 def drop_withdrawal_fee_codes(codes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Remove commission and fee codes from the codes selected for a cash-withdrawal type.
 
@@ -263,19 +310,20 @@ def drop_withdrawal_fee_codes(codes: List[Dict[str, Any]]) -> List[Dict[str, Any
         List[Dict[str, Any]]: The codes without CASH_WITHDRAWAL_FEE_CODES and without any code whose
             description names a commission, fee or charge.
     """
-    kept: List[Dict[str, Any]] = []
-    for c in codes:
-        code = str(c.get("code", "")).strip()
-        if code in CASH_WITHDRAWAL_FEE_CODES or _FEE_RE.search(str(c.get("description") or c.get("desc_eng") or "")):
-            continue
-        kept.append(c)
-    if len(kept) != len(codes):
-        logger.info(
-            "[EXPL_SEARCH] Dropped %d commission/fee codes from a cash-withdrawal type: %s",
-            len(codes) - len(kept),
-            sorted({str(c.get("code")) for c in codes} - {str(c.get("code")) for c in kept}),
-        )
-    return kept
+    return _drop_fee_codes(codes, CASH_WITHDRAWAL_FEE_CODES, "cash-withdrawal")
+
+
+def drop_deposit_fee_codes(codes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Remove commission and fee codes from the codes selected for a cash-deposit type.
+
+    Args:
+        codes (List[Dict[str, Any]]): Selected codes, each with 'code' and 'description'.
+
+    Returns:
+        List[Dict[str, Any]]: The codes without CASH_DEPOSIT_FEE_CODES and without any code whose
+            description names a commission, fee or charge.
+    """
+    return _drop_fee_codes(codes, CASH_DEPOSIT_FEE_CODES, "cash-deposit")
 
 
 def select_relevant_explanation_codes(
@@ -310,6 +358,8 @@ def select_relevant_explanation_codes(
         codes = _select_codes_for_single_type(tx, min_similarity=min_similarity)
         if is_cash_withdrawal_type(tx):
             codes = drop_withdrawal_fee_codes(codes)
+        elif is_cash_deposit_type(tx):
+            codes = drop_deposit_fee_codes(codes)
         for c in codes:
             code_val = str(c.get("code", "")).strip()
             if code_val and code_val not in seen_codes:

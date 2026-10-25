@@ -548,6 +548,154 @@ def test_no_backstop_when_the_tool_was_called(monkeypatch: pytest.MonkeyPatch) -
     assert [e["type"] for e in events].count("clarification_request") == 1
 
 
+# ─────────────────────────── echo guard ───────────────────────────
+
+BALANCE = "customer made cash deposits greater than 50 % of his account balance"
+REFUSED = "Balances on this database aren't kept day by day, so I can't build rules that compare deposits with the account balance."
+
+
+class EchoGraph(PanelGraph):
+    """A graph that plays one scripted run per astream call, counts tool executions and records state writes."""
+
+    def __init__(self, runs: List[Any]) -> None:
+        super().__init__([])
+        self.runs = list(runs)
+        self.updates: List[Any] = []
+        self.tools_run = 0
+
+    async def aupdate_state(self, config: Dict[str, Any], values: Dict[str, Any], as_node: str = "") -> None:
+        self.updates.append((as_node, list(values["messages"])))
+        self.recorded.extend(values["messages"])
+
+    async def astream(self, inputs: Any, config: Dict[str, Any]) -> Any:
+        self.inputs.append(inputs)
+        run = self.runs.pop(0)
+        if isinstance(run, Exception):
+            raise run
+        for event in run:
+            self.tools_run += len(event.get("tools", {}).get("messages", []))
+            yield event
+
+
+def _echo(message_id: str = "echo-1") -> Dict[str, Any]:
+    """The agent's reply that only repeats the user's message."""
+    return {"agent": {"messages": [AIMessage(content=BALANCE, id=message_id)]}}
+
+
+def _refusal_run() -> List[Dict[str, Any]]:
+    """A normal run: the intent tool, its result, then the reply."""
+    call = {"name": chat_route.INTENT_TOOL, "id": "r1", "args": {}}
+    return [{"agent": {"messages": [AIMessage(content="", tool_calls=[call])]}},
+            {"tools": {"messages": [ToolMessage(content=json.dumps({"status": "NOT_SUPPORTED"}), tool_call_id="r1")]}},
+            {"agent": {"messages": [AIMessage(content=REFUSED)]}}]
+
+
+def _post(monkeypatch: pytest.MonkeyPatch, graph: EchoGraph, text: str = BALANCE) -> List[Dict[str, Any]]:
+    """Send one message through the chat route.
+
+    Args:
+        monkeypatch (pytest.MonkeyPatch): The pytest monkeypatch fixture.
+        graph (EchoGraph): The graph to use.
+        text (str): The user's message.
+
+    Returns:
+        List[Dict[str, Any]]: The SSE events.
+    """
+    return _events(_client(monkeypatch, graph).post("/chat/stream", json={
+        "messages": [{"role": "user", "content": text}], "metadata": {"chat_id": "e", "user_id": "u"}}))
+
+
+def _replies(events: List[Dict[str, Any]]) -> List[str]:
+    return [e["text"] for e in events if e["type"] == "content"]
+
+
+@pytest.mark.parametrize("reply, message, expected", [
+    (BALANCE, BALANCE, True),
+    (f'  "{BALANCE.upper()}"  ', BALANCE, True),
+    (REFUSED, BALANCE, False),
+    ("", "", False),
+    (BALANCE + " please", BALANCE, False),
+])
+def test_an_echo_is_the_message_itself(reply: str, message: str, expected: bool) -> None:
+    """Spacing, case and surrounding quotes are ignored; any other word makes it a real reply."""
+    assert chat_route.is_echo(reply, message) is expected
+
+
+def test_an_echo_with_no_tool_call_is_retried_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Live case: the echo is never shown; it is removed and the agent step runs once more on the same history."""
+    graph = EchoGraph([[_echo()], _refusal_run()])
+
+    events = _post(monkeypatch, graph)
+
+    assert _replies(events) == [REFUSED]
+    assert len(graph.inputs) == 2 and graph.inputs[1] is None  # the retry adds no second user message
+    as_node, removed = graph.updates[0]
+    assert as_node == "tools" and [m.id for m in removed] == ["echo-1"]
+    assert graph.tools_run == 1
+
+
+def test_a_normal_reply_is_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A reply in the agent's own words is shown as it is, after one run."""
+    graph = EchoGraph([[{"agent": {"messages": [AIMessage(content="Hello, how can I help with AML scenarios?")]}}]])
+
+    events = _post(monkeypatch, graph, text="hello")
+
+    assert _replies(events) == ["Hello, how can I help with AML scenarios?"]
+    assert len(graph.inputs) == 1 and graph.updates == []
+
+
+def test_a_reply_after_a_tool_call_is_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The run called a tool, so its reply is shown even when it repeats the message: nothing runs twice."""
+    run = _refusal_run()[:2] + [{"agent": {"messages": [AIMessage(content=BALANCE, id="after-tool")]}}]
+    graph = EchoGraph([run])
+
+    events = _post(monkeypatch, graph)
+
+    assert _replies(events) == [BALANCE]
+    assert len(graph.inputs) == 1 and graph.updates == [] and graph.tools_run == 1
+
+
+@pytest.mark.parametrize("text, fallback", [(BALANCE, chat_route.ECHO_FALLBACK),
+                                             ("عميل أودع نقداً أكثر من نصف رصيده", chat_route.ECHO_FALLBACK_AR)])
+def test_a_second_echo_gets_the_fixed_reply_and_no_third_run(monkeypatch: pytest.MonkeyPatch, text: str, fallback: str) -> None:
+    """The retry echoes again: no further run; the fixed reply is shown and replaces the echo in the history."""
+    graph = EchoGraph([[{"agent": {"messages": [AIMessage(content=text, id="echo-1")]}}],
+                       [{"agent": {"messages": [AIMessage(content=text, id="echo-2")]}}]])
+
+    events = _post(monkeypatch, graph, text=text)
+
+    assert _replies(events) == [fallback]
+    assert len(graph.inputs) == 2
+    as_node, written = graph.updates[-1]
+    assert as_node == "agent" and [getattr(m, "id", None) for m in written[:-1]] == ["echo-2"]
+    assert written[-1].content == fallback
+
+
+def test_a_failed_retry_gets_the_fixed_reply(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The retry raises: the user sees the fixed reply, not an error."""
+    graph = EchoGraph([[_echo()], RuntimeError("model unavailable")])
+
+    events = _post(monkeypatch, graph)
+
+    assert _replies(events) == [chat_route.ECHO_FALLBACK]
+    assert "error" not in [e["type"] for e in events] and [e["type"] for e in events][-1] == "done"
+    assert graph.recorded[-1].content == chat_route.ECHO_FALLBACK
+
+
+def test_the_echo_guard_never_repeats_a_side_effect(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tools run once per turn: a retry happens only after a run that executed none, and only once."""
+    retried = EchoGraph([[_echo()], _refusal_run()])
+    _post(monkeypatch, retried)
+    tool_first = EchoGraph([_refusal_run()[:2] + [_echo("after-tool")]])
+    _post(monkeypatch, tool_first)
+    twice = EchoGraph([[_echo("echo-1")], [_echo("echo-2")], _refusal_run()])
+    _post(monkeypatch, twice)
+
+    assert (retried.tools_run, len(retried.inputs)) == (1, 2)
+    assert (tool_first.tools_run, len(tool_first.inputs)) == (1, 1)
+    assert (twice.tools_run, len(twice.inputs)) == (0, 2) and len(twice.runs) == 1  # the third run never started
+
+
 @pytest.mark.parametrize("text, asks_amount", [
     ("flag all customer they have 3 high cash deposite in one week in 2019", True),
     ("Flag customers with 3 large cash deposits within 7 days", True),

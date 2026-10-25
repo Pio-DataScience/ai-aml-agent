@@ -15,7 +15,7 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage, ToolMessage
 
 from services.aml_builder.web.services import scope_guard
 from services.aml_builder.web.services.clarification import (
@@ -53,6 +53,12 @@ _FORM_CLAIM = re.compile(r"\bform\b.{0,60}\b(?:side\s*panel|panel)\b|\bcomplete 
                          re.IGNORECASE | re.DOTALL)
 INTENT_TOOL = "analyze_intent_and_discover_explanation_codes"
 PANEL_PLAN_REPLY = "The plan is open in the side panel on the right."
+# The agent sometimes answers with the user's own words and calls no tool (live: 1 of 5 runs of a balance
+# request). Such a reply is never shown: the agent step runs once more, then this fixed reply is sent.
+ECHO_FALLBACK = "I couldn't process that message. Please send your request again, or rephrase it."
+ECHO_FALLBACK_AR = "تعذّرت معالجة رسالتك. يرجى إرسال طلبك مرة أخرى أو إعادة صياغته."
+_ECHO_TRIM = re.compile(r"\s+")
+_ARABIC = re.compile(r"[؀-ۿ]")
 
 
 def is_panel_request(message: str) -> bool:
@@ -66,6 +72,35 @@ def is_panel_request(message: str) -> bool:
     """
     text = (message or "").strip()
     return len(text.split()) <= 12 and bool(_PANEL_WORDS.search(text)) and bool(_SHOW_WORDS.search(text))
+
+
+def is_echo(reply: str, message: str) -> bool:
+    """Whether a reply only repeats the user's message (spacing, case and surrounding quotes ignored).
+
+    Args:
+        reply (str): The agent's reply.
+        message (str): What the user typed.
+
+    Returns:
+        bool: True when the reply is the message itself.
+    """
+    def plain(text: str) -> str:
+        return _ECHO_TRIM.sub(" ", text or "").strip().strip("\"'“”«»").strip().casefold()
+
+    said = plain(message)
+    return bool(said) and plain(reply) == said
+
+
+def echo_fallback_for(message: str) -> str:
+    """The fixed reply sent when the agent echoed the message twice, in the user's language.
+
+    Args:
+        message (str): What the user typed.
+
+    Returns:
+        str: ECHO_FALLBACK_AR for Arabic text, ECHO_FALLBACK otherwise.
+    """
+    return ECHO_FALLBACK_AR if _ARABIC.search(message or "") else ECHO_FALLBACK
 
 
 def latest_panel_event(messages: Any) -> Optional[SSEEvent]:
@@ -252,48 +287,20 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
         intent_tool_called = False
         clarification_sent = False
         last_reply = ""
+        # Per agent run: whether it called any tool, and an echoed reply held back instead of shown.
+        attempt: Dict[str, Any] = {"tool_called": False, "echo": None}
 
-        # Check and claim in one step (no await in between), so two requests cannot both pass.
-        if thread_id in _ACTIVE_THREADS:
-            logger.warning("[API] Duplicate request for a busy thread ignored: %s", thread_id)
-            yield _sse(SSEEvent(type="content", text=BUSY_NOTICE))
-            yield _sse(SSEEvent(type="done"))
-            return
-        _ACTIVE_THREADS.add(thread_id)
+        async def relay(stream: Any) -> Any:
+            """Translate one agent run's graph events into SSE strings.
 
-        try:
-            yield _sse(SSEEvent(type="thinking", status="Analyzing your request..."))
+            Args:
+                stream (Any): The graph's ``astream`` iterator for this run.
 
-            # "Give me the side panel": show the open form (or the latest plan) again, without the LLM.
-            if not request.metadata_json and not answers and is_panel_request(typed_msg):
-                try:
-                    state = await tool_graph.aget_state(config)
-                    panel = latest_panel_event((state.values or {}).get("messages", []) if state else [])
-                except Exception as exc:  # no state: let the agent answer normally
-                    logger.warning("[API] Could not read the side-panel content (%s)", type(exc).__name__)
-                    panel = None
-                if panel is not None:
-                    reply = PANEL_FORM_REPLY if panel.type == "clarification_request" else PANEL_PLAN_REPLY
-                    yield _sse(panel)
-                    yield _sse(SSEEvent(type="content", text=reply))
-                    try:
-                        await tool_graph.aupdate_state(
-                            config, {"messages": [HumanMessage(content=typed_msg), AIMessage(content=reply)]}, as_node="agent"
-                        )
-                    except Exception as exc:  # the panel is still shown; only the history entry is missing
-                        logger.warning("[API] Could not record the side-panel exchange (%s)", type(exc).__name__)
-                    logger.info("[API] Side panel re-sent on request: %s", panel.type)
-                    return
-
-            # Scope guard: a message clearly unrelated to AML scenarios gets a fixed refusal
-            # and never reaches the agent. Sidebar governance and clarification answers are always in scope.
-            if not request.metadata_json and not answers:
-                refusal = await _scope_refusal(tool_graph, config, typed_msg)
-                if refusal:
-                    yield _sse(SSEEvent(type="content", text=refusal))
-                    return
-
-            async for event in tool_graph.astream(inputs, config=config):
+            Yields:
+                str: SSE-formatted events.
+            """
+            nonlocal intent_tool_called, clarification_sent, last_reply
+            async for event in stream:
                 for node_name, node_output in event.items():
                     if not isinstance(node_output, dict):
                         continue
@@ -303,6 +310,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                         # ── AIMessage: register tool calls + emit tool_call SSE ──
                         if isinstance(m, AIMessage) or getattr(m, "type", None) == "ai":
                             if getattr(m, "tool_calls", None):
+                                attempt["tool_called"] = True
                                 for tc in m.tool_calls:
                                     t_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "tool")
                                     t_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
@@ -315,6 +323,11 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                             # Natural language reply → stream to chat
                             text = getattr(m, "content", "")
                             if isinstance(text, str) and text.strip():
+                                # Echo guard: the user's own words with no tool called are held back, not shown.
+                                if not attempt["tool_called"] and is_echo(text, typed_msg):
+                                    attempt["echo"] = m
+                                    logger.warning("[API] Echo guard: the agent repeated the message and called no tool")
+                                    continue
                                 last_reply = text
                                 yield _sse(SSEEvent(type="content", text=text))
 
@@ -363,6 +376,82 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                                     logger.warning("[API] Could not parse scenario_result from ToolMessage: %s", exc)
 
                             # All other ToolMessages are suppressed — raw JSON stays internal
+
+        # Check and claim in one step (no await in between), so two requests cannot both pass.
+        if thread_id in _ACTIVE_THREADS:
+            logger.warning("[API] Duplicate request for a busy thread ignored: %s", thread_id)
+            yield _sse(SSEEvent(type="content", text=BUSY_NOTICE))
+            yield _sse(SSEEvent(type="done"))
+            return
+        _ACTIVE_THREADS.add(thread_id)
+
+        try:
+            yield _sse(SSEEvent(type="thinking", status="Analyzing your request..."))
+
+            # "Give me the side panel": show the open form (or the latest plan) again, without the LLM.
+            if not request.metadata_json and not answers and is_panel_request(typed_msg):
+                try:
+                    state = await tool_graph.aget_state(config)
+                    panel = latest_panel_event((state.values or {}).get("messages", []) if state else [])
+                except Exception as exc:  # no state: let the agent answer normally
+                    logger.warning("[API] Could not read the side-panel content (%s)", type(exc).__name__)
+                    panel = None
+                if panel is not None:
+                    reply = PANEL_FORM_REPLY if panel.type == "clarification_request" else PANEL_PLAN_REPLY
+                    yield _sse(panel)
+                    yield _sse(SSEEvent(type="content", text=reply))
+                    try:
+                        await tool_graph.aupdate_state(
+                            config, {"messages": [HumanMessage(content=typed_msg), AIMessage(content=reply)]}, as_node="agent"
+                        )
+                    except Exception as exc:  # the panel is still shown; only the history entry is missing
+                        logger.warning("[API] Could not record the side-panel exchange (%s)", type(exc).__name__)
+                    logger.info("[API] Side panel re-sent on request: %s", panel.type)
+                    return
+
+            # Scope guard: a message clearly unrelated to AML scenarios gets a fixed refusal
+            # and never reaches the agent. Sidebar governance and clarification answers are always in scope.
+            if not request.metadata_json and not answers:
+                refusal = await _scope_refusal(tool_graph, config, typed_msg)
+                if refusal:
+                    yield _sse(SSEEvent(type="content", text=refusal))
+                    return
+
+            async for sse in relay(tool_graph.astream(inputs, config=config)):
+                yield sse
+
+            # Echo guard: the run ended on the user's own words and called no tool, so nothing ran and
+            # nothing can be repeated. Drop the echo and run the agent step once more on the same history
+            # (no new user message); a second echo, or a failed retry, gets a fixed reply.
+            echo = attempt["echo"]
+            if echo is not None and attempt["tool_called"]:
+                last_reply = getattr(echo, "content", "")
+                yield _sse(SSEEvent(type="content", text=last_reply))
+            elif echo is not None:
+                attempt.update(echo=None)
+                retried = False
+                if getattr(echo, "id", None):
+                    try:
+                        await tool_graph.aupdate_state(config, {"messages": [RemoveMessage(id=echo.id)]}, as_node="tools")
+                        echo = None  # removed from the conversation
+                        async for sse in relay(tool_graph.astream(None, config=config)):
+                            yield sse
+                        retried = True
+                    except Exception as exc:  # the fixed reply below is sent instead
+                        logger.warning("[API] Echo guard: the retry failed (%s)", type(exc).__name__)
+                if not retried or attempt["echo"] is not None:
+                    last_reply = echo_fallback_for(typed_msg)
+                    yield _sse(SSEEvent(type="content", text=last_reply))
+                    stale = [e for e in (echo, attempt["echo"]) if e is not None and getattr(e, "id", None)]
+                    try:
+                        await tool_graph.aupdate_state(
+                            config,
+                            {"messages": [*(RemoveMessage(id=e.id) for e in stale), AIMessage(content=last_reply)]},
+                            as_node="agent",
+                        )
+                    except Exception as exc:  # the reply is still shown; only the history entry is missing
+                        logger.warning("[API] Echo guard: could not record the fixed reply (%s)", type(exc).__name__)
+                    logger.warning("[API] Echo guard: sent the fixed reply (retry %s)", "echoed again" if retried else "not run")
 
             # Backstop: the agent said a form is waiting but never called the intent tool in this turn
             # (a small model can copy the sentence without the call). Make the form real.

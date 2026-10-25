@@ -5,6 +5,32 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-10-25] fix: No commission codes in cash-deposit scenarios; echo guard on agent replies
+
+### What
+- **Problem 1**: live run "cash deposits total more than 10,000 JOD within 7 days in 2019" sent codes 1, 660, 118
+  (CASH DEPOSIT COMMISSION) and 3019 (CASHLESS CASH DEPOSIT COMMISSION). The commission amounts were summed with the
+  deposits, so a customer with 9,600 JOD of deposits and 500 JOD of commission was flagged.
+- **Fix** (`explanation_code_search`): `is_cash_deposit_type` + `drop_deposit_fee_codes` remove `CASH_DEPOSIT_FEE_CODES`
+  (118, 3019) and any code whose description names a commission, fee or charge, for deposit types only - the same
+  rule as cash withdrawals (2026-10-17). Codes leave the transaction set entirely: a commission is a separate posting
+  that cannot be linked to its deposit (PioTech fact sheet), so it can be neither summed nor counted. An explicit
+  "deposit commission/fees" request, transfers and user-confirmed codes are unaffected. Withdrawal behaviour is
+  unchanged (shared `_drop_fee_codes`).
+- **Problem 2**: in 1 of 5 live runs of a balance request the agent replied with the user's own sentence and called no
+  tool.
+- **Fix** (`routes/chat.py`): the stream relay holds back a reply that `is_echo` matches when the run called no tool,
+  removes it from the conversation and runs the agent step once more on the same history (`as_node="tools"`, no new
+  user message). A second echo, or a failed retry, gets the fixed `ECHO_FALLBACK` (Arabic: `ECHO_FALLBACK_AR`), which
+  replaces the echo in the history. A run that called any tool is never retried, so no tool, SQL or write repeats.
+- Tests: 24 added (`test_all_transaction_code_scope.py`: deposit keywords, code removal, below / equal / above
+  10,000 JOD on an in-memory table; `test_clarification.py`: echo detection, single retry, no retry after a normal
+  reply or a tool call, second echo, failed retry, no repeated side effects). Two existing tests that asserted a
+  deposit keeps its commission code now assert the new rule. Full suite 264 passed. No database or LLM calls.
+- Not changed: "N days" still means N working days (`sql_dates._window_range`); business confirmation pending.
+
+---
+
 ## [2026-10-19] fix: "X% of the balance" rules - one ratio, percentages, slot-bound answers, plain errors, balance capability
 
 ### What
