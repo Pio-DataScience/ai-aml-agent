@@ -5,6 +5,23 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-10-25] fix: "Flag transaction" asks for the transaction type
+
+### What
+- **Problem**: for "Flag transaction" the intent model returned the request itself as the transaction type. The
+  form's check found the word "flag" in the message, counted the type as named, and never asked for it; the side
+  panel showed "Transaction types: Flag Transaction" and the code search would have run on that text.
+- **Fix** (`clarification`): `is_placeholder_type` / `drop_placeholder_types` treat a type made only of instruction
+  words (flag, detect, find, show, ...), descriptions (suspicious, large, ...) and generic words (transaction,
+  transfer, ...) as no type; `_channels_stated` ignores those words. `tools` drops such types right after the types
+  are read, before attribute filters, code search and the form, so the form asks for the transaction type.
+  Real channels ("CASH DEPOSIT", "outward transfer") and "any / all transactions" are unchanged.
+- Tests: 13 added (`test_clarification.py`); full suite 277 passed. Live: "Flag transaction" now asks amount,
+  period and transaction type; "Flag cash deposits above 10,000 JOD in the last 30 days" and "Flag any transaction
+  above 50,000 JOD in 2019" go straight to the plan.
+
+---
+
 ## [2026-10-25] fix: No commission codes in cash-deposit scenarios; echo guard on agent replies
 
 ### What

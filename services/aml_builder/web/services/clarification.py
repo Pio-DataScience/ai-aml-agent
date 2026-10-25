@@ -114,6 +114,14 @@ _BARE_CHANNEL_WORDS: Final = frozenset(
     {"transaction", "transactions", "transfer", "transfers", "payment", "payments", "deposit", "deposits",
      "withdrawal", "withdrawals", "activity", "activities", "movement", "movements"}
 )
+# Words that ask for something or describe it, never a channel: the intent model once returned the whole
+# request "Flag transaction" as the transaction type, and "flag" was then taken as the user naming a channel.
+_NOT_A_CHANNEL_WORDS: Final = frozenset(
+    {"flag", "flags", "flagged", "detect", "detects", "find", "identify", "monitor", "show", "return", "list",
+     "alert", "alerts", "report", "get", "give", "search", "check", "track", "catch", "review", "all", "any",
+     "every", "each", "the", "for", "suspicious", "unusual", "abnormal", "large", "high", "big", "huge",
+     "small", "many", "multiple", "frequent"}
+)
 # "transactions above 500,000": an amount on each transaction, so each transaction is monitored.
 _PER_TRANSACTION_AMOUNT: Final = re.compile(
     r"\b(?:transactions?|deposits?|withdrawals?|transfers?|payments?)\s+(?:of\s+)?"
@@ -256,7 +264,7 @@ def _channels_stated(intent: Dict[str, Any], text: str) -> bool:
     for transaction_type in types:
         # The qualifier ("cash", "outward", "cheque") is what names the channel; it must be the user's word.
         qualifiers = [w for w in re.findall(r"[a-z]+", str(transaction_type).lower())
-                      if w not in _BARE_CHANNEL_WORDS and len(w) > 2]
+                      if w not in _BARE_CHANNEL_WORDS and w not in _NOT_A_CHANNEL_WORDS and len(w) > 2]
         if not qualifiers or not all(w[:5] in lowered for w in qualifiers):
             return False
     return True
@@ -313,6 +321,42 @@ def find_gaps(intent: Dict[str, Any], text: str, known: Optional[Dict[str, Any]]
         if not stated(intent, text):
             gaps.append(name)
     return gaps
+
+
+def is_placeholder_type(transaction_type: Any) -> bool:
+    """Whether a "transaction type" names no channel at all ("Flag transaction", "suspicious activity").
+
+    Args:
+        transaction_type (Any): One transaction type as the intent model returned it.
+
+    Returns:
+        bool: True when every word is an instruction, a description or a generic word such as
+            "transaction"; False for a real channel ("CASH DEPOSIT", "outward transfer") or a scope
+            label ("ALL", handled elsewhere).
+    """
+    text = str(transaction_type or "").strip()
+    if not text or text.upper() in ("ALL", "ANY", "ALL TRANSACTIONS"):
+        return False
+    words = re.findall(r"[a-z]+", text.lower())
+    return bool(words) and all(w in _BARE_CHANNEL_WORDS or w in _NOT_A_CHANNEL_WORDS or len(w) <= 2 for w in words)
+
+
+def drop_placeholder_types(intent: Dict[str, Any]) -> Dict[str, Any]:
+    """Remove transaction types that name no channel, so they are neither searched as codes nor shown.
+
+    Args:
+        intent (Dict[str, Any]): The intent (not modified).
+
+    Returns:
+        Dict[str, Any]: The intent without placeholder types; with none left, both type fields are None.
+    """
+    types = [t for t in intent.get("transaction_types") or [] if t]
+    if not types and intent.get("transaction_type"):
+        types = [p.strip() for p in str(intent["transaction_type"]).split(",") if p.strip()]
+    kept = [t for t in types if not is_placeholder_type(t)]
+    if len(kept) == len(types):
+        return intent
+    return {**intent, "transaction_types": kept or None, "transaction_type": ", ".join(kept) or None}
 
 
 def all_types_if_any(intent: Dict[str, Any], text: str) -> Dict[str, Any]:
