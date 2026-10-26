@@ -147,6 +147,7 @@ class ScenarioSqlResult(BaseModel):
     model: str | None = None
     trace_id: str | None = None
     error: str | None = None
+    metrics: dict[str, int | float] = Field(default_factory=dict)
 
 
 class ScenarioSqlGenerator(Protocol):

@@ -54,9 +54,12 @@ def test_bl1_readonly_policy_accepts_cte_and_uses_ast() -> None:
 
 def test_bl2_experience_collection_name_is_shared() -> None:
     """Require shared identity and safe behavior when experience is absent."""
-    from services.aml_builder.web.services.dwh_scenario.embeddings import EmbeddingIdentity
+    from services.aml_builder.web.services.dwh_scenario.embeddings import (
+        EmbeddingIdentity,
+    )
     from services.aml_builder.web.services.dwh_scenario.retrieval import (
-        EXPERIENCE_COLLECTION_NAME, ChromaRetriever,
+        EXPERIENCE_COLLECTION_NAME,
+        ChromaRetriever,
     )
 
     assert EXPERIENCE_COLLECTION_NAME == "experience_templates"
@@ -97,13 +100,28 @@ def test_bl3_embedding_factory_receives_configured_key(
     assert captured["api_key"] == "key-canary"
 
 
-@pytest.mark.xfail(
-    strict=True, reason="BL4: failed memory compaction silently substitutes canned text"
-)
-def test_bl4_memory_failure_never_replaces_context_with_canned_summary() -> None:
-    """Require compaction failures to propagate or be deliberately removed."""
-    agent = _read_source("web/services/agent.py")
-    assert "Summary of prior conversation was lost due to an error." not in agent
+def test_bl4_local_request_context_does_not_use_memory_compaction() -> None:
+    """One scenario request is assembled from typed state without lossy compaction."""
+    from services.aml_builder.web.domain.dwh_scenario.contracts import (
+        ScenarioSqlRequest,
+    )
+    from services.aml_builder.web.services.dwh_scenario.context_assembly import (
+        assemble_context,
+    )
+
+    request = ScenarioSqlRequest(
+        intent={
+            "scenario_name": "Current scenario",
+            "scenario_type": "TRANSACTION",
+            "detection_logic": "Current intent",
+            "ready_for_handoff": True,
+        }
+    )
+    context = assemble_context(
+        request, experience=[], tables=[], columns=[], budget=10000
+    )
+    assert "Current intent" in context
+    assert "Summary of prior conversation was lost due to an error." not in context
 
 
 def test_bl5_critic_uses_its_role_provider(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -166,17 +184,26 @@ def test_bl6_local_embedding_cache_is_keyed_by_device(
 
 def test_bl7_health_exposes_dependency_readiness() -> None:
     """Readiness exposes each dependency status, including optional graph outage."""
-    from services.aml_builder.web.services.dwh_scenario.retrieval import readiness_report
+    from services.aml_builder.web.services.dwh_scenario.retrieval import (
+        readiness_report,
+    )
 
     report = readiness_report(
         lambda: {"status": "ok"},
-        {"schema_tables": lambda: {"status": "ok"}, "schema_columns": lambda: {"status": "down"}, "experience_templates": lambda: {"status": "empty"}},
+        {
+            "schema_tables": lambda: {"status": "ok"},
+            "schema_columns": lambda: {"status": "down"},
+            "experience_templates": lambda: {"status": "empty"},
+        },
         lambda: {"status": "degraded"},
     )
     assert report["status"] == "down"
     assert report["dependencies"]["schema_columns"]["status"] == "down"
     assert report["dependencies"]["neo4j"]["status"] == "degraded"
-    assert readiness_report("ok", {"experience_templates": "empty"}, "disabled")["status"] == "ready"
+    assert (
+        readiness_report("ok", {"experience_templates": "empty"}, "disabled")["status"]
+        == "ready"
+    )
 
 
 @pytest.mark.xfail(

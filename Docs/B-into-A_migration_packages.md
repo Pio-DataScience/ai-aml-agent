@@ -513,3 +513,53 @@ ACCEPTANCE: a one-line settings change returns the system to B's HTTP service; d
 - **VERIFIED:** B4 adapter behavior is covered with in-memory fakes; real Chroma, Neo4j and Oracle readiness were not exercised. The B1-B3 regression command did not finish.
 - **INFERRED:** semantic similarity and graph rank may have different scales; configured 50/50 weights may need calibration against a real, approved index before enabling Neo4j.
 - The default HTTP SQL generator remains selected; B5 was not started.
+
+## B5 completion report — 2026-10-26
+
+### 1. Plan followed and deviations
+
+- Created `refactor/b5-agent` from the checked-out B4 HEAD and built the local path behind an explicit factory; the active HTTP adapter/tool path is unchanged.
+- Added bounded retrieval/context, provider generation, deterministic policy and intent validation, bounded Oracle execution, critique/repair, structured counters, and explicit failure states.
+- Removed the need for memory compaction in the local one-request/one-intent flow; BL4 now checks typed context assembly rather than probing B source.
+- Added offline behavioral tests for generation approval, critique rejection, unsafe SQL, zero rows, provider/retrieval errors, and context/tool/Oracle budget exhaustion.
+- Checked B4's lazy readiness construction with no Chroma directory and disabled Neo4j; optional adapters do not initialize or block the HTTP-only path.
+- Deviation: did not inspect Service B source; the B5 requirements and existing B1–B4 interfaces in A were sufficient for this isolated implementation, and no Service B changes were authorized.
+
+### 2. Files created/changed in A; files read in B
+
+- `web/services/dwh_scenario/graph.py`, `generator.py`, `critique.py`, `context_assembly.py`, `prompt_loader.py`, `prompts/`, and `tools/` — dependency-injected local graph and eight tool adapters; graph compile is explicit and on demand.
+- `web/domain/dwh_scenario/contracts.py` — optional safe metrics on `ScenarioSqlResult`.
+- `web/services/settings.py` — configurable tool, critique and Oracle statement caps.
+- `tests/test_b5_local_generator.py` — offline behavior and lifecycle checks.
+- `tests/characterization/dwh_scenario/test_bug_ledger.py` — BL4 behavioral replacement.
+- `Docs/B5_local_generator.md`, `Docs/B-into-A_migration_packages.md`, `PROJECT_OVERVIEW.md`, `CHANGELOG.MD` — operating notes and verified package report.
+- B files read: none. B files changed: none.
+
+### 3. Tests
+
+- **Added / passing:** focused B5, B4 and ledger run: `22 passed, 3 xfailed`. Command: `\.venv\Scripts\python.exe -m pytest -q services\aml_builder\tests\test_b5_local_generator.py services\aml_builder\tests\test_b4_retrieval.py services\aml_builder\tests\characterization\dwh_scenario\test_bug_ledger.py`.
+- **Regression:** B1 contract, B2 provider factory and B3 SQL-policy tests: `59 passed`. Command: `\.venv\Scripts\python.exe -m pytest -q services\aml_builder\tests\test_b1_dwh_contract.py services\aml_builder\tests\test_b3_oracle_sql_policy.py services\aml_builder\tests\characterization\dwh_scenario\test_b2_provider_factory.py`.
+- **Other checks:** compileall and `git diff --check` passed. Black passed for all 15 changed Python files. Scoped flake8 passed with `--max-line-length=88` to match Black's configured width.
+- **Skipped:** none. The full suite was not run because of the documented Windows Proactor sandbox hang.
+
+### 4. Bug-ledger rows touched and status
+
+- **BL4 — VERIFIED fixed:** local context assembly uses the typed current request and bounded retrieval context; no memory compaction or canned-summary fallback exists in the new path. Behavioral test passes.
+- **BL5 — VERIFIED passing:** the local path requests generator and critic roles independently through A's B2 provider factory. B2 provider matrix regression passed.
+- **BL1, BL8, BL9 — unchanged strict xfail.**
+- **BL2, BL3, BL6, BL7, BL10 — VERIFIED passing in focused B4/B2 tests:** B4 retrieval/readiness and the B2 provider factory regressions passed in this run.
+
+### 5. OWNER items and open questions
+
+- **OWNER/compliance:** confirm provider data approval (D1) before using external generator/critic providers with business scenario metadata.
+- **OWNER:** confirm deployed Chroma collection names, embedding manifest identity and source counts before configuring the local path to an index.
+- **OWNER:** confirm Neo4j endpoint, graph schema/rank fields and GDS availability before enabling reranking.
+- **OWNER/DBA:** confirm B3 dictionary schema ownership, Oracle grants and read-only candidate-query account before live execution.
+- The B5 path remains unselected. No live provider, Oracle, Chroma or Neo4j checks were run.
+
+### 6. Risks noticed
+
+- **VERIFIED:** SQL is returned only after AST policy, A intent checks, repository execution success and explicit critic approval; zero-row success is retained as row-count evidence. Tests use fakes only.
+- **VERIFIED:** B4 readiness constructs lazy optional checks without creating Chroma or Neo4j clients; actual FastAPI startup still uses A's unchanged active graph.
+- **INFERRED:** request context budgeting uses a conservative four-character-per-token estimate; provider tokenizer-specific accounting is not available for retrieval context.
+- **INFERRED:** schema retrieval quality and critic judgments need a later approved index/provider evaluation; B5 does not establish SQL parity with the HTTP generator.

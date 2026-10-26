@@ -3,6 +3,12 @@
 All notable changes to this project are documented here.
 Format: `[DATE] TYPE: Description`
 
+## [2026-10-26] feat: Add B5 local DWH SQL orchestration
+
+- Added an injected, explicitly compiled LangGraph entry point and bounded generator/critic pipeline using B2 provider roles, B4 retrieval and B3 Oracle SQL policy/repository interfaces; the HTTP adapter remains active and unchanged.
+- Enforced tool, critique, Oracle statement, context and wall-time budgets; unsafe SQL is never executed, empty execution results remain successful, and SQL is returned only after deterministic validation, execution and critic approval.
+- Added offline behavior tests for generation, critique rejection, unsafe SQL, empty results, provider/retrieval failures, exhausted context, B4 optional-dependency lifecycle and BL4 memory-removal behavior; documented B5.
+
 ## [2026-10-26] feat: Add B4 retrieval interfaces and readiness
 
 - Added institution-scoped, deterministic Chroma retrieval with index manifest compatibility checks, optional empty experience support, and lazy Neo4j reranking with Chroma fallback.
