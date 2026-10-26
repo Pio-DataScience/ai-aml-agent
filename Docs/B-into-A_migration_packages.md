@@ -464,3 +464,52 @@ ACCEPTANCE: a one-line settings change returns the system to B's HTTP service; d
 - B0 first (safe, no behavior change). Then B1. B2 and B4 can be done in either order after B1 if you want parallel branches, but B5 needs B1-B4.
 - Paste each report here before the next package. I'll check it against the bug ledger, the locked decisions, and the interface contracts.
 - OWNER items to collect along the way: provider data approval (B2), Oracle ownership and grants (B3), deployed index versions and Neo4j GDS (B4/B7), your Toad run of any enrichment output (B7).
+
+---
+
+## B4 completion report — 2026-10-26
+
+### 1. Plan followed and deviations
+
+- Inspected A's B3 state, settings, health route, B0 fakes, and bug-ledger tests; created `refactor/b4-retrieval` from B3 HEAD.
+- Added injectable retrieval/reranking interfaces, institution-safe Chroma adapter, index manifest validation, optional Neo4j lifecycle/fallback, readiness probes and configuration.
+- Replaced BL2 and BL7 source probes with behavioral tests; documented B4 and updated this ledger, changelog, and canonical overview.
+- No Service B files were read or modified. No live database, model, Chroma build, Neo4j, enrichment, or B5 work was run.
+- Deviation: B1-B3 regression tests were started but stalled during Windows asyncio setup after emitting 24 progress dots; the run was interrupted. This is the previously documented Proactor `socketpair()` sandbox limitation, so no B1-B3 pass claim is made.
+
+### 2. Files created/changed in A; files read in B
+
+- `services/aml_builder/web/services/dwh_scenario/retrieval.py` — retriever/reranker protocols, Chroma, manifests, readiness, and lazy graph adapter.
+- `services/aml_builder/web/services/settings.py`, `.env.example` — collection/index/retrieval/Neo4j configuration.
+- `services/aml_builder/web/api/main.py` — startup readiness snapshot, live readiness response and graph-driver shutdown.
+- `services/aml_builder/tests/test_b4_retrieval.py` — offline adapter tests.
+- `services/aml_builder/tests/characterization/dwh_scenario/test_bug_ledger.py` — behavioral BL2/BL7 replacements.
+- `Docs/B4_retrieval.md`, `Docs/B-into-A_migration_packages.md`, `PROJECT_OVERVIEW.md`, `CHANGELOG.MD` — usage, report, architecture, and changelog.
+- B files read: none. B files changed: none.
+
+### 3. Tests
+
+- **Added / passing:** B4 adapter tests and BL2/BL7 behavioral tests. Exact command: `\.venv\Scripts\python.exe -m pytest -q services\aml_builder\tests\test_b4_retrieval.py services\aml_builder\tests\characterization\dwh_scenario\test_bug_ledger.py` — **11 passed, 4 xfailed**.
+- **Strict xfail:** BL1, BL4, BL8, BL9 remain strict xfails and are outside B4.
+- **Skipped:** none in this run.
+- **Regression attempt:** `\.venv\Scripts\python.exe -m pytest -q services\aml_builder\tests\test_b1_dwh_contract.py services\aml_builder\tests\test_b3_oracle_sql_policy.py services\aml_builder\tests\characterization\dwh_scenario\test_b2_provider_factory.py` stalled during startup; interrupted without a result summary.
+- **Other checks:** `\.venv\Scripts\python.exe -m compileall -q services app.py run_alert_engine.py` and `git diff --check` passed.
+
+### 4. Bug-ledger status
+
+- **BL2 — VERIFIED fixed:** canonical `EXPERIENCE_COLLECTION_NAME`; missing experience collection yields no examples and readiness `empty`.
+- **BL7 — VERIFIED fixed:** readiness reports Oracle, each Chroma collection and Neo4j separately; required collection failures affect aggregate readiness, while optional Neo4j degradation and empty experience remain visible.
+- **BL1, BL4, BL8, BL9 — unchanged strict xfail.**
+- **BL3, BL5, BL6, BL10 — existing B2 passing tests not rerun in this package.**
+
+### 5. OWNER items and open questions
+
+- **OWNER:** confirm deployed Chroma collection names, manifest embedding identity/fingerprint and source counts before pointing a deployment at an index.
+- **OWNER:** confirm Neo4j endpoint, graph schema/rank semantics and GDS requirement before enabling reranking; credentials must be deployment-managed.
+- **Open:** current graph query uses `n.id` and `n.rank`; confirm these properties match the deployed graph before enabling it.
+
+### 6. Risks noticed
+
+- **VERIFIED:** B4 adapter behavior is covered with in-memory fakes; real Chroma, Neo4j and Oracle readiness were not exercised. The B1-B3 regression command did not finish.
+- **INFERRED:** semantic similarity and graph rank may have different scales; configured 50/50 weights may need calibration against a real, approved index before enabling Neo4j.
+- The default HTTP SQL generator remains selected; B5 was not started.

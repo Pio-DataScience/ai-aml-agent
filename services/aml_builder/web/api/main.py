@@ -28,6 +28,9 @@ from services.aml_builder.web.services.settings import (
     settings,
 )
 from services.aml_builder.web.services.config_loader import load_catalogs
+from services.aml_builder.web.services.dwh_scenario.retrieval import readiness_report
+from services.aml_builder.web.services.dwh_scenario.retrieval import build_readiness_checks
+from services.aml_builder.web.services import oracle as oracle_service
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +48,23 @@ def ensure_service_auth_token(service_token: str | None) -> None:
         raise RuntimeError(
             "SERVICE_AUTH_TOKEN is required. Configure the same server-side token in the UI and Service A."
         )
+
+
+def _oracle_readiness() -> dict[str, str]:
+    """Check the initialized Oracle pool without exposing connection details."""
+    pool = oracle_service._pool
+    if pool is None:
+        return {"status": "down"}
+    connection = None
+    try:
+        connection = pool.acquire()
+        connection.ping()
+        return {"status": "ok"}
+    except Exception as exc:
+        return {"status": "down", "error": type(exc).__name__}
+    finally:
+        if connection is not None:
+            pool.release(connection)
 
 
 # =============================================================================
@@ -69,6 +89,18 @@ async def lifespan(app: FastAPI):
     setup_logging()
     initialize_io_executor()
     logger.info("[STARTUP] AML Builder service starting. port=%d", settings.SERVICE_PORT)
+
+    app.state.readiness_checks, graph_reranker = build_readiness_checks(
+        settings,
+        _oracle_readiness,
+    )
+    app.state.readiness_checks["neo4j"] = graph_reranker.readiness
+    app.state.graph_reranker = graph_reranker
+    app.state.startup_readiness = readiness_report(
+        app.state.readiness_checks["oracle"],
+        app.state.readiness_checks["chroma"],
+        app.state.readiness_checks["neo4j"],
+    )
 
     # Init sessions metadata table
     init_session_db()
@@ -98,6 +130,7 @@ async def lifespan(app: FastAPI):
         logger.error("[SHUTDOWN] Error closing checkpointer: %s", exc)
 
     logger.info("[SHUTDOWN] Closing Oracle pools.")
+    app.state.graph_reranker.close()
     close_pool()
     close_shadow_pool()
     close_io_executor()
@@ -153,8 +186,14 @@ async def health_check() -> dict:
     Returns:
         dict: Service status and version.
     """
+    checks = getattr(app.state, "readiness_checks", {})
+    report = readiness_report(
+        checks.get("oracle", {"status": "unknown"}),
+        checks.get("chroma", {"schema_tables": {"status": "unconfigured"}, "schema_columns": {"status": "unconfigured"}, "experience_templates": {"status": "empty"}}),
+        checks.get("neo4j", {"status": "disabled"}),
+    )
     return {
-        "status": "healthy",
+        **report,
         "service": settings.SERVICE_NAME,
         "version": "1.0.0",
     }

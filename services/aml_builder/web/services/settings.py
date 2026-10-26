@@ -12,6 +12,11 @@ from typing import Optional
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from services.aml_builder.web.services.dwh_scenario.collection_names import (
+    EXPERIENCE_COLLECTION_NAME,
+    SCHEMA_COLUMNS_COLLECTION_NAME,
+    SCHEMA_TABLES_COLLECTION_NAME,
+)
 
 
 class Settings(BaseSettings):
@@ -113,6 +118,22 @@ class Settings(BaseSettings):
     DWH_SQL_OPENROUTER_API_KEY: Optional[str] = None
     DWH_SQL_BASE_URL: Optional[str] = None
     DWH_SQL_TOOL_CALLING: bool = True
+    DWH_SQL_SCHEMA_TABLES_COLLECTION: str = SCHEMA_TABLES_COLLECTION_NAME
+    DWH_SQL_SCHEMA_COLUMNS_COLLECTION: str = SCHEMA_COLUMNS_COLLECTION_NAME
+    DWH_SQL_EXPERIENCE_COLLECTION: str = EXPERIENCE_COLLECTION_NAME
+    DWH_SQL_CHROMA_PERSIST_DIR: Optional[Path] = None
+    DWH_SQL_SCHEMA_TABLES_K: int = Field(default=20, ge=1, le=500)
+    DWH_SQL_SCHEMA_COLUMNS_K: int = Field(default=40, ge=1, le=500)
+    DWH_SQL_EXPERIENCE_K: int = Field(default=5, ge=1, le=100)
+    DWH_SQL_RETRIEVAL_THRESHOLD: float = Field(default=0.6, ge=0, le=1)
+    DWH_SQL_SEMANTIC_WEIGHT: float = Field(default=0.5, ge=0, le=1)
+    DWH_SQL_GRAPH_WEIGHT: float = Field(default=0.5, ge=0, le=1)
+    DWH_SQL_NEO4J_ENABLED: bool = False
+    DWH_SQL_NEO4J_URI: Optional[str] = None
+    DWH_SQL_NEO4J_USER: Optional[str] = None
+    DWH_SQL_NEO4J_PASSWORD: Optional[str] = None
+    DWH_SQL_NEO4J_TIMEOUT_SECONDS: float = Field(default=2.0, gt=0)
+    DWH_SQL_NEO4J_MAX_RESULTS: int = Field(default=100, ge=1, le=1000)
 
     # ─── Oracle DB (Primary) ──────────────────────────────────────────────────
     ORACLE_DSN: str = Field(

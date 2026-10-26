@@ -3,6 +3,12 @@
 All notable changes to this project are documented here.
 Format: `[DATE] TYPE: Description`
 
+## [2026-10-26] feat: Add B4 retrieval interfaces and readiness
+
+- Added institution-scoped, deterministic Chroma retrieval with index manifest compatibility checks, optional empty experience support, and lazy Neo4j reranking with Chroma fallback.
+- Added configurable collection identities, result limits, score threshold/weights and Neo4j lifecycle settings; exposed dependency readiness and replaced BL2/BL7 source probes with behavioral tests.
+- Documented B4 settings and offline verification; HTTP SQL generation remains the default.
+
 ## [2026-10-26] feat: Add B3 Oracle read repositories and SQL policy
 
 - Added an Oracle-dialect SQLGlot policy for single-statement read-only SQL, configured schema/object allowlists, required projection and confirmed-filter checks, and bind validation.

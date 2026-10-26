@@ -52,16 +52,22 @@ def test_bl1_readonly_policy_accepts_cte_and_uses_ast() -> None:
     assert 'startswith("select")' not in oracle
 
 
-@pytest.mark.xfail(
-    strict=True, reason="BL2: feedback and retrieval use different collection names"
-)
 def test_bl2_experience_collection_name_is_shared() -> None:
-    """Require feedback and search to reference the same collection constant."""
-    agent = _read_source("web/services/agent.py")
-    main = _read_source("web/api/main.py")
-    builder = _read_source("scripts/build_experience_index.py")
-    assert '"experience_templates"' not in agent + main + builder
-    assert '"experience_pairs"' not in agent + main + builder
+    """Require shared identity and safe behavior when experience is absent."""
+    from services.aml_builder.web.services.dwh_scenario.embeddings import EmbeddingIdentity
+    from services.aml_builder.web.services.dwh_scenario.retrieval import (
+        EXPERIENCE_COLLECTION_NAME, ChromaRetriever,
+    )
+
+    assert EXPERIENCE_COLLECTION_NAME == "experience_templates"
+    retriever = ChromaRetriever(
+        EXPERIENCE_COLLECTION_NAME,
+        lambda _name: (_ for _ in ()).throw(KeyError("missing")),
+        EmbeddingIdentity("openai", "test", 2, "test"),
+        optional_empty=True,
+    )
+    assert retriever.search("scenario", "inst-a", 3) == []
+    assert retriever.readiness()["status"] == "empty"
 
 
 def test_bl3_embedding_factory_receives_configured_key(
@@ -158,14 +164,19 @@ def test_bl6_local_embedding_cache_is_keyed_by_device(
     assert calls == [("fake", "cpu")]
 
 
-@pytest.mark.xfail(
-    strict=True, reason="BL7: health is static and startup failures are swallowed"
-)
 def test_bl7_health_exposes_dependency_readiness() -> None:
-    """Require dependency-level readiness instead of a static healthy response."""
-    main = _read_source("web/api/main.py")
-    assert 'status="ok"' not in main
-    assert '"neo4j"' in main.lower()
+    """Readiness exposes each dependency status, including optional graph outage."""
+    from services.aml_builder.web.services.dwh_scenario.retrieval import readiness_report
+
+    report = readiness_report(
+        lambda: {"status": "ok"},
+        {"schema_tables": lambda: {"status": "ok"}, "schema_columns": lambda: {"status": "down"}, "experience_templates": lambda: {"status": "empty"}},
+        lambda: {"status": "degraded"},
+    )
+    assert report["status"] == "down"
+    assert report["dependencies"]["schema_columns"]["status"] == "down"
+    assert report["dependencies"]["neo4j"]["status"] == "degraded"
+    assert readiness_report("ok", {"experience_templates": "empty"}, "disabled")["status"] == "ready"
 
 
 @pytest.mark.xfail(
