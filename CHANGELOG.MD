@@ -3,6 +3,14 @@
 All notable changes to this project are documented here.
 Format: `[DATE] TYPE: Description`
 
+## [2026-10-26] feat: Add B3 Oracle read repositories and SQL policy
+
+- Added an Oracle-dialect SQLGlot policy for single-statement read-only SQL, configured schema/object allowlists, required projection and confirmed-filter checks, and bind validation.
+- Added DWH dictionary read methods and candidate execution over Service A's pool with a bounded sample, truncation evidence, per-call timeout, and per-request statement/deadline budget.
+- Added offline fake-Oracle coverage for writes, comments, multi-statements, CTEs, identifiers, literals, binds, execution failures, and zero-row success; documented B3 and added allowed-object configuration.
+
+---
+
 ## [2026-10-26] feat: Add B2 role-aware providers and embedding adapters
 
 - Extended Settings with DWH SQL role/provider policies, separate timeout, retry, output-token, context, candidate-row and schema settings; added key names only to `.env.example`.

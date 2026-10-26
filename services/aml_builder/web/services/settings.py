@@ -106,6 +106,7 @@ class Settings(BaseSettings):
     DWH_SQL_CONTEXT_BUDGET: int = Field(default=32768, ge=1)
     DWH_SQL_MAX_CANDIDATE_ROWS: int = Field(default=100, ge=1)
     DWH_SQL_ALLOWED_SCHEMAS: tuple[str, ...] = ()
+    DWH_SQL_ALLOWED_OBJECTS: tuple[str, ...] = ()
     DWH_SQL_OPENAI_API_KEY: Optional[str] = None
     DWH_SQL_COHERE_API_KEY: Optional[str] = None
     DWH_SQL_SAMBANOVA_API_KEY: Optional[str] = None

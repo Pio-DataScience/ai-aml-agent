@@ -21,7 +21,7 @@ The application has four practical layers:
 3. **Domain and integration services:** pure intent normalization, catalog-driven filter resolution, SQL filter verification, code binding, metadata rules, window conversion, SQL extraction, hashing, deterministic deployment, version lifecycle rules, and the typed DWH SQL request/result contract live under `web/domain/`. The existing Service B HTTP SSE integration implements `ScenarioSqlGenerator` through `web/services/dwh_scenario/http_adapter.py`; it remains the default and preserves the existing wire envelope. DWH SQL role-specific LLM construction shares `web/services/llm_client.py`, and lazy embedding adapters live in `web/services/dwh_scenario/embeddings.py`; no in-process SQL generator is selected in B2. Oracle registry-v2 reads and transactional version/status/audit writes live under `web/adapters/oracle_repo.py`; Oracle-backed metadata lookups, plan rendering, explanation-code search, registry analytics, and alert processing remain under `web/services/`.
 4. **Persistence:** SQLite stores LangGraph checkpoints in `STATE_DIR/checkpoints.sqlite`; workflow, revision, card-audit, workflow-event, and composite-key chat-sidebar data live in `STATE_DIR/app_state.sqlite`. Oracle stores source/lookups, scenario definitions and governance records, and generated alerts.
 
-The service is synchronous at several integration boundaries despite async HTTP routes: Oracle helpers, OpenAI/LangChain invocations inside tools, the `httpx.Client` call to the text-to-SQL service, and alert-engine execution are synchronous. FastAPI engine routes invoke that work directly rather than enqueueing it.
+The service is synchronous at several integration boundaries despite async HTTP routes: Oracle helpers, OpenAI/LangChain invocations inside tools, the `httpx.Client` call to the text-to-SQL service, and alert-engine execution are synchronous. FastAPI engine routes invoke that work directly rather than enqueueing it. B3 adds opt-in DWH Oracle read repositories over A's pool and an Oracle-dialect SQL policy; the existing HTTP SQL adapter remains the active/default path until B6.
 
 ## 3. Repository map
 
@@ -53,6 +53,8 @@ The service is synchronous at several integration boundaries despite async HTTP 
 | `services/aml_builder/web/domain/policy.py` | YAML-backed role lookup, action authorization, and own-chat read scope. |
 | `services/aml_builder/web/domain/deploy_service.py` | Hard deployment guards, per-gate approval enforcement, shared deploy-blocker calculation, idempotent retry recovery, and receipt construction. |
 | `services/aml_builder/web/adapters/oracle_repo.py` | Create-if-missing registry-v2 schema, version/audit reads, and transactional exact-status, paired metadata-flag, parent supersession, and audit writes. |
+| `services/aml_builder/web/adapters/dwh_oracle_repo.py` | B3 read-only DWH dictionary lookups and bounded candidate execution over A's Oracle pool, with per-request budget and execution evidence. |
+| `services/aml_builder/web/domain/dwh_scenario/sql_policy.py` | B3 SQLGlot Oracle-dialect guard for single SELECT/CTE statements, allowlists, binds, required projection, and confirmed filters. |
 | `services/aml_builder/web/domain/versioning_service.py` | Deterministic create-version, rollback, retirement, registry seed validation, and stored-payload comparison rules. |
 | `services/aml_builder/web/services/schemas.py` | `AMLIntent` domain contract plus chat and SSE Pydantic models. |
 | `services/aml_builder/web/services/plan_renderer.py` | Deterministic Markdown plan renderer, including resolved filters. |
@@ -64,7 +66,7 @@ The service is synchronous at several integration boundaries despite async HTTP 
 | `services/aml_builder/web/services/alert_engine.py` | Loads active scenarios, executes saved SQL, and writes alert headers/details. |
 | `services/aml_builder/web/services/oracle.py` | Primary and shadow Oracle pools plus query/transaction helpers. |
 | `services/aml_builder/web/services/session_store.py` | Composite-key `chat_sessions` table and sidebar CRUD in the app-state database. |
-| `services/aml_builder/web/services/settings.py` | Pydantic environment configuration. |
+| `services/aml_builder/web/services/settings.py` | Pydantic environment configuration, including B3 DWH SQL schema/object allowlists and execution budgets. |
 | `services/aml_builder/web/services/dwh_scenario/embeddings.py` | Lazy OpenAI, Cohere and local embedding adapters with provider/model/device cache identity. |
 | `services/aml_builder/web/services/config_loader.py` | Pydantic validation and mtime-based reload for the four AML YAML catalogs. |
 | `config/aml_catalogs/` | Demo parameter, filter, policy, and UI-copy catalogs. |
