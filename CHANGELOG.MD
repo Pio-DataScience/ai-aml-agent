@@ -8,6 +8,7 @@ Format: `[DATE] TYPE: Description`
 - Added an Oracle-dialect SQLGlot policy for single-statement read-only SQL, configured schema/object allowlists, required projection and confirmed-filter checks, and bind validation.
 - Added DWH dictionary read methods and candidate execution over Service A's pool with a bounded sample, truncation evidence, per-call timeout, and per-request statement/deadline budget.
 - Added offline fake-Oracle coverage for writes, comments, multi-statements, CTEs, identifiers, literals, binds, execution failures, and zero-row success; documented B3 and added allowed-object configuration.
+- Diagnosed the pre-existing B1 Windows sandbox hang at Proactor `socketpair()` initialization and recorded bounded rerun results; no B3 fix was needed.
 
 ---
 

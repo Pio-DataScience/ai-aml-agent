@@ -26,6 +26,18 @@ The OWNER/DBA must confirm schema ownership and read grants before configuring t
 
 Tests use fake connections only. They cover unsafe statements, multi-statement input, comments, CTEs, quoted identifiers and aliases, literals, binds, confirmed filters, Oracle failures, statement budgets, truncation, and successful empty results.
 
+## B1 characterization limitation on Windows sandbox
+
+**VERIFIED:** The bounded verbose B1 run stalls in `test_http_adapter_preserves_existing_sse_payload_and_extracts_final_sql` at `services/aml_builder/tests/test_b1_dwh_contract.py:337`. With `faulthandler_timeout=5` and `faulthandler_exit_on_timeout=true`, the traceback stops in Python 3.14 Windows Proactor loop initialization: `asyncio.run()` → `new_event_loop()` → `_make_self_pipe()` → `_fallback_socketpair()` → `socket.accept()`. The test body and fake HTTP adapter are not reached. The same test file is unchanged from the B2 base, and B3 does not modify the adapter or this test. This matches the repository's previously documented sandbox restriction on asyncio socketpair creation; it is not a B3 regression.
+
+The bounded reruns passed: B1 synchronous cases `24 passed, 5 deselected`; B0 characterization `28 passed, 6 xfailed`; B0 evaluation `2 passed`; B2 provider factory `6 passed`; B3 tests `24 passed`. The five deselected B1 tests all exercise the HTTP adapter via `asyncio.run()` and share the same loop-creation limitation in this environment. The exact failing test can be diagnosed without an indefinite wait using:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -vv -s --tb=short -o faulthandler_timeout=5 -o faulthandler_exit_on_timeout=true services\aml_builder\tests\test_b1_dwh_contract.py -k test_http_adapter_preserves_existing_sse_payload_and_extracts_final_sql
+```
+
+The expected bounded result is a timeout traceback at `_fallback_socketpair`, not a normal test assertion failure. Do not weaken or delete the characterization tests; run them in an environment where the Windows event-loop socketpair can initialize.
+
 ## Rollback
 
 The B3 repository is not registered as the default SQL generator. Keep the HTTP adapter as the active path. To roll back B3 code, revert this package commit; no database state is changed by B3.
