@@ -20,9 +20,6 @@ SERVICE_B = (
     / "services"
     / "dwh_scenario_agent"
 )
-pytestmark = pytest.mark.skipif(
-    not SERVICE_B.is_dir(), reason="PioTech-AI checkout is not available"
-)
 
 
 def _read_source(relative_path: str) -> str:
@@ -40,16 +37,58 @@ def _read_source(relative_path: str) -> str:
     return (SERVICE_B / relative_path).read_text(encoding="utf-8")
 
 
-@pytest.mark.xfail(
-    strict=True, reason="BL1: Service B tool and Oracle guards disagree on CTEs"
-)
-def test_bl1_readonly_policy_accepts_cte_and_uses_ast() -> None:
-    """Require one AST policy to replace B's conflicting prefix checks."""
-    agent = _read_source("web/services/agent.py")
-    oracle = _read_source("web/services/oracle.py")
-    assert "sqlglot" in agent and "sqlglot" in oracle
-    assert "(SELECT|WITH)" not in agent
-    assert 'startswith("select")' not in oracle
+def test_bl1_readonly_policy_accepts_cte_and_repository_executes_it() -> None:
+    """A's AST guard and repository accept the same safe CTE SQL."""
+    from contextlib import contextmanager
+    from services.aml_builder.web.adapters.dwh_oracle_repo import (
+        DwhOracleRepository,
+        OracleRequestBudget,
+    )
+    from services.aml_builder.web.domain.dwh_scenario.sql_policy import (
+        validate_oracle_read,
+    )
+    from services.aml_builder.web.services.settings import settings
+
+    sql = "WITH q AS (SELECT CUS_NUM FROM BI_DWH.TX) SELECT CUS_NUM FROM q"
+    validate_oracle_read(sql, allowed_schemas=("BI_DWH",), allowed_objects=("TX",))
+
+    class Cursor:
+        description = [("CUS_NUM",)]
+        call_timeout = None
+        executed = None
+
+        def execute(self, statement, params):
+            self.executed = statement
+
+        def fetchmany(self, _size):
+            return [("1",)]
+
+    class Connection:
+        def cursor(self):
+            return cursor
+
+    @contextmanager
+    def provider():
+        yield Connection()
+
+    old_schema, old_objects = (
+        settings.DWH_SQL_ALLOWED_SCHEMAS,
+        settings.DWH_SQL_ALLOWED_OBJECTS,
+    )
+    settings.DWH_SQL_ALLOWED_SCHEMAS, settings.DWH_SQL_ALLOWED_OBJECTS = ("BI_DWH",), (
+        "TX",
+    )
+    cursor = Cursor()
+    try:
+        result = DwhOracleRepository(connection_provider=provider).execute_candidate(
+            sql, budget=OracleRequestBudget(max_statements=1)
+        )
+    finally:
+        settings.DWH_SQL_ALLOWED_SCHEMAS, settings.DWH_SQL_ALLOWED_OBJECTS = (
+            old_schema,
+            old_objects,
+        )
+    assert result.success and cursor.executed == sql
 
 
 def test_bl2_experience_collection_name_is_shared() -> None:
@@ -206,31 +245,121 @@ def test_bl7_health_exposes_dependency_readiness() -> None:
     )
 
 
-@pytest.mark.xfail(
-    strict=True, reason="BL8: index/graph rebuild removes the live version first"
-)
 def test_bl8_rebuild_preserves_current_index_and_graph_until_promotion() -> None:
-    """Require rebuild code to avoid dropping the active index or graph in place."""
-    index_builder = _read_source("scripts/build_hierarchical_index.py")
-    graph_builder = _read_source("scripts/build_graph_from_joins.py")
-    assert "delete_collection(" not in index_builder
-    assert "gds.graph.drop" not in graph_builder
-
-
-@pytest.mark.xfail(
-    strict=True, reason="BL9: candidate execution fetches all result rows"
-)
-def test_bl9_candidate_fetch_is_bounded_and_reports_truncation() -> None:
-    """Require candidate SQL retrieval to use bounded fetch and explicit truncation."""
-    module = ast.parse(_read_source("web/services/rag_adapter.py"))
-    execute = next(
-        node
-        for node in module.body
-        if isinstance(node, ast.FunctionDef) and node.name == "execute_sql_query"
+    """Staging validation precedes rename and the previous collection is retained."""
+    from services.aml_builder.web.services.dwh_scenario.toolchain import (
+        promote_versioned_collection,
     )
-    source = ast.unparse(execute)
-    assert ".fetchall(" not in source
-    assert "fetchmany" in source and "truncated" in source
+
+    manifest = {
+        "embedding_provider": "fake",
+        "embedding_model": "m",
+        "embedding_dimension": 2,
+        "embedding_fingerprint": "f",
+    }
+
+    class Collection:
+        def __init__(self, name, count, metadata):
+            self.name, self._count, self.metadata = name, count, metadata
+
+        def count(self):
+            return self._count
+
+        def modify(self, *, name):
+            del collections[self.name]
+            self.name = name
+            collections[name] = self
+
+    collections = {
+        "schema_tables": Collection("schema_tables", 1, manifest),
+        "staging": Collection("staging", 2, manifest),
+    }
+
+    class Client:
+        def get_collection(self, name):
+            return collections[name]
+
+    with pytest.raises(ValueError, match="count"):
+        promote_versioned_collection(
+            Client(),
+            temporary_name="staging",
+            live_name="schema_tables",
+            expected_count=1,
+            expected_manifest=manifest,
+        )
+    assert "schema_tables" in collections
+    collections["staging"]._count = 1
+    previous = promote_versioned_collection(
+        Client(),
+        temporary_name="staging",
+        live_name="schema_tables",
+        expected_count=1,
+        expected_manifest=manifest,
+    )
+    assert previous and previous in collections and "schema_tables" in collections
+
+
+def test_bl9_bounded_fetch_and_truncation_are_behaviorally_covered() -> None:
+    """B3 fake cursor proves bounded sample and explicit truncation evidence."""
+    from services.aml_builder.web.adapters.dwh_oracle_repo import OracleRequestBudget
+    from services.aml_builder.web.services.settings import settings
+    from tests.test_b3_oracle_sql_policy import FakeCursor, repository
+
+    old_limit = settings.DWH_SQL_MAX_CANDIDATE_ROWS
+    old_schemas = settings.DWH_SQL_ALLOWED_SCHEMAS
+    settings.DWH_SQL_MAX_CANDIDATE_ROWS = 2
+    settings.DWH_SQL_ALLOWED_SCHEMAS = ("BI_DWH",)
+    cursor = FakeCursor([(1,), (2,), (3,)])
+    try:
+        result = repository(cursor).execute_candidate(
+            "SELECT CUS_NUM FROM BI_DWH.TX", budget=OracleRequestBudget()
+        )
+    finally:
+        settings.DWH_SQL_MAX_CANDIDATE_ROWS = old_limit
+        settings.DWH_SQL_ALLOWED_SCHEMAS = old_schemas
+    assert result.rows == ((1,), (2,))
+    assert result.row_count == 2 and result.truncated is True
+    assert cursor.fetch_limit == 3
+
+
+def test_b7_scoped_sql_emits_backup_update_and_reverse_without_execution(
+    tmp_path,
+) -> None:
+    """Enrichment outputs scope every update by table and column, including project."""
+    from services.aml_builder.web.services.dwh_scenario.toolchain import (
+        scoped_enrichment_sql,
+    )
+
+    rows = [
+        {
+            "table_name": "TX_A",
+            "column_name": "STATUS",
+            "project_code": "AML",
+            "old": "old A",
+            "new": "new A",
+        },
+        {
+            "table_name": "TX_B",
+            "column_name": "STATUS",
+            "project_code": "AML",
+            "old": "old B",
+            "new": "new B",
+        },
+    ]
+    backup, updates, reverse = scoped_enrichment_sql(
+        rows, description_column="OBJECT_NAME", project_column="PROJECT_CODE"
+    )
+    assert (
+        "TABLE_NAME = 'TX_A' AND COLUMN_NAME = 'STATUS' AND PROJECT_CODE = 'AML'"
+        in updates
+    )
+    assert (
+        "TABLE_NAME = 'TX_B' AND COLUMN_NAME = 'STATUS' AND PROJECT_CODE = 'AML'"
+        in updates
+    )
+    assert "SELECT TABLE_NAME, COLUMN_NAME, OBJECT_NAME, PROJECT_CODE" in backup
+    assert "SET OBJECT_NAME = 'old A'" in reverse
+    assert "cursor.execute" not in updates
 
 
 def test_bl10_output_tokens_are_independent_of_context_budget(

@@ -1580,3 +1580,7 @@ Content-Type: application/json
 
 - Git repository initialized and pushed to `git@github.com:Pio-DataScience/ai-aml-agent.git`
 - `.gitignore`, `README.md`, `.vscode/settings.json` added
+# Unreleased
+
+- B7: added an isolated owner-run DWH toolchain for bounded dictionary export, versioned index staging/promotion, canonical experience-pair ingestion, scoped enrichment SQL emission, and join projection. HTTP remains the default; no B8 cutover or Service B changes.
+- B7: replaced BL1/BL9 static xfails with Service A behavioral coverage using its B3 SQL policy and bounded Oracle repository; added BL8 promotion preservation and B7 output-scope regressions.
