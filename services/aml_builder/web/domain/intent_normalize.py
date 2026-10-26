@@ -102,16 +102,21 @@ def normalize_intent(
         mark_default("baseline_window.unit")
 
     aggregation = intent.get("aggregation")
-    if isinstance(aggregation, dict):
-        for key, value in (
-            ("metric", "transaction_amount"),
-            ("function", "SUM"),
-            ("grain", "PER CUSTOMER PER DAY"),
-        ):
-            if not aggregation.get(key):
-                aggregation[key] = value
-                aggregation["provenance"] = "default"
-                mark_default(f"aggregation.{key}")
+    if not isinstance(aggregation, dict):
+        aggregation = {}
+        intent["aggregation"] = aggregation
+    for key, value in (
+        ("metric", "transaction_amount"),
+        ("function", "SUM"),
+    ):
+        if not aggregation.get(key):
+            aggregation[key] = value
+            aggregation["provenance"] = "default"
+            mark_default(f"aggregation.{key}")
+    if aggregation.get("grain") != "customer":
+        aggregation["grain"] = "customer"
+        aggregation["provenance"] = "default"
+        mark_default("aggregation.grain")
 
     transaction_type = intent.get("transaction_type")
     transaction_types = intent.get("transaction_types")

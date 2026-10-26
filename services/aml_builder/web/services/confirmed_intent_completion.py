@@ -37,8 +37,8 @@ def complete_confirmed_intent(
         A copied intent with only allowed descriptive paths updated.
 
     Raises:
-        No exceptions are propagated for model or parsing failures; the original
-        confirmed intent is returned so confirmation can still complete.
+        No exceptions are propagated for model or parsing failures; deterministic
+        descriptive fallbacks are used so confirmation can still complete.
     """
     completed = deepcopy(intent)
     fillable = _fillable_paths(completed)
@@ -46,10 +46,14 @@ def complete_confirmed_intent(
     if not fillable and not correctable:
         return completed
 
+    fallback_fields = _descriptive_fallbacks(completed)
     request = {
         "confirmed_intent": completed,
         "confirmed_card_values": _confirmation_snapshot(card_rows, submitted_values),
-        "eligible_generated_paths": fillable,
+        "eligible_generated_paths": sorted(fillable),
+        "fallback_examples": {
+            path: fallback_fields[path] for path in fillable if path in fallback_fields
+        },
         "correctable_user_text_paths": {
             path: _get_path(completed, path) for path in correctable
         },
@@ -68,8 +72,220 @@ def complete_confirmed_intent(
         _apply_generated(completed, generated, fillable)
         _apply_corrections(completed, corrections, correctable)
     except Exception:
-        logger.exception("Confirmed intent completion failed; preserving confirmed values.")
+        logger.exception(
+            "Confirmed intent completion failed; using descriptive fallbacks."
+        )
+
+    provenance = completed.get("field_provenance")
+    provenance = provenance if isinstance(provenance, dict) else {}
+    fallback_paths = set(fillable)
+    for path in ("scenario_name", "detection_logic"):
+        if provenance.get(path) != "stated":
+            fallback_paths.add(path)
+    for path in fallback_paths:
+        current = _get_path(completed, path)
+        machine_style_name = path == "scenario_name" and _is_machine_style_name(current)
+        if (_is_generic_text(current) or machine_style_name) and path in fallback_fields:
+            _set_path(completed, path, fallback_fields[path])
     return completed
+
+
+def _descriptive_fallbacks(intent: dict[str, Any]) -> dict[str, str]:
+    """Build plain-language descriptive text directly from confirmed values.
+
+    Args:
+        intent: Intent after applying the user's confirmed card values.
+
+    Returns:
+        Safe fallback text for scenario name and detection logic.
+    """
+    thresholds = intent.get("thresholds") or []
+    first_threshold = (
+        thresholds[0] if thresholds and isinstance(thresholds[0], dict) else {}
+    )
+    aggregation = intent.get("aggregation")
+    aggregation = aggregation if isinstance(aggregation, dict) else {}
+    field = str(
+        first_threshold.get("field") or aggregation.get("metric") or "activity"
+    )
+    metric = _friendly_value(field)
+    function = str(aggregation.get("function") or "").strip().casefold()
+    if "transaction_count" in field.casefold():
+        measure = "count transactions"
+        if first_threshold.get("value_from") is not None:
+            name_metric = (
+                "High Transaction Frequency"
+                if str(first_threshold.get("operator") or ">=") in {">", ">="}
+                else "Low Transaction Frequency"
+            )
+        else:
+            name_metric = "Transaction Frequency"
+    elif "count" in field.casefold():
+        measure = (
+            "count transactions"
+            if "transaction" in field.casefold()
+            else f"count {metric}"
+        )
+        name_metric = metric
+    elif function == "count":
+        measure = f"count {metric}"
+        name_metric = f"{metric} Count"
+    elif function in {"sum", "total"}:
+        measure = f"calculate the total {metric}"
+        name_metric = f"Total {metric}"
+    else:
+        measure = f"monitor {metric}"
+        name_metric = metric
+
+    transaction_types = intent.get("transaction_types") or []
+    transaction_type = intent.get("transaction_type")
+    scope = ", ".join(str(item) for item in transaction_types if item)
+    if not scope and transaction_type:
+        scope = str(transaction_type)
+    scope_phrase = f"{scope} transactions" if scope else "all transaction types"
+
+    time_window = intent.get("time_window")
+    window_phrase = ""
+    window_label = ""
+    if isinstance(time_window, dict) and time_window.get("value") is not None:
+        amount = str(time_window.get("value"))
+        unit = _friendly_value(str(time_window.get("unit") or "day"))
+        if amount == "1":
+            unit = unit.removesuffix("s")
+        rolling = time_window.get("is_rolling", True)
+        window_phrase = (
+            f"over a {'rolling' if rolling else 'calendar'} {amount}-{unit} period"
+        )
+        window_label = f" ({amount} {unit.title()})"
+
+    grain = aggregation.get("grain")
+    grain_phrase = (
+        f" at the {str(grain).replace('_', ' ').casefold()} level" if grain else ""
+    )
+    parts = [f"Monitor {scope_phrase}{grain_phrase} and {measure}"]
+    if window_phrase:
+        parts[0] += f" {window_phrase}"
+    trigger = _trigger_phrase(first_threshold)
+    if trigger:
+        parts.append(trigger)
+    elif not first_threshold or first_threshold.get("value_from") is None:
+        parts.append("The trigger value has not been set")
+
+    filters = [
+        item
+        for item in intent.get("resolved_filters") or []
+        if isinstance(item, dict) and item.get("status") == "resolved"
+    ]
+    for item in filters:
+        values = item.get("values") or []
+        if values:
+            label = _friendly_value(str(item.get("dimension") or "condition"))
+            parts.append(
+                f"limited to {label}: {', '.join(str(value) for value in values)}"
+            )
+    exclusions = intent.get("exclusions") or []
+    if isinstance(exclusions, str):
+        exclusions = [exclusions]
+    if exclusions:
+        parts.append(f"excluding {', '.join(str(item) for item in exclusions)}")
+
+    scenario_type = _friendly_value(str(intent.get("scenario_type") or "AML")).title()
+    if name_metric in {
+        "High Transaction Frequency",
+        "Low Transaction Frequency",
+        "Transaction Frequency",
+    }:
+        name = f"{name_metric}{window_label}"
+    elif scenario_type.casefold() in name_metric.casefold():
+        name = f"{name_metric.title()}{window_label}"
+    else:
+        name = f"{scenario_type} {name_metric.title()} Monitoring{window_label}"
+    return {
+        "scenario_name": name[:_FILL_LIMITS["scenario_name"]],
+        "detection_logic": ". ".join(part.rstrip(".") for part in parts) + ".",
+    }
+
+
+def _trigger_phrase(threshold: dict[str, Any]) -> str:
+    """Describe a numeric threshold when the confirmed intent contains one."""
+    value = threshold.get("value_from")
+    if value is None:
+        return ""
+    operator = str(threshold.get("operator") or ">")
+    field = _friendly_value(str(threshold.get("field") or "activity"))
+    if operator.casefold() == "between" and threshold.get("value_to") is not None:
+        condition = f"is between {value} and {threshold['value_to']}"
+    else:
+        operator_words = {
+            ">": "exceeds",
+            ">=": "is at least",
+            "<": "is below",
+            "<=": "does not exceed",
+            "=": "equals",
+        }
+        condition = f"{operator_words.get(operator, operator)} {value}"
+    return f"Flag activity when {field} {condition}"
+
+
+def _friendly_value(value: str) -> str:
+    """Convert a catalog value or enum into readable words."""
+    return " ".join(value.replace("_", " ").split()).casefold()
+
+
+def _is_generic_text(value: Any) -> bool:
+    """Identify empty or non-descriptive completion output."""
+    if not isinstance(value, str) or not value.strip():
+        return True
+    lowered = value.casefold()
+    return any(
+        phrase in lowered
+        for phrase in (
+            "unspecified",
+            "without specifying",
+            "no business rules",
+            "no specific business rules",
+            "no business scenario details",
+            "no scenario details",
+            "no aml detection logic",
+            "aml detection scenario",
+            "inferred aml scenario",
+            "user requested one aml scenario",
+            "new scenario",
+            "new aml scenario",
+            "newly requested aml scenario",
+            "no additional business constraints",
+            "no additional business details",
+            "no additional constraints provided",
+            "does not specify",
+            "does not include",
+            "no aml behavior",
+            "no behavior",
+            "no transaction pattern",
+            "placeholder intent",
+            "awaiting a concrete scenario",
+        )
+    )
+
+
+def _is_machine_style_name(value: Any) -> bool:
+    """Reject names that expose query syntax instead of describing a scenario."""
+    if not isinstance(value, str):
+        return True
+    lowered = value.casefold()
+    return any(
+        marker in lowered
+        for marker in (
+            ":",
+            ">=",
+            "<=",
+            "transaction_count",
+            "transaction count monitoring",
+            "customer transaction count",
+            "count of",
+            "rolling",
+            "(all)",
+        )
+    )
 
 
 def _fillable_paths(intent: dict[str, Any]) -> set[str]:
@@ -80,7 +296,9 @@ def _fillable_paths(intent: dict[str, Any]) -> set[str]:
     for path in _FILL_LIMITS:
         existing = _get_path(intent, path)
         source = provenance.get(path)
-        generic = path == "scenario_name" and existing == "AML Detection Scenario"
+        generic = _is_generic_text(existing) or (
+            path == "scenario_name" and _is_machine_style_name(existing)
+        )
         if not isinstance(existing, str) or not existing.strip() or generic:
             paths.add(path)
         elif source in _MODEL_GENERATED_PROVENANCE:

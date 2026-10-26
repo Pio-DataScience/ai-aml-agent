@@ -5,6 +5,38 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-10-25] feat: Add AML scope guard to agent prompt
+
+- Make the AML Builder boundary exclusive, require classification before every response or tool call, and define the exact redirect for unrelated requests. Clarify ambiguous requests without tools, preserve legitimate informal requests and contextual follow-ups, use one fixed sentence for immediate emergencies, and prevent earlier assistant mistakes from expanding scope.
+
+## [2026-10-25] ux: Hide scenario type from implementation plan overview
+
+- Removed the redundant Scenario Type row from rendered plans while retaining `scenario_type` in intent data, signatures, conflict checks, and persistence metadata.
+
+## [2026-10-25] fix: Recover confirmed scenario descriptions when completion fails
+
+- Avoided model-specific OpenAI `reasoning_effort` errors by omitting the parameter by default and treating configured `none` as omitted; explicit values remain available when supported by the selected model.
+- Expanded placeholder detection so generic names and descriptions such as “Inferred AML Scenario” and “placeholder intent” are replaced with readable text derived from confirmed card values.
+- Constrained generated scenario titles to short business language and replaced titles that expose field/operator syntax with a concise transaction-frequency name.
+- Made generic existing names and descriptions eligible for full completion, including “New AML Scenario” and “no additional business constraints” placeholders that were previously restricted to typo-only corrections.
+
+## [2026-10-25] fix: Enforce customer-level scenario grain
+
+- Fixed analysis grain to `customer` during intent normalization and card confirmation; omitted grain from new/editable and confirmed parameter cards while keeping it visible in plans.
+- Updated intent extraction and completion prompts to follow the customer-grain rule; legacy pending-card submissions no longer require a grain value.
+
+## [2026-10-25] fix: Serialize completion paths and preserve confirmed card values
+
+- Serialize eligible LLM completion paths as JSON lists and replace generic no-logic descriptions with parameter-grounded fallback text.
+- Store submitted values in both `value` and `final_value` on confirmed card snapshots while preserving the original value separately.
+- Documented the invariant in the P6 card guide and canonical project overview.
+
+## [2026-10-25] fix: Generate useful plan descriptions from confirmed parameters
+
+- Tightened confirmation-time LLM instructions and added parameter-grounded fallback text when the model returns empty or generic scenario names/descriptions.
+- Fixed confirmed metric and comparator mapping so values populate the plan aggregation profile and threshold structure, including when the incoming intent had no threshold object.
+- Updated `Docs/confirmed_intent_completion.md` with the fallback and parameter mapping behavior.
+
 ## [2026-10-21] feat: Complete descriptive intent from confirmed parameters
 
 - Added a constrained fast-LLM pass after parameter confirmation to correct only trivial spelling/grammar issues in scenario name and detection description, and generate eligible missing descriptive fields from the confirmed intent; structured business parameters remain unchanged.

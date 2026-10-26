@@ -82,7 +82,7 @@ class Settings(BaseSettings):
     )
     LLM_REASONING_EFFORT: Optional[str] = Field(
         default=None,
-        description="Reasoning effort ('none', 'low', 'medium', 'high'). Auto-defaulted for reasoning models.",
+        description="Optional model-specific reasoning effort. Leave unset or use 'none' to omit it; accepted values vary by model.",
     )
 
     # ─── Oracle DB (Primary) ──────────────────────────────────────────────────

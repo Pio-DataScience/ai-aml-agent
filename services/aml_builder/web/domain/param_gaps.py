@@ -55,6 +55,8 @@ def build_param_rows(
     rows: list[dict[str, Any]] = []
 
     for key, spec in params.items():
+        if key == "grain":
+            continue
         if key in {"threshold", "comparator"}:
             if key == "comparator":
                 continue
@@ -180,6 +182,8 @@ def ready_for_handoff(rows: list[dict[str, Any]], catalog: Any) -> bool:
     for row in rows:
         if row.get("read_only"):
             continue
+        if row.get("key") == "grain":
+            continue
         if row.get("kind") == "filter" and row.get("status") != "resolved":
             return False
         if row.get("validation_errors"):
@@ -205,6 +209,8 @@ def validate_confirmed_values(
         if row.get("read_only"):
             continue
         key = str(row["key"])
+        if key == "grain":
+            continue
         if row.get("kind") == "filter":
             submitted = values.get(key)
             if submitted is None:
@@ -276,7 +282,8 @@ def apply_confirmed_params(
         A new intent mapping with resolved values and cleared clarification state.
     """
     result = deepcopy(intent)
-    result.setdefault("field_provenance", {})
+    if not isinstance(result.get("field_provenance"), dict):
+        result["field_provenance"] = {}
     result.setdefault("applied_defaults", [])
     defaults = list(result.get("applied_defaults") or [])
     thresholds = result.setdefault("thresholds", [])
@@ -352,6 +359,16 @@ def apply_confirmed_params(
         if choice == "accepted_default":
             defaults.append(f"{key}: {value}")
     result["applied_defaults"] = list(dict.fromkeys(defaults))
+    aggregation = _ensure_aggregation(result)
+    if aggregation.get("grain") != "customer":
+        aggregation["grain"] = "customer"
+        aggregation["provenance"] = "default"
+        result["field_provenance"]["aggregation.grain"] = "default"
+        result["applied_defaults"] = list(
+            dict.fromkeys(
+                [*result["applied_defaults"], "aggregation.grain: customer"]
+            )
+        )
     result["resolved_filters"] = [
         item for item in result.get("resolved_filters", []) if isinstance(item, dict)
     ]
@@ -410,17 +427,14 @@ def _set_intent_value(intent: dict[str, Any], key: str, value: Any) -> None:
     if key == "scenario_type":
         intent[key] = value
     elif key == "grain":
-        intent.setdefault("aggregation", {})["grain"] = value
+        _ensure_aggregation(intent)["grain"] = value
     elif key == "aggregation":
-        intent.setdefault("aggregation", {})["function"] = value
+        _ensure_aggregation(intent)["function"] = value
     elif key == "metric":
-        thresholds = intent.setdefault("thresholds", [])
-        if thresholds:
-            thresholds[0]["field"] = value
+        _ensure_aggregation(intent)["metric"] = value
+        _ensure_first_threshold(intent)["field"] = value
     elif key == "comparator":
-        thresholds = intent.setdefault("thresholds", [])
-        if thresholds:
-            thresholds[0]["operator"] = value
+        _ensure_first_threshold(intent)["operator"] = value
     elif key == "window":
         intent["time_window"] = deepcopy(value)
         if isinstance(intent["time_window"], dict):
@@ -448,6 +462,30 @@ def _set_intent_value(intent: dict[str, Any], key: str, value: Any) -> None:
         thresholds = intent.setdefault("thresholds", [])
         if thresholds:
             thresholds[0]["value_from"] = value
+
+
+def _ensure_aggregation(intent: dict[str, Any]) -> dict[str, Any]:
+    """Return the aggregation mapping, replacing an absent or invalid value."""
+    aggregation = intent.get("aggregation")
+    if not isinstance(aggregation, dict):
+        aggregation = {}
+        intent["aggregation"] = aggregation
+    return aggregation
+
+
+def _ensure_first_threshold(intent: dict[str, Any]) -> dict[str, Any]:
+    """Return the first threshold, creating its standard aggregate shape."""
+    thresholds = intent.setdefault("thresholds", [])
+    if not thresholds:
+        thresholds.append(
+            {
+                "field": "transaction_amount",
+                "operator": ">",
+                "value_from": None,
+                "target_scope": "AGGREGATE",
+            }
+        )
+    return thresholds[0]
 
 
 def _catalog_dict(catalog: Any) -> dict[str, Any]:

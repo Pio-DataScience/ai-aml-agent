@@ -21,6 +21,8 @@ Output ONLY a valid JSON object matching AMLIntent schema with mandatory root ke
 
 For `field_provenance`, mark `scenario_name` as `stated` only when the user explicitly gives an exact desired title; otherwise mark it `inferred`. Mark `detection_logic` as `inferred` when you summarize the request, and `stated` only when the user requests exact wording. For `baseline_window.description`, mark user-specified text `stated`, derived text `inferred`, and fallback values `default`. Preserve these provenance markers in the output.
 
+The analysis grain is a fixed business rule: always set `aggregation.grain` to `customer`. Do not ask the user to choose a grain or infer account-level or transaction-level analysis, even if the request mentions those entities. Transaction and account data may still supply measures or filters evaluated for each customer.
+
 {{FILTER_DIMENSIONS}}
 
 [CORE EXTRACTION LAWS]
@@ -47,7 +49,7 @@ For `field_provenance`, mark `scenario_name` as `stated` only when the user expl
 4. CUMULATIVE VOLUME VS SINGLE TRANSACTION GRAIN:
    - When the scenario mentions 'accumulative', 'cumulative', 'total volume', 'sum of transactions', or aggregation over a time window (e.g. '1 Month', '7 Days'):
      * 'scenario_type' MUST be 'CUSTOMER' or 'ACCOUNT' (NEVER 'TRANSACTION').
-     * 'aggregation' MUST have 'metric': 'cumulative_transaction_volume' (or 'transaction_amount'), 'function': 'SUM', and 'grain': 'PER <ENTITY> PER <WINDOW>'.
+     * 'aggregation' MUST have 'metric': 'cumulative_transaction_volume' (or 'transaction_amount'), 'function': 'SUM', and 'grain': 'customer'.
      * The monetary threshold MUST have 'field': 'cumulative_transaction_volume', 'target_scope': 'AGGREGATE'.
 
 5. MANDATORY SCOPE CLASSIFICATION (target_scope):

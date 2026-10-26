@@ -385,12 +385,16 @@ def resolved_card_rows(
         snapshot = dict(row)
         submitted = values.get(str(row.get("key")))
         if isinstance(submitted, dict) and "value" in submitted:
+            snapshot["original_value"] = row.get("value")
+            snapshot["value"] = submitted.get("value")
             snapshot["choice"] = submitted.get("choice", "user_input")
             snapshot["final_value"] = submitted.get("value")
             snapshot["provenance"] = submitted.get("provenance") or snapshot.get(
                 "provenance"
             )
         elif submitted is not None:
+            snapshot["original_value"] = row.get("value")
+            snapshot["value"] = submitted
             snapshot["choice"] = "user_input"
             snapshot["final_value"] = submitted
         snapshots.append(snapshot)

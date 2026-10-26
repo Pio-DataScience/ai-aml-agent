@@ -63,12 +63,12 @@ def build_llm(fast: bool = False) -> ChatOpenAI:
             )
             kwargs[token_parameter] = settings.LLM_MAX_TOKENS
 
-        # Configure reasoning_effort
-        if settings.LLM_REASONING_EFFORT:
-            kwargs["reasoning_effort"] = settings.LLM_REASONING_EFFORT
-        elif is_reasoning_model:
-            # Default to 'none' for function-calling compatibility in chat completions
-            kwargs["reasoning_effort"] = "none"
+        # Reasoning-effort values vary across models. Treat "none" as a
+        # request to omit the parameter and leave it unset by default so the
+        # selected model can use its own compatible default.
+        configured_effort = (settings.LLM_REASONING_EFFORT or "").strip().casefold()
+        if configured_effort and configured_effort != "none":
+            kwargs["reasoning_effort"] = configured_effort
 
         # Some strict reasoning models (like o1-preview, o1-mini) reject custom temperature
         is_strict_fixed_temp = any(

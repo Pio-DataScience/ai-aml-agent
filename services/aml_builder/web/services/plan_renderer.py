@@ -87,7 +87,6 @@ def build_plan_markdown(
     lines.append("| Field | Value |")
     lines.append("|---|---|")
     lines.append(f"| **Scenario Name** | {intent.get('scenario_name', '—')} |")
-    lines.append(f"| **Scenario Type** | `{intent.get('scenario_type', '—')}` |")
     tx_types = intent.get("transaction_types")
     tx_type = intent.get("transaction_type")
     if tx_types and isinstance(tx_types, list):
