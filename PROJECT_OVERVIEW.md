@@ -235,7 +235,7 @@ P7 includes resolved filters in the card-confirmed revision and its parameter ha
 
 ### SQL generation and shadow testing
 
-`tools.py:execute_oracle_dwh_shadow_test` sends an `AML_SCENARIO_GENERATION` intent payload to `PIOTECH_AI_URL` using HTTP SSE. It prefers a `final_answer` event and otherwise concatenates `content` events, then `sql_extraction.py:extract_sql` extracts the last plausible `SELECT`/`WITH` query.
+`tools.py:execute_oracle_dwh_shadow_test` constructs a typed `ScenarioSqlRequest` and selects a generator through `DWH_SQL_MODE` (`http` default, `inprocess`, or `shadow`). The HTTP adapter sends an `AML_SCENARIO_GENERATION` payload to `PIOTECH_AI_URL` using SSE and preserves its existing wire behavior. In-process mode lazily constructs B5's local generator. Shadow mode is forbidden when `DWH_SQL_ENVIRONMENT=production`, runs local generation under `DWH_SQL_SHADOW_TIMEOUT_SECONDS`, records redacted structural comparisons, and always returns the HTTP result; local approval metadata and SQL cannot enter the active approval or deployment path. See `Docs/B6_mode_selection_shadow_comparison.md`.
 
 The tool runs:
 

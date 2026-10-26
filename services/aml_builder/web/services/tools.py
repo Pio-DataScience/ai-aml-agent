@@ -58,6 +58,7 @@ from services.aml_builder.web.domain.dwh_scenario.contracts import ScenarioSqlRe
 from services.aml_builder.web.services.dwh_scenario.http_adapter import (
     HttpScenarioSqlGenerator,
 )
+from services.aml_builder.web.services.dwh_scenario.mode import generate_by_mode
 from services.aml_builder.web.workflow.runtime import get_workflow_repo
 from services.aml_builder.web.services.conflict_check import make_conflict_checker
 from services.aml_builder.web.services.scenario_metadata import (
@@ -581,7 +582,16 @@ async def execute_oracle_dwh_shadow_test(
     except ValueError as exc:
         return json.dumps({"error": str(exc)})
 
-    sql_result = await HttpScenarioSqlGenerator(catalogs.filters).generate(request)
+    try:
+        sql_result = await generate_by_mode(
+            request,
+            http_generator=HttpScenarioSqlGenerator(catalogs.filters),
+        )
+    except ValueError as exc:
+        return json.dumps({"error": str(exc)})
+    except Exception as exc:
+        logger.error("[TOOL: SQL_BRIDGE] Generator mode failed: %s", type(exc).__name__)
+        return json.dumps({"error": "Configured SQL generator is unavailable."})
     if sql_result.error:
         if sql_result.error.startswith("PioTech AI did not return"):
             logger.error(

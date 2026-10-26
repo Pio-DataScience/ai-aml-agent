@@ -3,6 +3,12 @@
 All notable changes to this project are documented here.
 Format: `[DATE] TYPE: Description`
 
+## [2026-10-26] feat: Add B6 generator mode selection and shadow comparison
+
+- Added `DWH_SQL_MODE` (`http` default, `inprocess`, `shadow`) and a production guard for shadow mode; local dependencies are initialized only when the local path is selected.
+- Wired the existing scenario-generation tool through the selector. Shadow mode runs bounded local generation, logs only structural and operational comparison metadata, and returns the HTTP result regardless of local failure; local SQL and approval state never enter the active flow.
+- Added offline mode, timeout, failure-isolation, production-guard, invalid-config, and comparison tests plus a synthetic side-by-side evaluation report command; documented B6 settings and behavior.
+
 ## [2026-10-26] feat: Add B5 local DWH SQL orchestration
 
 - Added an injected, explicitly compiled LangGraph entry point and bounded generator/critic pipeline using B2 provider roles, B4 retrieval and B3 Oracle SQL policy/repository interfaces; the HTTP adapter remains active and unchanged.

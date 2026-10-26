@@ -8,7 +8,7 @@ Never hardcode secrets or connection strings — per SOLID Dependency Inversion.
 from functools import lru_cache
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -91,6 +91,9 @@ class Settings(BaseSettings):
     )
 
     # ─── DWH SQL provider policy ───────────────────────────────────────────
+    DWH_SQL_MODE: Literal["http", "inprocess", "shadow"] = "http"
+    DWH_SQL_ENVIRONMENT: Literal["development", "test", "staging", "production"] = "development"
+    DWH_SQL_SHADOW_TIMEOUT_SECONDS: float = Field(default=30.0, gt=0)
     DWH_SQL_GENERATOR_PROVIDER: Optional[str] = None
     DWH_SQL_GENERATOR_MODEL: Optional[str] = None
     DWH_SQL_CRITIC_PROVIDER: Optional[str] = None
