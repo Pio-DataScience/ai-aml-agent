@@ -25,6 +25,58 @@ from services.aml_builder.web.services.schemas import AMLIntent
 from services.aml_builder.web.services.dwh_scenario import http_adapter
 
 
+def _install_fake_service_b(
+    monkeypatch, lines, *, request_error=None, cancel_on_response=False
+):
+    """Install an offline SSE client and return the captured request."""
+    observed = {}
+
+    class FakeResponse:
+        async def __aenter__(self):
+            if cancel_on_response:
+                raise asyncio.CancelledError
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        def raise_for_status(self):
+            if request_error:
+                raise request_error
+
+        async def aiter_lines(self):
+            for line in lines:
+                yield line
+
+    class FakeClient:
+        def __init__(self, timeout):
+            observed["timeout"] = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        def stream(self, method, url, *, json, headers):
+            observed.update(method=method, url=url, payload=json, headers=headers)
+            return FakeResponse()
+
+    monkeypatch.setattr(http_adapter.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(
+        http_adapter,
+        "load_catalogs",
+        lambda _path: SimpleNamespace(filters={"dimensions": {}}),
+    )
+    monkeypatch.setattr(http_adapter.settings, "PIOTECH_AI_TIMEOUT_SECONDS", 17)
+    monkeypatch.setattr(
+        http_adapter.settings, "PIOTECH_AI_URL", "http://offline.test/chat/stream"
+    )
+    monkeypatch.setattr(http_adapter.settings, "PIOTECH_AI_USER_ID", "tester")
+    monkeypatch.setattr(http_adapter.settings, "PIOTECH_AI_PROJECT_ID", "project")
+    return observed
+
+
 def _intent(**updates):
     """Build a valid base intent, applying a requested contract variant."""
     payload = {
@@ -251,63 +303,36 @@ def test_http_adapter_preserves_existing_sse_payload_and_extracts_final_sql(
     monkeypatch,
 ):
     """Exercise the adapter offline with a fake SSE response."""
-    observed = {}
-
-    class FakeResponse:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *_args):
-            return None
-
-        def raise_for_status(self):
-            return None
-
-        async def aiter_lines(self):
-            yield 'data: {"type":"content","text":"ignored"}'
-            yield 'data: {"type":"final_answer","text":"SELECT CUS_NUM FROM TX"}'
-            yield "data: [DONE]"
-
-    class FakeClient:
-        def __init__(self, timeout):
-            observed["timeout"] = timeout
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *_args):
-            return None
-
-        def stream(self, method, url, *, json, headers):
-            observed.update(method=method, url=url, payload=json, headers=headers)
-            return FakeResponse()
-
-    monkeypatch.setattr(http_adapter.httpx, "AsyncClient", FakeClient)
-    monkeypatch.setattr(
-        http_adapter, "build_service_b_headers", lambda *_: {"X-Test": "1"}
+    observed = _install_fake_service_b(
+        monkeypatch,
+        [
+            'data: {"type":"content","text":"ignored"}',
+            "data: not-json",
+            'data: {"type":"final_answer","text":"SELECT CUS_NUM FROM TX"}',
+            "data: [DONE]",
+        ],
     )
-    monkeypatch.setattr(
-        http_adapter,
-        "load_catalogs",
-        lambda _path: SimpleNamespace(filters={"dimensions": {}}),
-    )
-    monkeypatch.setattr(http_adapter.settings, "PIOTECH_AI_TIMEOUT_SECONDS", 17)
-    monkeypatch.setattr(
-        http_adapter.settings, "PIOTECH_AI_URL", "http://offline.test/chat/stream"
-    )
-    monkeypatch.setattr(http_adapter.settings, "PIOTECH_AI_USER_ID", "tester")
-    monkeypatch.setattr(http_adapter.settings, "PIOTECH_AI_PROJECT_ID", "project")
 
     confirmed_filter = {
         "dimension": "country",
+        "raw_mention": "Jordan",
+        "polarity": "positive",
+        "level": "transaction",
         "status": "resolved",
+        "options": [],
         "values": ["JO"],
         "confidence": None,
+        "provenance": "catalog_resolver",
+        "audit_choice": "user_input",
         "target": {"table": "TX", "column": "COUNTRY_CODE"},
+        "match": "any_of",
+        "polarity_allowed": False,
     }
+    intent = _intent(resolved_filters=[confirmed_filter])
     request = ScenarioSqlRequest(
-        intent=_intent(resolved_filters=[confirmed_filter]),
+        intent=intent,
         confirmed_filters=[confirmed_filter],
+        version_context={"request_id": "req-7", "correlation_id": "corr-9"},
     )
     result = asyncio.run(http_adapter.HttpScenarioSqlGenerator().generate(request))
 
@@ -320,8 +345,74 @@ def test_http_adapter_preserves_existing_sse_payload_and_extracts_final_sql(
     assert set(body) == {"messages", "metadata", "reasoning_mode"}
     assert body["metadata"]["user_id"] == "tester"
     assert body["metadata"]["project_id"] == "project"
+    assert body["metadata"]["chat_id"].startswith("aml_tool_")
     assert body["reasoning_mode"] == "instant"
+    assert observed["headers"] == {
+        "Accept": "text/event-stream",
+        "Content-Type": "application/json",
+        "X-Request-ID": "req-7",
+        "X-Correlation-ID": "corr-9",
+    }
     content = json.loads(body["messages"][0]["content"])
     assert content["request_type"] == "AML_SCENARIO_GENERATION"
     assert content["intent"]["scenario_name"] == "Synthetic AML case"
     assert content["intent"]["resolved_filters"][0]["confidence"] is None
+    baseline_intent = build_service_b_intent(
+        intent.model_dump(mode="json", exclude_none=False), {"dimensions": {}}
+    )
+    assert content["intent"] == baseline_intent
+
+
+def test_http_adapter_keeps_content_sse_fallback_and_sql_identity(monkeypatch):
+    """Use content events when final_answer has no usable SQL, as in B0."""
+    _install_fake_service_b(
+        monkeypatch,
+        [
+            'data: {"type":"final_answer","text":"not a query"}',
+            'data: {"type":"content","text":"SELECT CUS_NUM FROM TX;"}',
+            "data: [DONE]",
+            'data: {"type":"content","text":"SELECT WRONG FROM TX"}',
+        ],
+    )
+    request = ScenarioSqlRequest(intent=_intent())
+
+    result = asyncio.run(http_adapter.HttpScenarioSqlGenerator().generate(request))
+
+    assert result.sql == "SELECT CUS_NUM FROM TX"
+    assert result.approved is False
+
+
+def test_http_adapter_translates_http_error_to_existing_error_result(monkeypatch):
+    """Preserve the B0 HTTP-error text without issuing a network request."""
+    error = http_adapter.httpx.ConnectError("offline fixture")
+    _install_fake_service_b(monkeypatch, [], request_error=error)
+    request = ScenarioSqlRequest(intent=_intent())
+
+    result = asyncio.run(http_adapter.HttpScenarioSqlGenerator().generate(request))
+
+    assert result.error == "PioTech AI HTTP error: offline fixture"
+
+
+def test_http_adapter_keeps_missing_sql_error_text(monkeypatch):
+    """Preserve the B0 extraction failure when SSE contains no usable SQL."""
+    _install_fake_service_b(
+        monkeypatch,
+        ['data: {"type":"content","text":"No query returned."}', "data: [DONE]"],
+    )
+    request = ScenarioSqlRequest(intent=_intent())
+
+    result = asyncio.run(http_adapter.HttpScenarioSqlGenerator().generate(request))
+
+    assert result.error == (
+        "PioTech AI did not return a valid SQL query. "
+        "Try refining the scenario intent."
+    )
+
+
+def test_http_adapter_does_not_swallow_cancellation(monkeypatch):
+    """Propagate task cancellation rather than converting it to an HTTP error."""
+    _install_fake_service_b(monkeypatch, [], cancel_on_response=True)
+    request = ScenarioSqlRequest(intent=_intent())
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(http_adapter.HttpScenarioSqlGenerator().generate(request))

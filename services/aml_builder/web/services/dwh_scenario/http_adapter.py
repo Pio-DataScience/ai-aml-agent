@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from typing import Any
 
 import httpx
 
@@ -27,6 +28,15 @@ logger = logging.getLogger(__name__)
 class HttpScenarioSqlGenerator:
     """Call the existing Service B endpoint using its established SSE envelope."""
 
+    def __init__(self, filter_catalog: Any | None = None) -> None:
+        """Create the adapter with an optional already-loaded filter catalog.
+
+        Args:
+            filter_catalog: Catalog used to enrich filters; supplying it lets the
+                active tool reuse its pre-request catalog snapshot.
+        """
+        self._filter_catalog = filter_catalog
+
     async def generate(self, request: ScenarioSqlRequest) -> ScenarioSqlResult:
         """Generate SQL through Service B without changing its wire payload.
 
@@ -36,12 +46,14 @@ class HttpScenarioSqlGenerator:
         Returns:
             Typed generator result containing extracted SQL or the existing adapter error.
         """
-        catalog = load_catalogs(settings.CATALOG_DIR).filters
+        catalog = self._filter_catalog
+        if catalog is None:
+            catalog = load_catalogs(settings.CATALOG_DIR).filters
         service_intent = build_service_b_intent(
             request.intent.model_dump(mode="json", exclude_none=False), catalog
         )
         service_intent["resolved_filters"] = [
-            item.model_dump(mode="json", exclude_none=False)
+            item.model_dump(mode="json", exclude_unset=True)
             for item in request.confirmed_filters
         ]
         payload_content = json.dumps(

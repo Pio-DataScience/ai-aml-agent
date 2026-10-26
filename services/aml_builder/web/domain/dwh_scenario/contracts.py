@@ -32,6 +32,8 @@ class ConfirmedFilter(BaseModel):
     values: list[str]
     confidence: float | None = None
     provenance: str = "catalog_resolver"
+    audit_choice: str | None = None
+    acknowledged_without_filter: bool | None = None
     target: dict[str, Any] = Field(default_factory=dict)
     match: str = "any_of"
     polarity_allowed: bool = False

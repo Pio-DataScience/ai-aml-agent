@@ -581,7 +581,7 @@ async def execute_oracle_dwh_shadow_test(
     except ValueError as exc:
         return json.dumps({"error": str(exc)})
 
-    sql_result = await HttpScenarioSqlGenerator().generate(request)
+    sql_result = await HttpScenarioSqlGenerator(catalogs.filters).generate(request)
     if sql_result.error:
         if sql_result.error.startswith("PioTech AI did not return"):
             logger.error(
@@ -602,7 +602,7 @@ async def execute_oracle_dwh_shadow_test(
         len(sql),
     )
 
-    filter_policy = catalogs.policy.filter_check.unverifiable
+    filter_policy = load_catalogs(settings.CATALOG_DIR).policy.filter_check.unverifiable
     requested_types = intent_dict.get("transaction_types") or intent_dict.get(
         "transaction_type"
     )
