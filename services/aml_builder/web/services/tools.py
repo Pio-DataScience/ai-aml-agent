@@ -19,15 +19,12 @@ Notes:
 
 import json
 import logging
-import uuid
-import httpx
 from typing import Any, Dict, List, Literal, Optional
 from langchain_core.runnables import RunnableConfig
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from services.aml_builder.web.services.settings import settings
-from services.aml_builder.web.services.observability import build_service_b_headers
 from services.aml_builder.web.api.codec import typed_tool as tool
 from services.aml_builder.web.services.schemas import AMLIntent
 from services.aml_builder.web.services.explanation_code_search import (
@@ -40,7 +37,6 @@ from services.aml_builder.web.services.io_executor import run_in_io_pool
 from services.aml_builder.web.adapters.oracle_repo import OracleRegistryRepo
 from services.aml_builder.web.domain.deploy_service import DeployError, DeployService
 from services.aml_builder.web.services.llm_client import build_llm, safe_parse_json
-from services.aml_builder.web.services.sql_extraction import extract_sql
 from services.aml_builder.web.domain.code_binding import (
     bind_channels_and_codes_to_intent,
     specific_transaction_types,
@@ -57,6 +53,10 @@ from services.aml_builder.web.domain.filter_resolution import (
 )
 from services.aml_builder.web.domain.filter_applied_check import (
     check_filter_application,
+)
+from services.aml_builder.web.domain.dwh_scenario.contracts import ScenarioSqlRequest
+from services.aml_builder.web.services.dwh_scenario.http_adapter import (
+    HttpScenarioSqlGenerator,
 )
 from services.aml_builder.web.workflow.runtime import get_workflow_repo
 from services.aml_builder.web.services.conflict_check import make_conflict_checker
@@ -564,75 +564,31 @@ async def execute_oracle_dwh_shadow_test(
         return json.dumps({"error": str(exc)})
     logger.info("[TOOL: SQL_BRIDGE] Requesting SQL generation from PioTech AI...")
 
-    # -----------------------------------------------------------
-    # Step 1: Validate intent JSON
-    # -----------------------------------------------------------
-    # -----------------------------------------------------------
-    # Step 2: Call PioTech AI text-to-SQL SSE service
-    # -----------------------------------------------------------
-    catalogs = load_catalogs(settings.CATALOG_DIR)
-    service_intent = build_service_b_intent(intent_dict, catalogs.filters)
-    payload_content = json.dumps(
-        {"request_type": "AML_SCENARIO_GENERATION", "intent": service_intent},
-        indent=2,
-        ensure_ascii=False,
-    )
-    chat_id = f"aml_tool_{uuid.uuid4().hex[:8]}"
-    payload = {
-        "messages": [{"role": "user", "content": payload_content}],
-        "metadata": {
-            "user_id": settings.PIOTECH_AI_USER_ID,
-            "project_id": settings.PIOTECH_AI_PROJECT_ID,
-            "chat_id": chat_id,
-        },
-        "reasoning_mode": "instant",
-    }
     trace_metadata = config.get("metadata", {})
     request_id = str(trace_metadata.get("request_id") or "")
     correlation_id = str(trace_metadata.get("correlation_id") or "")
-
-    collected_text: List[str] = []
-    final_answer_text: Optional[str] = None
-
+    catalogs = load_catalogs(settings.CATALOG_DIR)
+    service_intent = build_service_b_intent(intent_dict, catalogs.filters)
     try:
-        async with httpx.AsyncClient(timeout=settings.PIOTECH_AI_TIMEOUT_SECONDS) as client:
-            async with client.stream(
-                "POST",
-                settings.PIOTECH_AI_URL,
-                json=payload,
-                headers=build_service_b_headers(request_id, correlation_id),
-            ) as response:
-                response.raise_for_status()
-                async for line in response.aiter_lines():
-                    if not line or not line.startswith("data:"):
-                        continue
-                    raw = line[5:].strip()
-                    if raw == "[DONE]":
-                        break
-                    try:
-                        event = json.loads(raw)
-                        event_type = event.get("type", "")
-                        if event_type == "final_answer":
-                            final_answer_text = event.get("text", "")
-                        elif event_type == "content":
-                            collected_text.append(event.get("text", ""))
-                    except json.JSONDecodeError:
-                        continue
-    except httpx.HTTPError as exc:
-        logger.error("[TOOL: SQL_BRIDGE] HTTP error calling PioTech AI: %s", exc)
-        return json.dumps({"error": f"PioTech AI HTTP error: {exc}"})
+        request = ScenarioSqlRequest(
+            intent=AMLIntent.model_validate(intent_dict),
+            confirmed_filters=service_intent.get("resolved_filters", []),
+            version_context={
+                "request_id": request_id,
+                "correlation_id": correlation_id,
+            },
+        )
+    except ValueError as exc:
+        return json.dumps({"error": str(exc)})
 
-    # -----------------------------------------------------------
-    # Step 3: Extract SQL from the SSE stream response
-    # -----------------------------------------------------------
-    sql = ""
-    if final_answer_text and final_answer_text.strip():
-        sql = extract_sql(final_answer_text)
-
-    if not sql:
-        full_stream_text = "".join(collected_text).strip()
-        sql = extract_sql(full_stream_text)
-
+    sql_result = await HttpScenarioSqlGenerator().generate(request)
+    if sql_result.error:
+        if sql_result.error.startswith("PioTech AI did not return"):
+            logger.error(
+                "[TOOL: SQL_BRIDGE] PioTech AI did not return a valid SQL query."
+            )
+        return json.dumps({"error": sql_result.error})
+    sql = sql_result.sql or ""
     if not sql:
         logger.error("[TOOL: SQL_BRIDGE] PioTech AI did not return a valid SQL query.")
         return json.dumps(
@@ -646,7 +602,7 @@ async def execute_oracle_dwh_shadow_test(
         len(sql),
     )
 
-    filter_policy = load_catalogs(settings.CATALOG_DIR).policy.filter_check.unverifiable
+    filter_policy = catalogs.policy.filter_check.unverifiable
     requested_types = intent_dict.get("transaction_types") or intent_dict.get(
         "transaction_type"
     )
@@ -657,7 +613,10 @@ async def execute_oracle_dwh_shadow_test(
     )
     filter_check = check_filter_application(
         sql,
-        service_intent.get("resolved_filters", []),
+        [
+            item.model_dump(mode="python", exclude_none=True)
+            for item in request.confirmed_filters
+        ],
         unverifiable=filter_policy,
         transaction_scope=transaction_scope,
     )

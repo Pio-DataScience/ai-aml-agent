@@ -5,6 +5,12 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-10-26] feat: Add B1 typed DWH SQL handoff contract
+
+- Added strict Pydantic request/result contracts, a generator protocol, pure handoff validation checks, and an HTTP SSE adapter preserving the established Service B wire request and SQL extraction behavior.
+- Routed the existing shadow-test tool through the adapter and covered AMLIntent variants, unresolved filters, all-transaction code semantics, and contract validation in offline tests.
+- Documented B1 in `Docs/B1_contract_adapter.md`.
+
 ## [2026-10-26] test: Add B0 DWH scenario baseline and evaluation harness
 
 - Added deterministic fake Oracle, LLM, Chroma, and Neo4j adapters, routing fixture contracts, isolated Service B handoff characterization, and strict source assertions for BL1-BL10.
