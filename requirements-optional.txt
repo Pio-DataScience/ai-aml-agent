@@ -1,0 +1,7 @@
+# Install only for deployments that enable the corresponding DWH SQL provider.
+cohere
+sentence-transformers
+torch
+transformers
+chromadb
+neo4j

@@ -3,6 +3,14 @@
 All notable changes to this project are documented here.
 Format: `[DATE] TYPE: Description`
 
+## [2026-10-26] feat: Add B2 role-aware providers and embedding adapters
+
+- Extended Settings with DWH SQL role/provider policies, separate timeout, retry, output-token, context, candidate-row and schema settings; added key names only to `.env.example`.
+- Extended `build_llm` with role-specific OpenAI, LM Studio, Cohere, SambaNova and OpenRouter construction while retaining its existing no-role defaults and LangSmith propagation.
+- Added lazy OpenAI, Cohere and local embedding adapters with configured credentials, device-aware model caching, bounded local inference and explicit index identity.
+- Added offline behavioral tests replacing the B2 BL3, BL5, BL6 and BL10 source probes; kept optional packages out of required `requirements.txt`.
+- Documented configuration and optional dependency installation in `Docs/B2_provider_configuration.md`.
+
 ---
 
 ## [2026-10-26] feat: Add B1 typed DWH SQL handoff contract

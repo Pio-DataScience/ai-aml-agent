@@ -85,6 +85,34 @@ class Settings(BaseSettings):
         description="Optional model-specific reasoning effort. Leave unset or use 'none' to omit it; accepted values vary by model.",
     )
 
+    # ─── DWH SQL provider policy ───────────────────────────────────────────
+    DWH_SQL_GENERATOR_PROVIDER: Optional[str] = None
+    DWH_SQL_GENERATOR_MODEL: Optional[str] = None
+    DWH_SQL_CRITIC_PROVIDER: Optional[str] = None
+    DWH_SQL_CRITIC_MODEL: Optional[str] = None
+    DWH_SQL_SUMMARIZER_PROVIDER: Optional[str] = None
+    DWH_SQL_SUMMARIZER_MODEL: Optional[str] = None
+    DWH_SQL_EMBEDDINGS_PROVIDER: str = "openai"
+    DWH_SQL_EMBEDDINGS_MODEL: str = "text-embedding-3-small"
+    DWH_SQL_EMBEDDINGS_DIMENSION: int = Field(default=1536, ge=1)
+    DWH_SQL_EMBEDDINGS_FINGERPRINT: Optional[str] = None
+    DWH_SQL_EMBEDDINGS_DEVICE: str = "cpu"
+    DWH_SQL_CONNECT_TIMEOUT_SECONDS: float = Field(default=10.0, gt=0)
+    DWH_SQL_READ_TIMEOUT_SECONDS: float = Field(default=120.0, gt=0)
+    DWH_SQL_DEADLINE_SECONDS: float = Field(default=180.0, gt=0)
+    DWH_SQL_RETRY_BUDGET: int = Field(default=2, ge=0)
+    DWH_SQL_MAX_ATTEMPTS: int = Field(default=3, ge=1)
+    DWH_SQL_OUTPUT_TOKEN_LIMIT: int = Field(default=4096, ge=1)
+    DWH_SQL_CONTEXT_BUDGET: int = Field(default=32768, ge=1)
+    DWH_SQL_MAX_CANDIDATE_ROWS: int = Field(default=100, ge=1)
+    DWH_SQL_ALLOWED_SCHEMAS: tuple[str, ...] = ()
+    DWH_SQL_OPENAI_API_KEY: Optional[str] = None
+    DWH_SQL_COHERE_API_KEY: Optional[str] = None
+    DWH_SQL_SAMBANOVA_API_KEY: Optional[str] = None
+    DWH_SQL_OPENROUTER_API_KEY: Optional[str] = None
+    DWH_SQL_BASE_URL: Optional[str] = None
+    DWH_SQL_TOOL_CALLING: bool = True
+
     # ─── Oracle DB (Primary) ──────────────────────────────────────────────────
     ORACLE_DSN: str = Field(
         ...,
@@ -246,9 +274,7 @@ class Settings(BaseSettings):
         allowed = {"openai", "lmstudio"}
         normalized = value.lower().strip()
         if normalized not in allowed:
-            raise ValueError(
-                f"LLM_PROVIDER must be one of {allowed}, got '{value}'."
-            )
+            raise ValueError(f"LLM_PROVIDER must be one of {allowed}, got '{value}'.")
         return normalized
 
 
