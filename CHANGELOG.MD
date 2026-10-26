@@ -5,6 +5,11 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-10-26] test: Add B0 DWH scenario baseline and evaluation harness
+
+- Added deterministic fake Oracle, LLM, Chroma, and Neo4j adapters, routing fixture contracts, isolated Service B handoff characterization, and strict expected-failure placeholders for BL1-BL10.
+- Added 21 synthetic JSONL cases and a pluggable structural SQL evaluation runner, plus `Docs/B0_dwh_scenario_baseline.md` with offline commands and officer-case instructions.
+
 ## [2026-10-25] feat: Add AML scope guard to agent prompt
 
 - Make the AML Builder boundary exclusive, require classification before every response or tool call, and define the exact redirect for unrelated requests. Clarify ambiguous requests without tools, preserve legitimate informal requests and contextual follow-ups, use one fixed sentence for immediate emergencies, and prevent earlier assistant mistakes from expanding scope.
