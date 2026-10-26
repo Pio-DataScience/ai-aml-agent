@@ -141,7 +141,7 @@ def test_section_six_catalog_drafts_load_from_repository() -> None:
     assert catalogs.policy.workflow.enforcement.model_dump() == {
         "approvals": "enforce",
         "card_confirmation": "enforce",
-        "conflict_check": "observe",
+        "conflict_check": "enforce",
     }
     assert catalogs.params.card["one_pending_per_chat"] is True
     assert catalogs.params.params["baseline"].required_if.model_dump() == {

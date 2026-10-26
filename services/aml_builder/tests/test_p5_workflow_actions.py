@@ -95,7 +95,7 @@ def test_current_flow_uses_real_guards_with_per_gate_policy(tmp_path: Path) -> N
     assert gate_modes == {
         "approvals": "enforce",
         "card_confirmation": "enforce",
-        "conflict_check": "observe",
+        "conflict_check": "enforce",
     }
     repo = WorkflowRepo(tmp_path / "full-flow.sqlite", enforcement=gate_modes)
     repo.get_or_create_workflow("p1_flow_999", "p1", "flow", "999")
