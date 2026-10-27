@@ -26,6 +26,65 @@ CACHE_DIR = Path("artifacts")
 CACHE_FILE = CACHE_DIR / "explanation_codes_vector_cache.pkl"
 
 _VECTOR_CACHE: Optional[Dict[str, Any]] = None
+# The codes chosen for each transaction type, so one type always gets the same codes. The sub-LLM picks
+# differently between runs: "cash withdrawal" got 7 codes in one chat and 13 in the next, and the same
+# scenario was deployed twice with different SQL. Delete the file to choose again (e.g. after the
+# catalog changes).
+_SELECTION_CACHE: Optional[Dict[str, List[Dict[str, Any]]]] = None
+
+
+def _selection_cache_file() -> Path:
+    """The per-database file that remembers the codes chosen for each transaction type.
+
+    Returns:
+        Path: artifacts/explanation_code_selection_<country>_<inst>.json
+    """
+    return CACHE_DIR / f"explanation_code_selection_{settings.AML_COUNTRY_CODE}_{settings.AML_INST_CODE}.json"
+
+
+def _selection_key(single_type: str) -> str:
+    """The cache key of a transaction type: case and spacing do not make another type.
+
+    Args:
+        single_type (str): One transaction type phrase.
+
+    Returns:
+        str: The normalized phrase, e.g. 'CASH WITHDRAWAL'.
+    """
+    return " ".join(str(single_type or "").upper().split())
+
+
+def _load_selection_cache() -> Dict[str, List[Dict[str, Any]]]:
+    """The remembered code choices, read once from disk.
+
+    Returns:
+        Dict[str, List[Dict[str, Any]]]: {normalized type: selected codes}.
+    """
+    global _SELECTION_CACHE
+    if _SELECTION_CACHE is None:
+        path = _selection_cache_file()
+        try:
+            _SELECTION_CACHE = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        except (OSError, ValueError) as exc:
+            logger.warning("[EXPL_SEARCH] Could not read %s (%s): choosing codes again.", path.name, exc)
+            _SELECTION_CACHE = {}
+    return _SELECTION_CACHE
+
+
+def _remember_selection(single_type: str, codes: List[Dict[str, Any]]) -> None:
+    """Store the codes chosen for a type, in memory and on disk.
+
+    Args:
+        single_type (str): The transaction type.
+        codes (List[Dict[str, Any]]): The codes the sub-LLM selected.
+    """
+    cache = _load_selection_cache()
+    cache[_selection_key(single_type)] = codes
+    try:
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        _selection_cache_file().write_text(json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError as exc:  # still remembered for this process
+        logger.warning("[EXPL_SEARCH] Could not save the code selection cache (%s)", exc)
 
 
 def _load_or_build_vector_index() -> Dict[str, Any]:
@@ -165,7 +224,15 @@ def search_explanation_candidates(
 def _select_codes_for_single_type(
     single_type: str, min_similarity: float = 0.55
 ) -> List[Dict[str, Any]]:
-    """Sub-LLM selection & ranking for candidates meeting the similarity threshold for a single transaction type."""
+    """Sub-LLM selection & ranking for candidates meeting the similarity threshold for a single transaction type.
+
+    A type already chosen for returns the remembered codes, so every chat gets the same ones.
+    """
+    remembered = _load_selection_cache().get(_selection_key(single_type))
+    if remembered:
+        logger.info("[EXPL_SEARCH] Using the %d codes already chosen for '%s'.", len(remembered), single_type)
+        return [dict(c) for c in remembered]
+
     candidates = search_explanation_candidates(single_type, min_similarity=min_similarity, top_k=100)
     if not candidates:
         return []
@@ -212,6 +279,8 @@ def _select_codes_for_single_type(
             single_type,
             min_similarity,
         )
+        if isinstance(parsed, list) and parsed:
+            _remember_selection(single_type, parsed)  # the vector fallback below is never remembered
         return parsed
     except Exception as exc:
         logger.error(
@@ -326,6 +395,36 @@ def drop_deposit_fee_codes(codes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return _drop_fee_codes(codes, CASH_DEPOSIT_FEE_CODES, "cash-deposit")
 
 
+_CASH_WORD_RE: Final = re.compile(r"\bcash\b", re.IGNORECASE)
+_CASH_CODE_RE: Final = re.compile(r"\bcash\b|\batm\b", re.IGNORECASE)
+_REVERSAL_RE: Final = re.compile(r"\brevers|\brev\b", re.IGNORECASE)
+
+
+def drop_non_cash_codes(codes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Keep only cash postings for a type that says "cash": no clearing, cheque or reversal codes.
+
+    Live case (OPENBI2): "cash withdrawal" also got 25 / 31 / 427 / 434 (CLEARING WITHDRAWAL ...),
+    725 (CHEQUE WITHDRAWAL) and 2117 (OUTWORD CASH WITHD. REVERSAL). A clearing or cheque withdrawal is
+    not cash, and a reversal undoes a withdrawal rather than being one.
+
+    Args:
+        codes (List[Dict[str, Any]]): Selected codes, each with 'code' and 'description'.
+
+    Returns:
+        List[Dict[str, Any]]: The codes whose description names cash or an ATM and is not a reversal.
+    """
+    kept = [c for c in codes
+            if _CASH_CODE_RE.search(str(c.get("description") or c.get("desc_eng") or ""))
+            and not _REVERSAL_RE.search(str(c.get("description") or c.get("desc_eng") or ""))]
+    if len(kept) != len(codes):
+        logger.info(
+            "[EXPL_SEARCH] Dropped %d non-cash or reversal codes from a cash type: %s",
+            len(codes) - len(kept),
+            sorted({str(c.get("code")) for c in codes} - {str(c.get("code")) for c in kept}),
+        )
+    return kept
+
+
 def select_relevant_explanation_codes(
     transaction_type: Any, min_similarity: float = 0.55
 ) -> List[Dict[str, Any]]:
@@ -360,6 +459,8 @@ def select_relevant_explanation_codes(
             codes = drop_withdrawal_fee_codes(codes)
         elif is_cash_deposit_type(tx):
             codes = drop_deposit_fee_codes(codes)
+        if _CASH_WORD_RE.search(tx) and (is_cash_withdrawal_type(tx) or is_cash_deposit_type(tx)):
+            codes = drop_non_cash_codes(codes)
         for c in codes:
             code_val = str(c.get("code", "")).strip()
             if code_val and code_val not in seen_codes:

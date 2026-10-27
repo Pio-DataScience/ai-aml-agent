@@ -90,6 +90,8 @@ def _save(scenario_id: str, sql: str = SQL) -> bool:
     (SQL.replace("10000", "20000"), False),                          # another threshold
     (SQL.replace("'660'", "'661'"), False),                          # another code
     (SQL.replace("'1'", "'1 '"), False),                             # text inside a literal counts
+    (SQL.replace("('1', '660')", "('660','1')"), True),              # the order inside IN (...)
+    (SQL.replace("('1', '660')", "('1')"), False),                   # a code less
 ])
 def test_the_fingerprint_ignores_layout_not_meaning(variant: str, same: bool) -> None:
     """Two texts of one rule match; any change to what the rule selects does not."""
@@ -177,3 +179,28 @@ def test_the_chat_tool_answers_already_deployed(db: FakeDB, monkeypatch: pytest.
     assert result["status"] == "ALREADY_DEPLOYED" and result["scenario_id"] == "PRD_AAAA0001"
     assert result["write_success"] is False and "already deployed" in result["user_message"]
     assert len(db.rows) == 1
+
+
+def test_the_live_second_chat_is_now_the_same_scenario(db: FakeDB) -> None:
+    """Live case: two chats wrote the same rule with the codes in another order and other line breaks."""
+    first = """SELECT t.CUS_NUM, t.TRA_DATE, t.EQU_TRA_AMT, t.EXPL_CODE
+FROM BI_DWH.PIO_TRANSACTIONS t
+WHERE t.COUNTRY_CODE = 400
+  AND t.INST_CODE = 1
+  AND t.EXPL_CODE IN ('2', '466', '2114', '2164', '467', '2108', '3')
+  AND t.DEB_CRE_IND = '1'
+  AND t.EQU_TRA_AMT > 50000
+  AND t.TRA_DATE >= DATE '2019-01-01' AND t.TRA_DATE < DATE '2019-04-01'"""
+    second = """SELECT t.CUS_NUM, t.TRA_DATE, t.EQU_TRA_AMT, t.EXPL_CODE
+FROM BI_DWH.PIO_TRANSACTIONS t
+WHERE t.COUNTRY_CODE = 400 AND t.INST_CODE = 1
+  AND t.EXPL_CODE IN ('2', '466', '467', '2164', '2114', '2108', '3')
+  AND t.DEB_CRE_IND = '1'
+  AND t.EQU_TRA_AMT > 50000
+  AND t.TRA_DATE >= DATE '2019-01-01' AND t.TRA_DATE < DATE '2019-04-01'"""
+    _save("PRD_BD92929B", sql=first)
+
+    with pytest.raises(registry.DuplicateScenarioError) as raised:
+        _save("PRD_9C487F0D", sql=second)
+
+    assert raised.value.existing["scenario_id"] == "PRD_BD92929B" and len(db.rows) == 1

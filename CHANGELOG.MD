@@ -20,8 +20,19 @@ Format: `[DATE] TYPE: Description`
   existing `scenario_id`, and "This scenario is already deployed as PRD_... It was not deployed again."); the chat
   tool returns `status: ALREADY_DEPLOYED` with that `user_message`.
 - Tests: 13 added (`test_production_registry.py`, fake Oracle connection); full suite 277 passed. No database writes.
-- Limits: two chats that generate different SQL for the same idea are not detected (the SQL is the comparison);
-  the lock covers one service process, so several API instances would need a database-level unique key.
+- Limits: the lock covers one service process, so several API instances would need a database-level unique key.
+
+### Same request in another chat (follow-up, same day)
+- **Problem**: the same request in a new chat was deployed again. The SQL really differed: the sub-LLM that picks
+  explanation codes chose differently each run (log: 20, 18, 20 candidates for "CASH WITHDRAWAL"; 14, 7 and 13
+  codes kept), including non-cash codes 25 / 31 / 427 / 434 (CLEARING WITHDRAWAL), 725 (CHEQUE WITHDRAWAL) and
+  the reversal 2117 (`PRD_9C487F0D` vs `PRD_BD92929B`).
+- **Fix** (`explanation_code_search`): the codes chosen for a transaction type are remembered per database in
+  `artifacts/explanation_code_selection_<country>_<inst>.json`, so every chat gets the same ones (a failed choice
+  is never remembered; delete the file to choose again). `drop_non_cash_codes`: a type that says "cash" keeps only
+  codes described as cash or ATM, never reversals. `sql_fingerprint` ignores the order of values in `IN (...)`.
+- Tests: 7 added; full suite 284 passed. Live: "Flag any single cash withdrawal above 50,000 JOD in 2019" in two
+  new chats gave the same 7 codes (2, 466, 467, 2164, 2114, 2108, 3) and the same fingerprint. Nothing deployed.
 
 ---
 

@@ -56,7 +56,8 @@ class DuplicateScenarioError(Exception):
 def sql_fingerprint(sql: str) -> str:
     """The detection SQL reduced to what decides its result: no comments, spacing, case or trailing ';'.
 
-    Text inside string literals ('2', 'CASH') is kept exactly, since it changes the result.
+    Text inside string literals ('2', 'CASH') is kept exactly, since it changes the result; the order of
+    the values in an IN list is not.
 
     Args:
         sql (str): A scenario's RAW_SQL.
@@ -74,6 +75,10 @@ def sql_fingerprint(sql: str) -> str:
     text = _SQL_COMMENT.sub(" ", text)
     text = re.sub(r"\s+", " ", text).strip().rstrip(";").strip().upper()
     text = re.sub(r"\s*([(),=<>+\-*/])\s*", r"\1", text)
+    # IN ('2','466','467') and IN ('467','2','466') select the same rows.
+    text = re.sub(r"\bIN\((\x00\d+\x00(?:,\x00\d+\x00)*)\)",
+                  lambda m: "IN(" + ",".join(sorted(m.group(1).split(","), key=lambda p: literals[int(p.strip("\x00"))])) + ")",
+                  text)
     return re.sub(r"\x00(\d+)\x00", lambda m: literals[int(m.group(1))], text)
 
 
