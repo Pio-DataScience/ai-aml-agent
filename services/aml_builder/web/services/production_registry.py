@@ -14,12 +14,97 @@ consumer can always join one to the other.
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+import re
+import threading
+from typing import Any, Dict, Final, List, Optional
 
 from services.aml_builder.web.services.settings import settings
 from services.aml_builder.web.services.oracle import run_readonly, run_write, atomic_connection
 
 logger = logging.getLogger(__name__)
+
+# One deployment at a time in this process: the duplicate check and the insert must not interleave.
+_DEPLOY_LOCK: Final = threading.Lock()
+_SQL_LITERAL: Final = re.compile(r"'(?:[^']|'')*'")
+_SQL_COMMENT: Final = re.compile(r"--[^\n]*|/\*.*?\*/", re.DOTALL)
+
+
+class DuplicateScenarioError(Exception):
+    """A scenario with the same detection SQL is already registered; nothing was written.
+
+    Args:
+        existing (Dict[str, Any]): The registered scenario: 'scenario_id', 'scenario_name', 'is_active'.
+    """
+
+    def __init__(self, existing: Dict[str, Any]) -> None:
+        self.existing = existing
+        super().__init__(f"Scenario already registered as {existing.get('scenario_id')}")
+
+    @property
+    def user_message(self) -> str:
+        """The plain-language reason shown to the user.
+
+        Returns:
+            str: Which scenario it is already registered as, and that nothing was deployed.
+        """
+        name = self.existing.get("scenario_name") or ""
+        state = "" if self.existing.get("is_active") else ", currently inactive"
+        return (f"This scenario is already deployed as {self.existing.get('scenario_id')}"
+                f"{f' ({name})' if name else ''}{state}. It was not deployed again.")
+
+
+def sql_fingerprint(sql: str) -> str:
+    """The detection SQL reduced to what decides its result: no comments, spacing, case or trailing ';'.
+
+    Text inside string literals ('2', 'CASH') is kept exactly, since it changes the result.
+
+    Args:
+        sql (str): A scenario's RAW_SQL.
+
+    Returns:
+        str: The normalized SQL; two scenarios with the same fingerprint flag the same rows.
+    """
+    literals: List[str] = []
+
+    def keep(match: "re.Match[str]") -> str:
+        literals.append(match.group(0))
+        return f"\x00{len(literals) - 1}\x00"
+
+    text = _SQL_LITERAL.sub(keep, sql or "")
+    text = _SQL_COMMENT.sub(" ", text)
+    text = re.sub(r"\s+", " ", text).strip().rstrip(";").strip().upper()
+    text = re.sub(r"\s*([(),=<>+\-*/])\s*", r"\1", text)
+    return re.sub(r"\x00(\d+)\x00", lambda m: literals[int(m.group(1))], text)
+
+
+def _lob_text(value: Any) -> str:
+    """Read a CLOB (or plain string) column value.
+
+    Args:
+        value (Any): The column value.
+
+    Returns:
+        str: Its text, '' for NULL.
+    """
+    return value.read() if hasattr(value, "read") else str(value or "")
+
+
+def find_registered_scenario(cursor: Any, raw_sql: str) -> Optional[Dict[str, Any]]:
+    """The registered scenario whose detection SQL matches ``raw_sql``, active or not.
+
+    Args:
+        cursor (Any): An open cursor (inside the deployment transaction).
+        raw_sql (str): The SQL about to be deployed.
+
+    Returns:
+        Optional[Dict[str, Any]]: 'scenario_id', 'scenario_name', 'is_active' of the match, or None.
+    """
+    wanted = sql_fingerprint(raw_sql)
+    cursor.execute("SELECT SCENARIO_ID, SCENARIO_NAME, IS_ACTIVE, RAW_SQL FROM PIO_AML_PRODUCTION_SCENARIOS")
+    for scenario_id, scenario_name, is_active, sql in cursor.fetchall():
+        if sql_fingerprint(_lob_text(sql)) == wanted:
+            return {"scenario_id": scenario_id, "scenario_name": scenario_name, "is_active": is_active == 1}
+    return None
 
 
 def init_production_scenarios_table() -> None:
@@ -160,12 +245,16 @@ def save_production_scenario(
     Returns:
         bool: True if both writes succeeded and were committed, False if the
             transaction failed and was rolled back on both tables.
+
+    Raises:
+        DuplicateScenarioError: A new scenario_id whose detection SQL is already registered under
+            another ID. Nothing is written. An existing scenario_id is still updated in place.
     """
     init_production_scenarios_table()
     init_scenario_metadata_table()
 
     try:
-        with atomic_connection() as conn:
+        with _DEPLOY_LOCK, atomic_connection() as conn:
             cursor = conn.cursor()
 
             # ---- 1. PIO_AML_PRODUCTION_SCENARIOS (RAW_SQL) ----
@@ -174,6 +263,12 @@ def save_production_scenario(
                 {"sid": scenario_id},
             )
             existing_prod = cursor.fetchone()
+
+            # The same detection SQL is deployed once: a second deploy would raise the same alerts twice.
+            if not existing_prod:
+                registered = find_registered_scenario(cursor, raw_sql)
+                if registered:
+                    raise DuplicateScenarioError(registered)
 
             prod_params = {
                 "sid": scenario_id,
@@ -323,6 +418,12 @@ def save_production_scenario(
             scenario_id,
         )
         return True
+    except DuplicateScenarioError as exc:
+        logger.warning(
+            "[PRODUCTION_REGISTRY] Not deployed: the same detection SQL is already registered as %s",
+            exc.existing.get("scenario_id"),
+        )
+        raise
     except Exception as exc:
         logger.error(
             "[PRODUCTION_REGISTRY] Atomic write failed for scenario %s — both tables rolled back: %s",

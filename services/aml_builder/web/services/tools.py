@@ -39,6 +39,7 @@ from services.aml_builder.web.services.explanation_code_search import (
 )
 from services.aml_builder.web.services.oracle import run_readonly, run_shadow_readonly
 from services.aml_builder.web.services.production_registry import (
+    DuplicateScenarioError,
     save_production_scenario,
 )
 from services.aml_builder.web.services.llm_client import build_llm, safe_parse_json
@@ -1372,16 +1373,31 @@ def persist_and_validate_scenario_in_dwh(
     scenario_id = f"PRD_{uuid.uuid4().hex[:8].upper()}"
     created_at = datetime.utcnow().isoformat()
 
-    success = save_production_scenario(
-        scenario_id=scenario_id,
-        scenario_name=scenario_name,
-        scenario_type=scenario_type,
-        detection_logic=detection_logic,
-        raw_sql=raw_sql,
-        scenario_metadata=metadata_dict,
-        time_window_days=time_window_days,
-        created_by=settings.AML_CREATED_BY,
-    )
+    try:
+        success = save_production_scenario(
+            scenario_id=scenario_id,
+            scenario_name=scenario_name,
+            scenario_type=scenario_type,
+            detection_logic=detection_logic,
+            raw_sql=raw_sql,
+            scenario_metadata=metadata_dict,
+            time_window_days=time_window_days,
+            created_by=settings.AML_CREATED_BY,
+        )
+    except DuplicateScenarioError as exc:
+        return json.dumps(
+            {
+                "status": "ALREADY_DEPLOYED",
+                "already_deployed": True,
+                "scenario_id": exc.existing.get("scenario_id"),
+                "scenario_name": exc.existing.get("scenario_name"),
+                "write_success": False,
+                "user_message": exc.user_message,
+                "agent_instruction": "Reply with user_message verbatim. Do not call this tool again for this scenario.",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
 
     if success:
         logger.info(

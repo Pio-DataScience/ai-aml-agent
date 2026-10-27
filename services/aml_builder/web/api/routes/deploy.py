@@ -13,10 +13,11 @@ from typing import Any, Dict, List, Optional
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from services.aml_builder.web.services.graph import get_tool_driven_graph
-from services.aml_builder.web.services.production_registry import save_production_scenario
+from services.aml_builder.web.services.production_registry import DuplicateScenarioError, save_production_scenario
 from services.aml_builder.web.services.scenario_metadata import validate_scenario_metadata
 from services.aml_builder.web.services.settings import settings
 
@@ -38,6 +39,7 @@ class DeployResponse(BaseModel):
     scenario_name: Optional[str] = None
     message: str
     validation_errors: Optional[List[str]] = None
+    already_deployed: bool = False
 
 
 @router.post("/scenario/deploy", response_model=DeployResponse)
@@ -139,16 +141,29 @@ async def deploy_scenario(request: DeployRequest):
 
     scenario_id = f"PRD_{uuid.uuid4().hex[:8].upper()}"
 
-    success = save_production_scenario(
-        scenario_id=scenario_id,
-        scenario_name=scenario_name,
-        scenario_type=scenario_type,
-        detection_logic=detection_logic,
-        raw_sql=raw_sql,
-        scenario_metadata=request.metadata_json,
-        time_window_days=time_window_days,
-        created_by=str(request.metadata_json.get("CREATED_BY") or settings.AML_CREATED_BY),
-    )
+    try:
+        success = save_production_scenario(
+            scenario_id=scenario_id,
+            scenario_name=scenario_name,
+            scenario_type=scenario_type,
+            detection_logic=detection_logic,
+            raw_sql=raw_sql,
+            scenario_metadata=request.metadata_json,
+            time_window_days=time_window_days,
+            created_by=str(request.metadata_json.get("CREATED_BY") or settings.AML_CREATED_BY),
+        )
+    except DuplicateScenarioError as exc:
+        # A flat body (not FastAPI's {"detail": ...}), so the side panel shows the message as it is.
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content=DeployResponse(
+                success=False,
+                scenario_id=exc.existing.get("scenario_id"),
+                scenario_name=exc.existing.get("scenario_name"),
+                message=exc.user_message,
+                already_deployed=True,
+            ).model_dump(),
+        )
 
     if not success:
         logger.error("[DEPLOY] Failed to persist scenario to Oracle DWH.")

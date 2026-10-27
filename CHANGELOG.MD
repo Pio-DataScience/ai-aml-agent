@@ -5,6 +5,26 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-10-27] fix: A scenario is deployed once
+
+### What
+- **Problem**: every deploy made a new random `PRD_xxxxxxxx` ID (`routes/deploy.py`, and the chat tool
+  `persist_and_validate_scenario_in_dwh`), so deploying the same scenario again registered it again and the alert
+  engine would raise its alerts twice. OPENBI2 already holds one such copy: `PRD_4EBC9567` = `PRD_C902F779`
+  (left as it is).
+- **Fix** (`production_registry`): before inserting a new ID, `save_production_scenario` compares the detection SQL
+  with every registered scenario, active or inactive, by `sql_fingerprint` (comments, spacing, case and a trailing
+  `;` ignored; text inside string literals kept). A match raises `DuplicateScenarioError` and nothing is written.
+  The check and the insert run in one transaction under a process lock. Saving under an existing ID still updates it.
+- **Responses**: `POST /scenario/deploy` returns 409 with a flat body (`success: false`, `already_deployed: true`, the
+  existing `scenario_id`, and "This scenario is already deployed as PRD_... It was not deployed again."); the chat
+  tool returns `status: ALREADY_DEPLOYED` with that `user_message`.
+- Tests: 13 added (`test_production_registry.py`, fake Oracle connection); full suite 277 passed. No database writes.
+- Limits: two chats that generate different SQL for the same idea are not detected (the SQL is the comparison);
+  the lock covers one service process, so several API instances would need a database-level unique key.
+
+---
+
 ## [2026-10-25] fix: No commission codes in cash-deposit scenarios; echo guard on agent replies
 
 ### What
