@@ -4,6 +4,7 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 ---
 
+
 ## Canonical project overview
 
 [`PROJECT_OVERVIEW.md`](PROJECT_OVERVIEW.md) is the canonical repository-level technical overview. Read it after the applicable `AGENTS.md` instructions when work requires project architecture, business logic, cross-cutting workflows, repository structure, or system-wide behavior.
