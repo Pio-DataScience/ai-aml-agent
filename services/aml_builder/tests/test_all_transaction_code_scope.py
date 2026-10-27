@@ -244,3 +244,90 @@ def test_commissions_do_not_count_toward_the_deposit_total(monkeypatch, case, de
         assert result["C1"] == sum(deposits)
     # The codes as the search returned them (before the fix) flag every case: the commission inflated the total.
     assert "C1" in _flagged_deposit_totals([c["code"] for c in CASH_DEPOSIT_SEARCH], rows)
+
+
+# ─────────────────────────── one type, the same codes, cash only ───────────────────────────
+
+# The 13 codes one chat got for "CASH WITHDRAWAL" (PRD_9C487F0D, OPENBI2, 2026-10-27); another chat got 7.
+CASH_WITHDRAWAL_SECOND_CHAT = [
+    {"code": "2", "description": "CASH WITHDRAWAL"},
+    {"code": "466", "description": "CASH WITHDRAWAL FROM OUR ATM."},
+    {"code": "467", "description": "CASH WITHDRAWAL FROM OTHER'S ATM."},
+    {"code": "2164", "description": "ATM/POS CASH WITHDRAWAL"},
+    {"code": "2114", "description": "OUTWARD CASH WITHDRAWAL"},
+    {"code": "2108", "description": "CREDIT CARDS CASH WITHDRAWAL"},
+    {"code": "3", "description": "CASH WITHDRAWAL CERTIFIED CHECK"},
+    {"code": "31", "description": "CLEARING WITHDRAWAL - CERTIFIED CHECK"},
+    {"code": "25", "description": "CLEARING WITHDRAWAL"},
+    {"code": "427", "description": "CLEARING WITHDRAWAL (ON-LINE CLOSING)"},
+    {"code": "434", "description": "CLEARING WITHDRAWAL ,TRANSIT"},
+    {"code": "725", "description": "CHEQUE WITHDRAWAL (ECC)"},
+    {"code": "2117", "description": "OUTWORD CASH WITHD. REVERSAL"},
+]
+
+
+def test_a_cash_type_keeps_only_cash_codes(monkeypatch):
+    """Live case: clearing, cheque and reversal codes are not cash withdrawals; the 7 cash codes stay."""
+    _fake_search(monkeypatch, {"CASH WITHDRAWAL": CASH_WITHDRAWAL_SECOND_CHAT})
+
+    codes = [c["code"] for c in expl_search.select_relevant_explanation_codes("CASH WITHDRAWAL")]
+
+    assert sorted(codes) == sorted(GENUINE_WITHDRAWAL_CODES)
+
+
+def test_a_type_that_does_not_say_cash_keeps_its_codes(monkeypatch):
+    """"clearing withdrawal" is not a cash type: its clearing codes are what was asked for."""
+    clearing = [c for c in CASH_WITHDRAWAL_SECOND_CHAT if "CLEARING" in c["description"]]
+    _fake_search(monkeypatch, {"clearing withdrawal": clearing})
+
+    assert [c["code"] for c in expl_search.select_relevant_explanation_codes("clearing withdrawal")] == ["31", "25", "427", "434"]
+
+
+@pytest.fixture
+def selection(monkeypatch, tmp_path):
+    """The real _select_codes_for_single_type with a scripted sub-LLM and a temporary selection cache.
+
+    Returns:
+        dict: 'answers' (what the sub-LLM returns, one per call) and 'calls' (how often it was asked).
+    """
+    script = {"answers": [], "calls": 0}
+
+    class SubLLM:
+        def invoke(self, prompt):
+            script["calls"] += 1
+            answer = script["answers"].pop(0)
+            if isinstance(answer, Exception):
+                raise answer
+            return SimpleNamespace(content=json.dumps(answer))
+
+    monkeypatch.setattr(expl_search, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(expl_search, "_SELECTION_CACHE", None)
+    monkeypatch.setattr(expl_search, "build_llm", lambda fast=False: SubLLM())
+    monkeypatch.setattr(expl_search, "search_explanation_candidates", lambda *a, **k: [
+        {"code": c["code"], "desc_eng": c["description"], "similarity_pct": "80%", "score": 0.8}
+        for c in CASH_WITHDRAWAL_SECOND_CHAT])
+    return script
+
+
+def test_the_same_type_gets_the_same_codes_in_every_chat(selection, tmp_path):
+    """The first choice is remembered (in memory and on disk); a second chat never asks again."""
+    first = [{"code": "2", "description": "CASH WITHDRAWAL"}, {"code": "466", "description": "CASH WITHDRAWAL FROM OUR ATM."}]
+    selection["answers"] = [first, CASH_WITHDRAWAL_SECOND_CHAT]
+
+    one = expl_search._select_codes_for_single_type("CASH WITHDRAWAL")
+    two = expl_search._select_codes_for_single_type("  cash   withdrawal ")
+
+    assert one == two == first and selection["calls"] == 1
+    saved = json.loads((tmp_path / "explanation_code_selection_400_1.json").read_text(encoding="utf-8"))
+    assert saved == {"CASH WITHDRAWAL": first}
+
+
+def test_a_failed_choice_is_not_remembered(selection):
+    """When the sub-LLM fails, the vector fallback is used once and the next chat asks again."""
+    selection["answers"] = [RuntimeError("model unavailable"), [{"code": "2", "description": "CASH WITHDRAWAL"}]]
+
+    fallback = expl_search._select_codes_for_single_type("CASH WITHDRAWAL")
+    chosen = expl_search._select_codes_for_single_type("CASH WITHDRAWAL")
+
+    assert len(fallback) == len(CASH_WITHDRAWAL_SECOND_CHAT) and chosen == [{"code": "2", "description": "CASH WITHDRAWAL"}]
+    assert selection["calls"] == 2

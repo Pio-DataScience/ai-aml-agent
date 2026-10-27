@@ -5,6 +5,37 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-10-27] fix: A scenario is deployed once
+
+### What
+- **Problem**: every deploy made a new random `PRD_xxxxxxxx` ID (`routes/deploy.py`, and the chat tool
+  `persist_and_validate_scenario_in_dwh`), so deploying the same scenario again registered it again and the alert
+  engine would raise its alerts twice. OPENBI2 already holds one such copy: `PRD_4EBC9567` = `PRD_C902F779`
+  (left as it is).
+- **Fix** (`production_registry`): before inserting a new ID, `save_production_scenario` compares the detection SQL
+  with every registered scenario, active or inactive, by `sql_fingerprint` (comments, spacing, case and a trailing
+  `;` ignored; text inside string literals kept). A match raises `DuplicateScenarioError` and nothing is written.
+  The check and the insert run in one transaction under a process lock. Saving under an existing ID still updates it.
+- **Responses**: `POST /scenario/deploy` returns 409 with a flat body (`success: false`, `already_deployed: true`, the
+  existing `scenario_id`, and "This scenario is already deployed as PRD_... It was not deployed again."); the chat
+  tool returns `status: ALREADY_DEPLOYED` with that `user_message`.
+- Tests: 13 added (`test_production_registry.py`, fake Oracle connection); full suite 277 passed. No database writes.
+- Limits: the lock covers one service process, so several API instances would need a database-level unique key.
+
+### Same request in another chat (follow-up, same day)
+- **Problem**: the same request in a new chat was deployed again. The SQL really differed: the sub-LLM that picks
+  explanation codes chose differently each run (log: 20, 18, 20 candidates for "CASH WITHDRAWAL"; 14, 7 and 13
+  codes kept), including non-cash codes 25 / 31 / 427 / 434 (CLEARING WITHDRAWAL), 725 (CHEQUE WITHDRAWAL) and
+  the reversal 2117 (`PRD_9C487F0D` vs `PRD_BD92929B`).
+- **Fix** (`explanation_code_search`): the codes chosen for a transaction type are remembered per database in
+  `artifacts/explanation_code_selection_<country>_<inst>.json`, so every chat gets the same ones (a failed choice
+  is never remembered; delete the file to choose again). `drop_non_cash_codes`: a type that says "cash" keeps only
+  codes described as cash or ATM, never reversals. `sql_fingerprint` ignores the order of values in `IN (...)`.
+- Tests: 7 added; full suite 284 passed. Live: "Flag any single cash withdrawal above 50,000 JOD in 2019" in two
+  new chats gave the same 7 codes (2, 466, 467, 2164, 2114, 2108, 3) and the same fingerprint. Nothing deployed.
+
+---
+
 ## [2026-10-25] fix: "Flag transaction" asks for the transaction type
 
 ### What
