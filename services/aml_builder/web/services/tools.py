@@ -58,6 +58,7 @@ from services.aml_builder.web.services.clarification import (
     clarification_payload,
     default_entity,
     describe_answers,
+    drop_placeholder_types,
     find_gaps,
     pending_clarification,
     apply_ratio_conditions,
@@ -403,6 +404,17 @@ def analyze_intent_and_discover_explanation_codes(
                 intent_dict["transaction_type"] = ", ".join(intent_dict["transaction_types"])
         elif tx_type:
             intent_dict["transaction_type"] = tx_type
+
+        # A "type" that names no channel ("Flag transaction", "suspicious activity") is not one: it is
+        # neither searched as codes nor shown, and the form asks for the transaction type.
+        cleaned = drop_placeholder_types(intent_dict)
+        if cleaned is not intent_dict:
+            logger.info("[TOOL: INTENT] Dropped transaction types that name no channel: %s -> %s",
+                        intent_dict.get("transaction_types") or intent_dict.get("transaction_type"),
+                        cleaned.get("transaction_types"))
+            intent_dict = cleaned
+            tx_types = intent_dict.get("transaction_types")
+            tx_type = intent_dict.get("transaction_type")
 
         # Attribute filters first ("dormant accounts", "corporate customers", "credit transactions"),
         # resolved against the lookup tables. They take priority over explanation codes: a "type" that is

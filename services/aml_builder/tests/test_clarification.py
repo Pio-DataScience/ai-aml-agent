@@ -332,6 +332,49 @@ def test_the_answers_complete_the_original_request(monkeypatch: pytest.MonkeyPat
     assert "Plan" in result["plan_artifact"] or result["plan_artifact"]
 
 
+@pytest.mark.parametrize("transaction_type, placeholder", [
+    ("Flag transaction", True),
+    ("Detect transactions", True),
+    ("suspicious activity", True),
+    ("large transfers", True),
+    ("CASH DEPOSIT", False),
+    ("outward transfer", False),
+    ("ATM withdrawals", False),
+    ("ALL", False),
+])
+def test_a_type_that_names_no_channel_is_a_placeholder(transaction_type: str, placeholder: bool) -> None:
+    """Instructions, descriptions and generic words are not a channel; a qualifier such as 'cash' is."""
+    assert cl.is_placeholder_type(transaction_type) is placeholder
+
+
+@pytest.mark.parametrize("text, types, asks_type", [
+    ("Flag transaction", ["Flag transaction"], True),           # live case: the request came back as the type
+    ("Detect transactions", ["Detect transactions"], True),
+    ("Flag cash deposits", ["CASH DEPOSIT"], False),            # a real channel, named by the user
+    ("Flag any transaction above 50,000", [], False),            # "any": every transaction type
+])
+def test_the_transaction_type_is_asked_when_none_is_named(text: str, types: List[str], asks_type: bool) -> None:
+    """The form asks for the channel unless the user named one or asked for all of them."""
+    intent = cl.all_types_if_any(
+        cl.drop_placeholder_types({**VAGUE_INTENT, "transaction_type": ", ".join(types) or None,
+                                   "transaction_types": types or None}), text)
+    assert ("channels" in cl.find_gaps(intent, text)) is asks_type
+
+
+def test_flag_transaction_asks_for_the_type_and_searches_no_codes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Live case (2026-10-25): 'Flag transaction' showed no type question and 'Flag Transaction' as the type."""
+    searched: List[Any] = []
+    intent = {**VAGUE_INTENT, "transaction_type": "Flag transaction", "transaction_types": ["Flag transaction"]}
+    _fake_intent_llm(monkeypatch, intent, [])
+    monkeypatch.setattr(aml_tools, "select_relevant_explanation_codes", lambda t, *a, **k: searched.append(t) or [])
+
+    result = json.loads(aml_tools.analyze_intent_and_discover_explanation_codes.invoke({"user_prompt": "Flag transaction"}))
+
+    assert result["status"] == "NEEDS_CLARIFICATION" and "channels" in result["missing_fields"]
+    assert "channels" in [q["id"] for q in result["questions"]]
+    assert searched == [] and not any("Flag Transaction" in line for line in result["understood_summary"])
+
+
 def test_the_flow_can_be_switched_off(monkeypatch: pytest.MonkeyPatch) -> None:
     """AML_CLARIFICATION_FLOW=False restores the assumed-default behaviour."""
     monkeypatch.setattr(aml_tools.settings, "AML_CLARIFICATION_FLOW", False)
