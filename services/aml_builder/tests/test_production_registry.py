@@ -204,3 +204,87 @@ WHERE t.COUNTRY_CODE = 400 AND t.INST_CODE = 1
         _save("PRD_9C487F0D", sql=second)
 
     assert raised.value.existing["scenario_id"] == "PRD_BD92929B" and len(db.rows) == 1
+
+
+# ─────────────────────────── similar registered scenarios ───────────────────────────
+
+from services.aml_builder.web.services import scenario_registry_analytics as analytics  # noqa: E402
+
+# The live rules of 2026-10-27 (OPENBI2): the same request, written by two chats and a third variant.
+SEVEN_CODES_Q1 = """SELECT t.CUS_NUM, t.TRA_DATE, t.EQU_TRA_AMT FROM BI_DWH.PIO_TRANSACTIONS t
+WHERE t.COUNTRY_CODE = 400 AND t.INST_CODE = 1
+  AND t.EXPL_CODE IN ('2', '466', '2114', '2164', '467', '2108', '3') AND t.DEB_CRE_IND = '1'
+  AND t.EQU_TRA_AMT > 50000 AND t.TRA_DATE >= DATE '2019-01-01' AND t.TRA_DATE < DATE '2019-04-01'"""
+THIRTEEN_CODES_Q1 = SEVEN_CODES_Q1.replace("'3')", "'3', '31', '25', '427', '434', '725', '2117')")
+PER_CUSTOMER_Q4 = """SELECT t.CUS_NUM, COUNT(*) AS TRANSACTION_COUNT FROM BI_DWH.PIO_TRANSACTIONS t
+WHERE t.COUNTRY_CODE = 400 AND t.INST_CODE = 1
+  AND t.EXPL_CODE IN ('2', '466', '2114', '2164', '467', '2108', '3') AND t.DEB_CRE_IND = '1'
+  AND t.EQU_TRA_AMT > 50000 AND t.TRA_DATE >= DATE '2019-10-01' AND t.TRA_DATE < DATE '2020-01-01'
+GROUP BY t.COUNTRY_CODE, t.INST_CODE, t.CUS_NUM"""
+CASH_DEPOSITS = """SELECT t.CUS_NUM, SUM(t.EQU_TRA_AMT) FROM BI_DWH.PIO_TRANSACTIONS t
+WHERE t.COUNTRY_CODE = 400 AND t.INST_CODE = 1 AND t.EXPL_CODE IN ('1', '660') AND t.DEB_CRE_IND = '2'
+  AND t.TRA_DATE >= :bd_minus_30 GROUP BY t.CUS_NUM HAVING SUM(t.EQU_TRA_AMT) > 10000"""
+
+
+def test_the_parts_of_a_rule_are_read_from_its_sql() -> None:
+    """Codes, thresholds, period, what is monitored and the debit/credit leg."""
+    parts = analytics.rule_parts(PER_CUSTOMER_Q4)
+
+    assert parts["codes"] == {"2", "466", "2114", "2164", "467", "2108", "3"}
+    assert parts["amounts"] == ((">", 50000.0),)
+    assert parts["period"] == (("2019-10-01", "2020-01-01"), ())
+    assert parts["monitored"] == "per customer" and parts["direction"] == "debit"
+    assert analytics.rule_parts(SEVEN_CODES_Q1)["monitored"] == "each transaction"
+
+
+def test_the_same_rule_is_identical() -> None:
+    """Another layout and code order of the same rule is 100% and lists no difference."""
+    similarity, same, differs = analytics.compare_rules(SEVEN_CODES_Q1, SEVEN_CODES_Q1.replace("'2', '466'", "'466', '2'"))
+    assert similarity == 100.0 and differs == [] and "transaction codes (7)" in same
+
+
+def test_extra_codes_are_close_and_named() -> None:
+    """Live pair: 7 vs 13 codes, everything else equal - very similar, and the difference is the codes."""
+    similarity, same, differs = analytics.compare_rules(SEVEN_CODES_Q1, THIRTEEN_CODES_Q1)
+
+    assert 70 <= similarity < 100
+    assert differs == ["transaction codes: 7 shared, 0 only in the new rule, 6 only in the registered one"]
+    assert "period: 2019-01-01 to 2019-04-01" in same
+
+
+def test_another_period_and_grain_is_less_similar() -> None:
+    """Q1 per transaction vs Q4 per customer: lower than the code-only difference, both named."""
+    codes_only, _, _ = analytics.compare_rules(SEVEN_CODES_Q1, THIRTEEN_CODES_Q1)
+    similarity, _, differs = analytics.compare_rules(SEVEN_CODES_Q1, PER_CUSTOMER_Q4)
+
+    assert similarity < codes_only
+    assert "period: 2019-01-01 to 2019-04-01 vs 2019-10-01 to 2020-01-01" in differs
+    assert "monitored: each transaction vs per customer" in differs
+
+
+def test_a_different_kind_of_rule_is_far() -> None:
+    """Cash withdrawals per transaction vs cash deposit totals: below the reporting threshold."""
+    similarity, _, _ = analytics.compare_rules(SEVEN_CODES_Q1, CASH_DEPOSITS)
+    assert similarity < 50
+
+
+def test_similar_scenarios_are_listed_most_similar_first(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Read-only: the close ones, ordered, with the identical one marked; the far one is left out."""
+    rows = [("PRD_9788E8FB", "Per customer Q4", 1, PER_CUSTOMER_Q4), ("PRD_9C487F0D", "13 codes", 1, THIRTEEN_CODES_Q1),
+            ("PRD_BD92929B", "7 codes", 0, SEVEN_CODES_Q1), ("PRD_DEPOSITS", "Deposits", 1, CASH_DEPOSITS)]
+    monkeypatch.setattr(analytics, "run_readonly", lambda sql, *a: (["ID", "NAME", "ACTIVE", "SQL"], rows))
+
+    found = analytics.find_similar_scenarios(SEVEN_CODES_Q1)
+
+    assert [f["scenario_id"] for f in found] == ["PRD_BD92929B", "PRD_9C487F0D", "PRD_9788E8FB"]
+    assert found[0]["identical"] is True and found[0]["is_active"] is False and found[0]["similarity_pct"] == 100.0
+    assert found[1]["identical"] is False and found[1]["differences"]
+
+
+def test_a_registry_that_cannot_be_read_gives_no_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The comparison is extra information: a database error leaves the shadow test as it is."""
+    def fail(*_a: Any) -> None:
+        raise RuntimeError("ORA-12541")
+
+    monkeypatch.setattr(analytics, "run_readonly", fail)
+    assert analytics.find_similar_scenarios(SEVEN_CODES_Q1) == []

@@ -5,6 +5,26 @@ Format: `[DATE] TYPE: Description`
 
 ---
 
+## [2026-10-27] feat: Similar registered scenarios, with similarity, after the shadow test
+
+### What
+- **Need**: when a new scenario is generated, show which registered scenarios it resembles, how much, and how they
+  differ, so near-copies are noticed before deployment.
+- **How** (`scenario_registry_analytics`): `rule_parts` reads a rule from its SQL (transaction codes, amount and
+  count thresholds, period dates or window, what is monitored - each transaction / per customer / per account - and
+  the debit/credit leg). `compare_rules` scores two rules 0-100: codes 30% (shared / all), thresholds 20% (same
+  kind, other value = half), period 15%, monitored 15%, direction 5%, and the whole normalized SQL text 15%; the
+  same `sql_fingerprint` is 100% and `identical`. `find_similar_scenarios` compares with every registered scenario
+  (active or not, read-only) and returns the 3 closest at 50% or more, each with what is the same and what differs.
+  Deterministic: no LLM or embedding call.
+- `execute_oracle_dwh_shadow_test` returns them as `similar_registered_scenarios`; the system prompt shows them as a
+  table after the metrics and says plainly when the rule is already deployed. A registry read error leaves the list
+  empty and the shadow test unchanged.
+- Tests: 7 added (`test_production_registry.py`); full suite 291 passed. Live on OPENBI2, "Flag any single cash
+  withdrawal above 50,000 JOD in 2019": PRD_4EBC9567, PRD_BD92929B, PRD_C902F779 at 84.9%, differing only by period.
+
+---
+
 ## [2026-10-27] fix: A scenario is deployed once
 
 ### What

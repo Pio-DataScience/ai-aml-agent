@@ -92,6 +92,7 @@ from services.aml_builder.web.services.scenario_metadata import (
     validate_scenario_metadata,
 )
 from services.aml_builder.web.services.scenario_registry_analytics import (
+    find_similar_scenarios,
     search_scenarios_semantic,
     get_registry_statistics,
     get_alert_telemetry,
@@ -1142,10 +1143,16 @@ def execute_oracle_dwh_shadow_test(intent_json: str) -> str:
     try:
         metrics = _shadow_metrics(sql, binds)
         logger.info("[TOOL: SQL_BRIDGE] Shadow test complete: %s", metrics["metrics_summary"])
+        # Registered scenarios that look like this rule, with how similar and what differs (read-only).
+        similar = find_similar_scenarios(sql)
+        if similar:
+            logger.info("[TOOL: SQL_BRIDGE] Similar registered scenarios: %s",
+                        [(s["scenario_id"], s["similarity_pct"]) for s in similar])
         return json.dumps(
             {
                 "raw_sql": sql,
                 **metrics,
+                "similar_registered_scenarios": similar,
                 "validation_success": True,
                 **date_fields,
                 **correction_fields,

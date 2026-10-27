@@ -23,17 +23,186 @@ presented as proof a scenario is broken — it may simply mean the engine
 hasn't been run yet for that scenario/date.
 """
 
+import difflib
 import logging
+import re
 from datetime import date, datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Final, List, Optional, Tuple
 
 import numpy as np
 from langchain_openai import OpenAIEmbeddings
 
 from services.aml_builder.web.services.oracle import run_readonly
+from services.aml_builder.web.services.production_registry import sql_fingerprint
 from services.aml_builder.web.services.settings import settings
 
 logger = logging.getLogger(__name__)
+
+# How much each part of a rule counts when two rules are compared (sums to 1). The rest of the SQL
+# text, compared as a whole, catches what the parts do not name.
+_SIMILARITY_WEIGHTS: Final[Dict[str, float]] = {
+    "codes": 0.30, "amounts": 0.20, "period": 0.15, "monitored": 0.15, "direction": 0.05, "text": 0.15,
+}
+_CODE_LIST_RE: Final = re.compile(r"EXPL_CODE\s*IN\s*\(([^)]*)\)|EXPL_CODE\s*=\s*('[^']*')", re.IGNORECASE)
+_AMOUNT_RE: Final = re.compile(r"(?:EQU_TRA_AMT|TRA_AMT|SUM\([^)]*AMT[^)]*\))\s*(>=|>|<=|<|=)\s*(\d+(?:\.\d+)?)", re.IGNORECASE)
+_COUNT_RE: Final = re.compile(r"COUNT\([^)]*\)\s*(>=|>|<=|<|=)\s*(\d+)", re.IGNORECASE)
+_DATE_RE: Final = re.compile(r"DATE\s*'(\d{4}-\d{2}-\d{2})'", re.IGNORECASE)
+_WINDOW_RE: Final = re.compile(r":bd_minus_(\d+)|(\d+)\s+PRECEDING|INTERVAL\s*'(\d+)'\s*(DAY|MONTH|YEAR)", re.IGNORECASE)
+_DIRECTION_RE: Final = re.compile(r"DEB_CRE_IND\s*=\s*'([12])'", re.IGNORECASE)
+_GROUP_BY_RE: Final = re.compile(r"GROUP\s+BY\s+(.+?)(?:\bHAVING\b|\bORDER\b|\)|$)", re.IGNORECASE | re.DOTALL)
+
+
+def rule_parts(sql: str) -> Dict[str, Any]:
+    """The parts of a detection rule that decide what it flags, read from its SQL.
+
+    Args:
+        sql (str): A scenario's SQL.
+
+    Returns:
+        Dict[str, Any]: 'codes' (set), 'amounts' and 'counts' (sorted (operator, number) pairs),
+            'period' (dates and window sizes), 'monitored' ('each transaction' / 'per customer' /
+            'per account'), 'direction' ('debit' / 'credit' / None).
+    """
+    codes = set()
+    for listed, single in _CODE_LIST_RE.findall(sql or ""):
+        codes.update(re.findall(r"'([^']*)'", listed or single))
+    grouped = _GROUP_BY_RE.search(sql or "")
+    columns = grouped.group(1).upper() if grouped else ""
+    monitored = ("per account" if "ACCOUNT_NUMBER" in columns or "SUB_ACCT_CODE" in columns
+                 else "per customer" if "CUS_NUM" in columns else "each transaction")
+    window = tuple(sorted({"".join(part for part in m if part) for m in _WINDOW_RE.findall(sql or "")}))
+    direction = {"1": "debit", "2": "credit"}.get(next(iter(_DIRECTION_RE.findall(sql or "")), ""), None)
+    return {
+        "codes": codes,
+        "amounts": tuple(sorted((op, float(n)) for op, n in _AMOUNT_RE.findall(sql or ""))),
+        "counts": tuple(sorted((op, int(n)) for op, n in _COUNT_RE.findall(sql or ""))),
+        "period": (tuple(sorted(set(_DATE_RE.findall(sql or "")))), window),
+        "monitored": monitored,
+        "direction": direction,
+    }
+
+
+def _describe_period(period: Tuple[Tuple[str, ...], Tuple[str, ...]]) -> str:
+    """A period as people read it.
+
+    Args:
+        period (Tuple[Tuple[str, ...], Tuple[str, ...]]): (dates, window sizes) from :func:`rule_parts`.
+
+    Returns:
+        str: e.g. '2019-01-01 to 2019-04-01', 'window 30', or 'no date limit'.
+    """
+    dates, window = period
+    if len(dates) >= 2:
+        return f"{dates[0]} to {dates[-1]}"
+    if dates:
+        return f"from {dates[0]}"
+    return f"window {', '.join(window)}" if window else "no date limit"
+
+
+def _describe_limits(amounts: Tuple[Tuple[str, float], ...], counts: Tuple[Tuple[str, int], ...]) -> str:
+    """Thresholds as people read them.
+
+    Args:
+        amounts (Tuple[Tuple[str, float], ...]): (operator, value) amount limits.
+        counts (Tuple[Tuple[str, int], ...]): (operator, value) count limits.
+
+    Returns:
+        str: e.g. 'amount > 50,000; count >= 3', or 'none'.
+    """
+    parts = [f"amount {op} {value:,.0f}" for op, value in amounts] + [f"count {op} {value}" for op, value in counts]
+    return "; ".join(parts) or "none"
+
+
+def compare_rules(new_sql: str, registered_sql: str) -> Tuple[float, List[str], List[str]]:
+    """How similar two detection rules are, and what they share and what differs.
+
+    Args:
+        new_sql (str): The rule being generated.
+        registered_sql (str): A registered scenario's RAW_SQL.
+
+    Returns:
+        Tuple[float, List[str], List[str]]: (similarity 0-100, what is the same, what differs).
+    """
+    new, old = rule_parts(new_sql), rule_parts(registered_sql)
+    same: List[str] = []
+    differs: List[str] = []
+    score: Dict[str, float] = {}
+
+    union = new["codes"] | old["codes"]
+    score["codes"] = len(new["codes"] & old["codes"]) / len(union) if union else 1.0
+    if union and new["codes"] == old["codes"]:
+        same.append(f"transaction codes ({len(new['codes'])})")
+    elif union:
+        differs.append(f"transaction codes: {len(new['codes'] & old['codes'])} shared, "
+                       f"{len(new['codes'] - old['codes'])} only in the new rule, "
+                       f"{len(old['codes'] - new['codes'])} only in the registered one")
+
+    limits_new, limits_old = new["amounts"] + new["counts"], old["amounts"] + old["counts"]
+    new_limits = _describe_limits(new["amounts"], new["counts"])
+    if limits_new == limits_old:
+        score["amounts"] = 1.0
+        same.append(f"thresholds: {new_limits}")
+    else:
+        # The same kind of threshold with another value is closer than a different kind of rule.
+        same_kind = bool(limits_new) and {op for op, _ in limits_new} == {op for op, _ in limits_old}
+        score["amounts"] = 0.5 if same_kind else 0.0
+        differs.append(f"thresholds: {new_limits} vs {_describe_limits(old['amounts'], old['counts'])}")
+
+    score["period"] = 1.0 if new["period"] == old["period"] else 0.0
+    (same if score["period"] else differs).append(
+        f"period: {_describe_period(new['period'])}" if score["period"] else
+        f"period: {_describe_period(new['period'])} vs {_describe_period(old['period'])}")
+
+    score["monitored"] = 1.0 if new["monitored"] == old["monitored"] else 0.0
+    (same if score["monitored"] else differs).append(
+        f"monitored: {new['monitored']}" if score["monitored"] else f"monitored: {new['monitored']} vs {old['monitored']}")
+
+    score["direction"] = 1.0 if new["direction"] == old["direction"] else 0.0
+    if new["direction"] or old["direction"]:
+        (same if score["direction"] else differs).append(
+            f"direction: {new['direction']}" if score["direction"] else
+            f"direction: {new['direction'] or 'any'} vs {old['direction'] or 'any'}")
+
+    score["text"] = difflib.SequenceMatcher(None, sql_fingerprint(new_sql), sql_fingerprint(registered_sql)).ratio()
+    total = sum(_SIMILARITY_WEIGHTS[part] * value for part, value in score.items())
+    if sql_fingerprint(new_sql) == sql_fingerprint(registered_sql):
+        total = 1.0
+    return round(100 * total, 1), same, differs
+
+
+def find_similar_scenarios(raw_sql: str, limit: int = 3, min_similarity: float = 50.0) -> List[Dict[str, Any]]:
+    """The registered scenarios most like a rule being generated, most similar first. Read-only.
+
+    Args:
+        raw_sql (str): The generated SQL (as shadow-tested).
+        limit (int): How many to return.
+        min_similarity (float): The lowest similarity (0-100) worth reporting.
+
+    Returns:
+        List[Dict[str, Any]]: 'scenario_id', 'scenario_name', 'is_active', 'similarity_pct',
+            'identical', 'same', 'differences'. Empty when nothing is close or the registry cannot be read.
+    """
+    try:
+        _, rows = run_readonly("SELECT SCENARIO_ID, SCENARIO_NAME, IS_ACTIVE, RAW_SQL FROM PIO_AML_PRODUCTION_SCENARIOS")
+    except Exception as exc:  # the comparison is extra information; the shadow test stands without it
+        logger.warning("[REGISTRY_ANALYTICS] Similar-scenario check skipped (%s)", type(exc).__name__)
+        return []
+    found = []
+    for scenario_id, scenario_name, is_active, sql in rows:
+        registered = _clob_to_str(sql)
+        similarity, same, differs = compare_rules(raw_sql, registered)
+        if similarity >= min_similarity:
+            found.append({
+                "scenario_id": scenario_id,
+                "scenario_name": scenario_name,
+                "is_active": is_active == 1,
+                "similarity_pct": similarity,
+                "identical": similarity == 100.0 and not differs,
+                "same": same,
+                "differences": differs,
+            })
+    found.sort(key=lambda item: (-item["similarity_pct"], str(item["scenario_id"])))
+    return found[:limit]
 
 _ALERT_DATA_NOTE = (
     "Alert tables (PIO_AML_CUSTOMERS / PIO_AML_CUSTOMERS_DET) are populated by the "
