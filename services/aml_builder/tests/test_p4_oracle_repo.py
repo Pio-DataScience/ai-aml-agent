@@ -13,6 +13,7 @@ from services.aml_builder.web.adapters import oracle_repo
 
 
 def test_legacy_shared_registry_is_ignored_and_agent_registry_created(monkeypatch):
+    monkeypatch.setattr(oracle_repo.settings, "ORACLE_REGISTRY_SCHEMA_PROVISIONING_ENABLED", True)
     calls = []
 
     def fake_select(sql, params=None):
@@ -33,6 +34,7 @@ def test_legacy_shared_registry_is_ignored_and_agent_registry_created(monkeypatc
 
 
 def test_incompatible_agent_registry_fails_with_typed_schema_error(monkeypatch):
+    monkeypatch.setattr(oracle_repo.settings, "ORACLE_REGISTRY_SCHEMA_PROVISIONING_ENABLED", True)
     def fake_select(sql, _params=None):
         if "ALL_TABLES" in sql:
             return [], [("PIO_AML_AGENT_PRODUCTION_SCENARIOS",)]
@@ -105,6 +107,6 @@ def test_application_adapter_source_has_no_forbidden_schema_or_row_removal_sql()
         web_root / "api" / "routes" / "deploy.py",
         web_root / "api" / "routes" / "workflow.py",
     ]
-    for prohibited in ("DELETE FROM", "DROP TABLE", "DROP INDEX", "TRUNCATE", "ALTER TABLE"):
+    for prohibited in (r"\bDELETE\s+FROM\b", r"\bDROP\s+TABLE\b", r"\bDROP\s+INDEX\b", r"\bTRUNCATE\b", r"\bALTER\s+TABLE\b"):
         for source_path in source_paths:
-            assert prohibited not in source_path.read_text(encoding="utf-8").upper()
+            assert not re.search(prohibited, source_path.read_text(encoding="utf-8").upper())

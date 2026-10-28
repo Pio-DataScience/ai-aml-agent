@@ -121,15 +121,34 @@ class EmbeddingProviderManager:
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         """Embed text batches, serializing access to local model instances."""
+        if not texts:
+            return []
         adapter = self.get()
         if self.identity.provider.startswith("local_"):
             with _LOCAL_INFERENCE_LOCK:
                 vectors = adapter.encode(texts, convert_to_numpy=True)
-            return vectors.tolist()
-        return adapter.embed_documents(texts)
+            result = vectors.tolist()
+        else:
+            result = adapter.embed_documents(texts)
+        self._validate_vectors(result, expected_count=len(texts))
+        return result
 
     def embed_query(self, text: str) -> list[float]:
         """Embed one query using the same configured model and cache key."""
         if self.identity.provider.startswith("local_"):
             return self.embed_documents([text])[0]
-        return self.get().embed_query(text)
+        vector = self.get().embed_query(text)
+        self._validate_vectors([vector], expected_count=1)
+        return vector
+
+    def _validate_vectors(
+        self, vectors: list[list[float]], *, expected_count: int
+    ) -> None:
+        """Reject provider output that cannot match the persisted Chroma dimension."""
+        if len(vectors) != expected_count or any(
+            len(vector) != self.identity.dimension for vector in vectors
+        ):
+            raise ValueError(
+                "Embedding output dimension does not match configured index identity "
+                f"({self.identity.dimension})"
+            )

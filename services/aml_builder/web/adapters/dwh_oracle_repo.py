@@ -49,15 +49,31 @@ class CandidateQueryResult:
 
 
 class DwhOracleRepository:
-    """Use Service A's initialized Oracle pool for guarded DWH reads."""
+    """Use Service A's independently configured DWH reader pool."""
 
-    def __init__(self, *, connection_provider: Any = oracle.get_connection) -> None:
+    def __init__(
+        self,
+        *,
+        connection_provider: Any = oracle.get_dwh_connection,
+        allowed_schemas: tuple[str, ...] | None = None,
+        allowed_objects: tuple[str, ...] | None = None,
+        max_candidate_rows: int | None = None,
+        read_timeout_seconds: float | None = None,
+    ) -> None:
         """Create a repository with an injectable connection context factory.
 
         Args:
             connection_provider: Context manager yielding a fake or pooled connection.
+            allowed_schemas: Optional per-repository schema allowlist.
+            allowed_objects: Optional per-repository object allowlist.
+            max_candidate_rows: Optional stricter row cap for this repository.
+            read_timeout_seconds: Optional stricter call timeout.
         """
         self._connection_provider = connection_provider
+        self._allowed_schemas = allowed_schemas
+        self._allowed_objects = allowed_objects
+        self._max_candidate_rows = max_candidate_rows
+        self._read_timeout_seconds = read_timeout_seconds
 
     def execute_candidate(
         self,
@@ -85,17 +101,33 @@ class DwhOracleRepository:
             validate_oracle_read(
                 sql,
                 params=params,
-                allowed_schemas=tuple(settings.DWH_SQL_ALLOWED_SCHEMAS),
-                allowed_objects=tuple(settings.DWH_SQL_ALLOWED_OBJECTS),
+                allowed_schemas=(
+                    self._allowed_schemas
+                    if self._allowed_schemas is not None
+                    else tuple(settings.DWH_SQL_ALLOWED_SCHEMAS)
+                ),
+                allowed_objects=(
+                    self._allowed_objects
+                    if self._allowed_objects is not None
+                    else tuple(settings.DWH_SQL_ALLOWED_OBJECTS)
+                ),
                 required_projection=required_projection,
                 confirmed_filters=confirmed_filters,
             )
             remaining = budget.consume()
-            sample_limit = settings.DWH_SQL_MAX_CANDIDATE_ROWS
+            sample_limit = min(
+                settings.DWH_SQL_MAX_CANDIDATE_ROWS,
+                self._max_candidate_rows or settings.DWH_SQL_MAX_CANDIDATE_ROWS,
+            )
             with self._connection_provider() as connection:
                 cursor = connection.cursor()
                 cursor.call_timeout = int(
-                    min(settings.DWH_SQL_READ_TIMEOUT_SECONDS, remaining) * 1000
+                    min(
+                        self._read_timeout_seconds
+                        or settings.DWH_SQL_READ_TIMEOUT_SECONDS,
+                        remaining,
+                    )
+                    * 1000
                 )
                 cursor.execute(sql, params or {})
                 columns = tuple(item[0] for item in (cursor.description or ()))
@@ -176,6 +208,135 @@ class DwhOracleRepository:
             ),
         )
 
+    def read_schema_metadata(
+        self,
+        schemas: tuple[str, ...],
+        objects: tuple[str, ...],
+        *,
+        budget: OracleRequestBudget,
+        max_rows: int = 2000,
+    ) -> tuple[list[str], list[tuple[Any, ...]]]:
+        """Read bounded Oracle object and column comments for configured scope.
+
+        Args:
+            schemas: Explicit schema allowlist.
+            objects: Explicit schema-qualified object allowlist.
+            budget: Shared Oracle statement and wall-time budget.
+            max_rows: Maximum dictionary rows to fetch.
+
+        Returns:
+            Available table and column metadata; absent objects are not errors.
+        """
+        max_rows = _positive_limit(max_rows, 5000)
+        normalized_schemas = tuple(dict.fromkeys(_identifier(item) for item in schemas))
+        normalized_objects_list: list[tuple[str, str]] = []
+        for item in objects:
+            if item.count(".") != 1:
+                raise ValueError("Objects must use schema-qualified identifiers")
+            owner, name = item.split(".", 1)
+            normalized_objects_list.append((_identifier(owner), _identifier(name)))
+        normalized_objects = tuple(dict.fromkeys(normalized_objects_list))
+        if not normalized_schemas or not normalized_objects:
+            raise ValueError("Configured schema and object allowlists are required")
+        if any(owner not in normalized_schemas for owner, _name in normalized_objects):
+            raise ValueError("Object scope exceeds configured schema allowlist")
+        params: dict[str, Any] = {}
+        schema_binds: list[str] = []
+        for index, schema in enumerate(normalized_schemas):
+            key = f"schema_{index}"
+            schema_binds.append(f":{key}")
+            params[key] = schema
+        object_binds: list[str] = []
+        for index, (_owner, name) in enumerate(normalized_objects):
+            key = f"object_{index}"
+            object_binds.append(f":{key}")
+            params[key] = name
+        sql = (
+            "SELECT o.OWNER, o.OBJECT_NAME AS TABLE_NAME, c.COLUMN_NAME, "
+            "c.DATA_TYPE, c.DATA_LENGTH, c.DATA_PRECISION, c.DATA_SCALE, "
+            "c.NULLABLE, tc.COMMENTS AS TABLE_COMMENT, "
+            "cc.COMMENTS AS COLUMN_COMMENT, NVL(s.TABLE_OWNER,o.OWNER) AS TARGET_OWNER, "
+            "NVL(s.TABLE_NAME,o.OBJECT_NAME) AS TARGET_NAME, o.OBJECT_TYPE "
+            "FROM ALL_OBJECTS o LEFT JOIN ALL_SYNONYMS s "
+            "ON s.OWNER=o.OWNER AND s.SYNONYM_NAME=o.OBJECT_NAME "
+            "AND o.OBJECT_TYPE='SYNONYM' AND s.DB_LINK IS NULL "
+            "JOIN ALL_TAB_COLUMNS c ON c.OWNER=NVL(s.TABLE_OWNER,o.OWNER) "
+            "AND c.TABLE_NAME=NVL(s.TABLE_NAME,o.OBJECT_NAME) "
+            "LEFT JOIN ALL_TAB_COMMENTS tc ON tc.OWNER=c.OWNER "
+            "AND tc.TABLE_NAME=c.TABLE_NAME "
+            "LEFT JOIN ALL_COL_COMMENTS cc ON cc.OWNER=c.OWNER "
+            "AND cc.TABLE_NAME=c.TABLE_NAME AND cc.COLUMN_NAME=c.COLUMN_NAME "
+            f"WHERE o.OWNER IN ({', '.join(schema_binds)}) "
+            f"AND o.OBJECT_NAME IN ({', '.join(object_binds)}) "
+            "AND o.OBJECT_TYPE IN ('TABLE','VIEW','MATERIALIZED VIEW','SYNONYM') "
+            "ORDER BY o.OWNER, o.OBJECT_NAME, c.COLUMN_ID "
+            f"FETCH FIRST {max_rows} ROWS ONLY"
+        )
+        return self._read_guarded(
+            sql,
+            params,
+            budget=budget,
+            max_rows=max_rows,
+            allowed_objects=(
+                "ALL_OBJECTS",
+                "ALL_SYNONYMS",
+                "ALL_TAB_COLUMNS",
+                "ALL_TAB_COMMENTS",
+                "ALL_COL_COMMENTS",
+            ),
+        )
+
+    def read_schema_object_resolution(
+        self,
+        schemas: tuple[str, ...],
+        objects: tuple[str, ...],
+        *,
+        budget: OracleRequestBudget,
+        max_rows: int = 100,
+    ) -> tuple[list[str], list[tuple[Any, ...]]]:
+        """Resolve configured objects and local synonym targets from Oracle metadata."""
+        max_rows = _positive_limit(max_rows, 500)
+        normalized_schemas = tuple(dict.fromkeys(_identifier(item) for item in schemas))
+        normalized_objects: list[tuple[str, str]] = []
+        for item in objects:
+            if item.count(".") != 1:
+                raise ValueError("Objects must use schema-qualified identifiers")
+            owner, name = item.split(".", 1)
+            normalized_objects.append((_identifier(owner), _identifier(name)))
+        if not normalized_schemas or not normalized_objects:
+            raise ValueError("Configured schema and object allowlists are required")
+        if any(owner not in normalized_schemas for owner, _name in normalized_objects):
+            raise ValueError("Object scope exceeds configured schema allowlist")
+        params: dict[str, Any] = {}
+        schema_binds: list[str] = []
+        for index, schema in enumerate(normalized_schemas):
+            key = f"schema_{index}"
+            schema_binds.append(f":{key}")
+            params[key] = schema
+        object_binds: list[str] = []
+        for index, (_owner, name) in enumerate(normalized_objects):
+            key = f"object_{index}"
+            object_binds.append(f":{key}")
+            params[key] = name
+        sql = (
+            "SELECT o.OWNER, o.OBJECT_NAME, o.OBJECT_TYPE, o.STATUS, "
+            "s.TABLE_OWNER, s.TABLE_NAME, s.DB_LINK "
+            "FROM ALL_OBJECTS o LEFT JOIN ALL_SYNONYMS s "
+            "ON s.OWNER=o.OWNER AND s.SYNONYM_NAME=o.OBJECT_NAME "
+            f"WHERE o.OWNER IN ({', '.join(schema_binds)}) "
+            f"AND o.OBJECT_NAME IN ({', '.join(object_binds)}) "
+            "AND o.OBJECT_TYPE IN ('TABLE','VIEW','MATERIALIZED VIEW','SYNONYM') "
+            "ORDER BY o.OWNER,o.OBJECT_NAME "
+            f"FETCH FIRST {max_rows} ROWS ONLY"
+        )
+        return self._read_guarded(
+            sql,
+            params,
+            budget=budget,
+            max_rows=max_rows,
+            allowed_objects=("ALL_OBJECTS", "ALL_SYNONYMS"),
+        )
+
     def probe_column_values(
         self,
         owner: str,
@@ -241,14 +402,24 @@ class DwhOracleRepository:
         validate_oracle_read(
             sql,
             params=params,
-            allowed_schemas=tuple(settings.DWH_SQL_ALLOWED_SCHEMAS),
-            allowed_objects=allowed_objects or tuple(settings.DWH_SQL_ALLOWED_OBJECTS),
+            allowed_schemas=(
+                self._allowed_schemas
+                if self._allowed_schemas is not None
+                else tuple(settings.DWH_SQL_ALLOWED_SCHEMAS)
+            ),
+            allowed_objects=allowed_objects
+            or self._allowed_objects
+            or tuple(settings.DWH_SQL_ALLOWED_OBJECTS),
         )
         remaining = budget.consume()
         with self._connection_provider() as connection:
             cursor = connection.cursor()
             cursor.call_timeout = int(
-                min(settings.DWH_SQL_READ_TIMEOUT_SECONDS, remaining) * 1000
+                min(
+                    self._read_timeout_seconds or settings.DWH_SQL_READ_TIMEOUT_SECONDS,
+                    remaining,
+                )
+                * 1000
             )
             cursor.execute(sql, params or {})
             columns = [item[0] for item in (cursor.description or ())]

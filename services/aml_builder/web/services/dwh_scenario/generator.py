@@ -17,6 +17,7 @@ from services.aml_builder.web.domain.dwh_scenario.sql_policy import (
     validate_oracle_read,
 )
 from services.aml_builder.web.domain.dwh_scenario.validation import (
+    derive_candidate_bind_values,
     validate_generated_sql,
 )
 from services.aml_builder.web.services.dwh_scenario.critique import critique_candidate
@@ -168,9 +169,12 @@ class LocalScenarioSqlGenerator:
                 )
                 counters.tokens += _usage_tokens(response)
                 last_sql = _response_text(response).strip()
+                bind_values: dict[str, Any] = {}
                 try:
+                    bind_values = derive_candidate_bind_values(request, last_sql)
                     validate_oracle_read(
                         last_sql,
+                        params=bind_values,
                         allowed_schemas=tuple(self._config.DWH_SQL_ALLOWED_SCHEMAS),
                         allowed_objects=tuple(self._config.DWH_SQL_ALLOWED_OBJECTS),
                         required_projection="CUS_NUM",
@@ -179,7 +183,9 @@ class LocalScenarioSqlGenerator:
                             for item in request.confirmed_filters
                         ],
                     )
-                    findings = validate_generated_sql(request, last_sql)
+                    findings = validate_generated_sql(
+                        request, last_sql, params=bind_values
+                    )
                 except SqlPolicyError as exc:
                     findings = [str(exc)]
                 self._reserve(counters, deadline)
@@ -187,6 +193,7 @@ class LocalScenarioSqlGenerator:
                     execute_sql(
                         self._repository,
                         last_sql,
+                        params=bind_values,
                         budget=oracle_budget,
                         required_projection="CUS_NUM",
                         confirmed_filters=[

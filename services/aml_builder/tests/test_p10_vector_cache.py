@@ -53,7 +53,7 @@ def test_failed_cache_key_lookup_rebuilds_instead_of_returning_memory_cache(
     monkeypatch.setattr(search, "CACHE_DIR", tmp_path)
     monkeypatch.setattr(search, "_VECTOR_CACHE", {"metadata": [{"code": "stale"}]})
     monkeypatch.setattr(search, "_get_vector_cache_key", lambda: (_ for _ in ()).throw(RuntimeError("offline")))
-    monkeypatch.setattr(oracle, "run_readonly", lambda *_args, **_kwargs: ([], [("fresh", "Fresh", None, "Long")]))
+    monkeypatch.setattr(oracle, "run_dwh_readonly", lambda *_args, **_kwargs: ([], [("fresh", "Fresh", None, "Long")]))
 
     class FakeEmbeddings:
         def __init__(self, **_kwargs):

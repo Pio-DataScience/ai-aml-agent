@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
-from services.aml_builder.web.services.oracle import atomic_connection, get_connection, run_readonly, run_write
+from services.aml_builder.web.services.oracle import (
+    get_registry_connection as get_connection,
+    registry_atomic_connection as atomic_connection,
+    run_registry_readonly as run_readonly,
+    run_registry_write as run_write,
+)
 from services.aml_builder.web.services.settings import settings
 
 REGISTRY_COLUMNS = frozenset(
@@ -21,6 +27,32 @@ REGISTRY_COLUMNS = frozenset(
 
 PRODUCTION_TABLE = "PIO_AML_AGENT_PRODUCTION_SCENARIOS"
 METADATA_TABLE = "PIO_AML_AGENT_SCENARIOS"
+
+
+def _registry_name(name: str) -> str:
+    """Translate the default application prefix to the configured namespace."""
+    return settings.ORACLE_REGISTRY_NAMESPACE.upper() + name[len("PIO_AML_AGENT"):]
+
+
+def _registry_sql(sql: str) -> str:
+    """Apply the configured registry namespace to application-owned identifiers."""
+    prefix = settings.ORACLE_REGISTRY_NAMESPACE.upper()
+    return re.sub(r"\bPIO_AML_AGENT(?=_|\b)", prefix, sql, flags=re.IGNORECASE)
+
+
+def _registry_readonly(sql: str, params: dict[str, Any] | None = None) -> tuple[list[str], list[tuple]]:
+    """Read from the configured registry role and namespace."""
+    return run_readonly(_registry_sql(sql), params)
+
+
+def _registry_write(sql: str, params: dict[str, Any] | None = None) -> int:
+    """Execute registry DML through the configured registry role."""
+    return run_write(_registry_sql(sql), params)
+
+
+def _registry_execute(cursor: Any, sql: str, params: Any = None) -> Any:
+    """Execute one repository-owned statement in the configured namespace."""
+    return cursor.execute(_registry_sql(sql), params) if params is not None else cursor.execute(_registry_sql(sql))
 
 SCHEMA_DDLS = {
     "PIO_AML_AGENT_PRODUCTION_SCENARIOS": """
@@ -111,21 +143,29 @@ class OracleRegistryRepo:
     """Read and write registry-v2 rows through Oracle transactions."""
 
     def ensure_schema(self) -> None:
-        """Create missing v2 tables/indexes and record the schema version.
+        """Provision missing v2 registry objects when explicitly enabled.
 
         Existing objects are never altered. The legacy shared registry tables are
         left untouched; this application creates its own agent-prefixed tables.
+
+        Raises:
+            PermissionError: If explicit provisioning has not been enabled.
         """
-        owner = settings.ORACLE_USER.upper()
+        if not settings.ORACLE_REGISTRY_SCHEMA_PROVISIONING_ENABLED:
+            raise PermissionError(
+                "Registry schema provisioning is disabled; provision it through "
+                "an explicitly authorized operation."
+            )
+        owner = (settings.ORACLE_REGISTRY_SCHEMA or settings.ORACLE_USER).upper()
         tables = _names(
-            run_readonly(
+            _registry_readonly(
                 "SELECT TABLE_NAME FROM ALL_TABLES WHERE OWNER=UPPER(:owner)",
                 {"owner": owner},
             )[1]
         )
         if "pio_aml_agent_production_scenarios" in tables:
             columns = _names(
-                run_readonly(
+                _registry_readonly(
                     "SELECT COLUMN_NAME FROM ALL_TAB_COLUMNS WHERE OWNER=UPPER(:owner) AND TABLE_NAME='PIO_AML_AGENT_PRODUCTION_SCENARIOS'",
                     {"owner": owner},
                 )[1]
@@ -139,23 +179,23 @@ class OracleRegistryRepo:
                 )
 
         for table_name, ddl in SCHEMA_DDLS.items():
-            if table_name.lower() not in tables:
-                _execute_ddl(ddl)
+            if _registry_name(table_name).lower() not in tables:
+                _execute_ddl(_registry_sql(ddl))
         indexes = _names(
-            run_readonly(
+            _registry_readonly(
                 "SELECT INDEX_NAME FROM ALL_INDEXES WHERE OWNER=UPPER(:owner)",
                 {"owner": owner},
             )[1]
         )
         for index_name, ddl in SCHEMA_INDEXES.items():
-            if index_name.lower() not in indexes:
-                _execute_ddl(ddl)
-        version = run_readonly(
+            if _registry_name(index_name).lower() not in indexes:
+                _execute_ddl(_registry_sql(ddl))
+        version = _registry_readonly(
             "SELECT VERSION FROM PIO_AML_AGENT_SCHEMA_VERSION WHERE COMPONENT=:component",
             {"component": "scenario_registry"},
         )[1]
         if not version:
-            run_write(
+            _registry_write(
                 "INSERT INTO PIO_AML_AGENT_SCHEMA_VERSION (COMPONENT, VERSION, APPLIED_AT) VALUES (:component, :version, SYSTIMESTAMP)",
                 {"component": "scenario_registry", "version": 2},
             )
@@ -166,7 +206,7 @@ class OracleRegistryRepo:
 
     def get_by_thread(self, thread_id: str) -> dict[str, Any] | None:
         """Find an existing deployment by its unique chat identifier."""
-        columns, rows = run_readonly(
+        columns, rows = _registry_readonly(
             "SELECT SCENARIO_ID, SCENARIO_NAME, THREAD_ID, REVISION_ID, PARENT_SCENARIO_ID, RECEIPT_JSON FROM PIO_AML_AGENT_PRODUCTION_SCENARIOS WHERE THREAD_ID=:thread_id",
             {"thread_id": thread_id},
         )
@@ -174,7 +214,7 @@ class OracleRegistryRepo:
 
     def get_version(self, scenario_id: str) -> dict[str, Any] | None:
         """Return one exact version with all stored comparison and seed JSON."""
-        columns, rows = run_readonly(
+        columns, rows = _registry_readonly(
             """SELECT SCENARIO_ID,SCENARIO_KEY,VERSION_NO,PARENT_SCENARIO_ID,STATUS,IS_ACTIVE,
             THREAD_ID,REVISION_ID,REV_NO,SIGNATURE_HASH,PARAMS_HASH,PLAN_HASH,SQL_HASH,METADATA_HASH,
             SIGNATURE_JSON,PARAMS_JSON,FILTERS_JSON,METADATA_JSON,RECEIPT_JSON,CHANGE_REASON,
@@ -186,7 +226,7 @@ class OracleRegistryRepo:
 
     def list_versions(self, scenario_key: str) -> list[dict[str, Any]]:
         """Return every version for a stable key, newest first."""
-        columns, rows = run_readonly(
+        columns, rows = _registry_readonly(
             """SELECT SCENARIO_ID,SCENARIO_KEY,VERSION_NO,PARENT_SCENARIO_ID,STATUS,IS_ACTIVE,
             SIGNATURE_HASH,METADATA_HASH,SIGNATURE_JSON,PARAMS_JSON,FILTERS_JSON,METADATA_JSON,
             RECEIPT_JSON,CHANGE_REASON,SCENARIO_NAME,SCENARIO_TYPE,CREATED_BY,CREATED_AT,UPDATED_BY,UPDATED_AT
@@ -203,7 +243,7 @@ class OracleRegistryRepo:
 
     def latest_active_version(self, scenario_key: str) -> dict[str, Any] | None:
         """Return the active version for a key, if one exists."""
-        columns, rows = run_readonly(
+        columns, rows = _registry_readonly(
             """SELECT SCENARIO_ID,SCENARIO_KEY,VERSION_NO,STATUS,IS_ACTIVE,SIGNATURE_HASH,
             SIGNATURE_JSON,METADATA_JSON FROM PIO_AML_AGENT_PRODUCTION_SCENARIOS
             WHERE SCENARIO_KEY=:scenario_key AND STATUS='ACTIVE'""",
@@ -215,7 +255,7 @@ class OracleRegistryRepo:
 
     def list_version_audit(self, scenario_key: str) -> list[dict[str, Any]]:
         """Return creation and status events for all versions of a key."""
-        columns, rows = run_readonly(
+        columns, rows = _registry_readonly(
             """SELECT SCENARIO_ID,ACTION,ACTOR,ACTOR_ROLE,TS,FROM_STATUS,TO_STATUS,REASON
             FROM PIO_AML_AGENT_SCENARIO_AUDIT WHERE SCENARIO_KEY=:scenario_key ORDER BY TS DESC""",
             {"scenario_key": scenario_key},
@@ -224,7 +264,7 @@ class OracleRegistryRepo:
 
     def get_active_by_key(self, scenario_key: str) -> list[dict[str, Any]]:
         """Return active versions for one stable scenario key."""
-        columns, rows = run_readonly(
+        columns, rows = _registry_readonly(
             "SELECT SCENARIO_ID, SCENARIO_KEY, VERSION_NO, SIGNATURE_HASH, SIGNATURE_JSON FROM PIO_AML_AGENT_PRODUCTION_SCENARIOS WHERE SCENARIO_KEY=:scenario_key AND STATUS='ACTIVE'",
             {"scenario_key": scenario_key},
         )
@@ -237,7 +277,7 @@ class OracleRegistryRepo:
         if scenario_type:
             sql += " AND UPPER(SCENARIO_TYPE)=UPPER(:scenario_type)"
             params["scenario_type"] = scenario_type
-        columns, rows = run_readonly(sql, params)
+        columns, rows = _registry_readonly(sql, params)
         return [_row_dict(columns, row) for row in rows]
 
     def insert_version(self, row: dict[str, Any]) -> dict[str, Any]:
@@ -246,12 +286,12 @@ class OracleRegistryRepo:
             with atomic_connection() as connection:
                 cursor = connection.cursor()
                 if row.get("parent_scenario_id"):
-                    cursor.execute(
+                    _registry_execute(cursor,
                         "SELECT SCENARIO_KEY,VERSION_NO,STATUS FROM PIO_AML_AGENT_PRODUCTION_SCENARIOS WHERE SCENARIO_ID=:scenario_id",
                         {"scenario_id": row["parent_scenario_id"]},
                     )
                     parent = cursor.fetchone()
-                    cursor.execute(
+                    _registry_execute(cursor,
                         "SELECT MAX(VERSION_NO) FROM PIO_AML_AGENT_PRODUCTION_SCENARIOS WHERE SCENARIO_KEY=:scenario_key",
                         {"scenario_key": row["scenario_key"]},
                     )
@@ -268,7 +308,7 @@ class OracleRegistryRepo:
                         raise RegistryStaleError("REVISE_STALE", "Start again from the latest version.")
                 if row.get("parent_scenario_id") and str(row.get("parent_status") or "ACTIVE").upper() == "ACTIVE":
                     self.supersede(cursor, row)
-                cursor.execute(
+                _registry_execute(cursor,
                     """INSERT INTO PIO_AML_AGENT_PRODUCTION_SCENARIOS
                     (SCENARIO_ID,SCENARIO_KEY,VERSION_NO,PARENT_SCENARIO_ID,STATUS,IS_ACTIVE,
                      THREAD_ID,REVISION_ID,REV_NO,SIGNATURE_HASH,PARAMS_HASH,PLAN_HASH,SQL_HASH,
@@ -342,7 +382,7 @@ class OracleRegistryRepo:
             raise ValueError(f"Unsupported scenario status: {status}")
         active = int(status == "ACTIVE")
         expected_active = int(from_status == "ACTIVE")
-        cursor.execute(
+        _registry_execute(cursor,
             "SELECT SCENARIO_KEY,METADATA_JSON FROM PIO_AML_AGENT_PRODUCTION_SCENARIOS WHERE SCENARIO_ID=:scenario_id",
             {"scenario_id": scenario_id},
         )
@@ -365,13 +405,13 @@ class OracleRegistryRepo:
             "status": status, "active": active, "actor": actor,
             "scenario_id": scenario_id, "from_status": from_status,
         }
-        cursor.execute(
+        _registry_execute(cursor,
             "UPDATE PIO_AML_AGENT_PRODUCTION_SCENARIOS SET STATUS=:status, IS_ACTIVE=:active, UPDATED_BY=:actor, UPDATED_AT=SYSTIMESTAMP WHERE SCENARIO_ID=:scenario_id AND STATUS=:from_status",
             binds,
         )
         if cursor.rowcount != 1:
             raise RegistryStaleError("VERSION_STALE", "The scenario status changed. Refresh version history and try again.")
-        cursor.execute(
+        _registry_execute(cursor,
             "UPDATE PIO_AML_AGENT_SCENARIOS SET ACTIVE_FLAG=:active, UPDATED_BY=:actor, UPDATED_DATE=SYSDATE WHERE COUNTRY_CODE=:country AND INST_CODE=:institution AND SCENARIO_CODE=:scenario_id AND ACTIVE_FLAG=:expected_active",
             {
                 "active": str(active),
@@ -417,7 +457,7 @@ class OracleRegistryRepo:
     @staticmethod
     def _supersede_in_transaction(cursor: Any, row: dict[str, Any]) -> None:
         parent_id = row["parent_scenario_id"]
-        cursor.execute(
+        _registry_execute(cursor,
             "SELECT SCENARIO_KEY, STATUS FROM PIO_AML_AGENT_PRODUCTION_SCENARIOS WHERE SCENARIO_ID=:scenario_id",
             {"scenario_id": parent_id},
         )
@@ -442,7 +482,7 @@ class OracleRegistryRepo:
         country = _value(metadata, "COUNTRY_CODE", settings.AML_COUNTRY_CODE)
         institution = _value(metadata, "INST_CODE", settings.AML_INST_CODE)
         description = _value(metadata, "SCENARIO_DES_ENG", row["scenario_name"])
-        cursor.execute(
+        _registry_execute(cursor,
             """INSERT INTO PIO_AML_AGENT_SCENARIOS
             (COUNTRY_CODE,INST_CODE,SCENARIO_CODE,SCENARIO_DES_ENG,SCENARIO_DES_NAT_LAN,
              ACTIVE_FLAG,RUN_FLAG,VIOLATION_LEVEL,DEGREE_RISK_FLAG,CREATED_BY,CREATED_DATE,
@@ -462,7 +502,7 @@ class OracleRegistryRepo:
 
     @staticmethod
     def _append_audit_in_transaction(cursor: Any, row: dict[str, Any]) -> None:
-        cursor.execute(
+        _registry_execute(cursor,
             """INSERT INTO PIO_AML_AGENT_SCENARIO_AUDIT
             (AUDIT_ID,SCENARIO_ID,SCENARIO_KEY,ACTION,ACTOR,ACTOR_ROLE,TS,
              FROM_STATUS,TO_STATUS,REASON,DIFF_JSON)
@@ -484,7 +524,7 @@ class OracleRegistryRepo:
 
 def _execute_ddl(sql: str) -> None:
     with get_connection() as connection:
-        connection.cursor().execute(sql)
+        connection.cursor().execute(_registry_sql(sql))
 
 
 def _names(rows: list[tuple]) -> set[str]:
@@ -523,7 +563,7 @@ def _number(value: Any, default: Any) -> int:
 
 def _lookup_scenario_key(cursor: Any, scenario_id: str) -> str:
     """Read the stable key for one exact scenario primary key."""
-    cursor.execute(
+    _registry_execute(cursor,
         "SELECT SCENARIO_KEY FROM PIO_AML_AGENT_PRODUCTION_SCENARIOS WHERE SCENARIO_ID=:scenario_id",
         {"scenario_id": scenario_id},
     )

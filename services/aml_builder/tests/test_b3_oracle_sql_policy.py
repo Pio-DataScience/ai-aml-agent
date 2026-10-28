@@ -156,6 +156,11 @@ def fake_settings(monkeypatch):
     monkeypatch.setattr(
         settings_module.settings, "DWH_SQL_ALLOWED_SCHEMAS", ("BI_DWH",)
     )
+    monkeypatch.setattr(
+        settings_module.settings,
+        "DWH_SQL_ALLOWED_OBJECTS",
+        ("BI_DWH.TX", "BI_DWH.COUNTRIES"),
+    )
     monkeypatch.setattr(settings_module.settings, "DWH_SQL_MAX_CANDIDATE_ROWS", 2)
     monkeypatch.setattr(settings_module.settings, "DWH_SQL_READ_TIMEOUT_SECONDS", 3.0)
 

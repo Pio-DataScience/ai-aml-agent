@@ -1,0 +1,2 @@
+# Install after requirements.txt only when using local_bge/local_finance.
+sentence-transformers==5.2.0

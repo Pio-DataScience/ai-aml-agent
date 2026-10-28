@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from services.aml_builder.web.services.oracle import (
     atomic_connection,
-    run_readonly,
+    run_registry_readonly as run_readonly,
     run_shadow_readonly,
 )
 from services.aml_builder.web.services.settings import settings
@@ -120,9 +120,7 @@ def execute_scenario_query(
         return [c.upper() for c in cols], rows
     except Exception as exc:
         logger.error("[ALERT_ENGINE] Error executing query against shadow pool: %s", exc)
-        # Fallback to primary readonly pool if shadow pool fails
-        cols, rows = run_readonly(executable_sql)
-        return [c.upper() for c in cols], rows
+        raise
 
 
 def _get_next_seq(cursor, table_name: str, key_conditions: Dict[str, Any]) -> int:

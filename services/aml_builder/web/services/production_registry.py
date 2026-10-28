@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from services.aml_builder.web.adapters.oracle_repo import OracleRegistryRepo
-from services.aml_builder.web.services.oracle import run_readonly
+from services.aml_builder.web.services.oracle import run_registry_readonly as run_readonly
 
 
 def init_production_scenarios_table() -> None:
@@ -43,7 +43,6 @@ def get_production_scenarios(is_active_only: bool = True) -> list[dict[str, Any]
     Returns:
         list[dict[str, Any]]: Active or all scenario records.
     """
-    init_production_scenarios_table()
     predicate = "WHERE IS_ACTIVE=1" if is_active_only else ""
     columns, rows = run_readonly(
         f"""SELECT SCENARIO_ID, SCENARIO_NAME, SCENARIO_TYPE, DETECTION_LOGIC,

@@ -31,7 +31,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 from langchain_openai import OpenAIEmbeddings
 
-from services.aml_builder.web.services.oracle import run_readonly
+from services.aml_builder.web.services.oracle import run_registry_readonly as run_readonly
 from services.aml_builder.web.services.settings import settings
 
 logger = logging.getLogger(__name__)

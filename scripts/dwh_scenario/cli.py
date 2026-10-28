@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 from typing import Sequence
 
+from services.aml_builder.web.services.settings import settings
 from services.aml_builder.web.services.dwh_scenario.toolchain import (
     build_experience_collection,
     build_schema_index as _build_schema_index,
@@ -18,6 +19,7 @@ from services.aml_builder.web.services.dwh_scenario.toolchain import (
     harvest_dictionary as _harvest_dictionary,
     ingest_pairs,
     read_jsonl,
+    schema_records_from_oracle_metadata,
     schema_collection_names,
     scoped_enrichment_sql,
 )
@@ -97,8 +99,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 0
     if args.command == "harvest-dictionary":
-        if args.max_rows < 1:
-            raise SystemExit("--max-rows must be positive")
+        if args.max_rows < 1 or args.max_rows > 5000:
+            raise SystemExit("--max-rows must be between 1 and 5000")
+        if not settings.DWH_SQL_ALLOWED_SCHEMAS or not settings.DWH_SQL_ALLOWED_OBJECTS:
+            raise SystemExit("Explicit schema and object allowlists are required")
         if args.dry_run:
             print(
                 json.dumps(
@@ -111,57 +115,39 @@ def main(argv: Sequence[str] | None = None) -> int:
             OracleRequestBudget,
         )
         from services.aml_builder.web.services import oracle
-        from services.aml_builder.web.services.settings import settings
-
-        oracle.init_pool()
+        oracle.init_shadow_pool()
         try:
             budget = OracleRequestBudget(
-                max_statements=2, deadline_seconds=settings.DWH_SQL_DEADLINE_SECONDS
-            )
-            sql = (
-                "SELECT TABLE_NAME, COLUMN_NAME, OBJECT_NAME, FLAGS "
-                "FROM PIO_BANKBI_DICTIONARY_COL ORDER BY TABLE_NAME, COLUMN_NAME "
-                f"FETCH FIRST {args.max_rows} ROWS ONLY"
+                max_statements=1, deadline_seconds=settings.DWH_SQL_DEADLINE_SECONDS
             )
             repo = DwhOracleRepository()
-            headers, rows = repo.read_dictionary(
-                sql, budget=budget, max_rows=args.max_rows
+            headers, rows = repo.read_schema_metadata(
+                tuple(settings.DWH_SQL_ALLOWED_SCHEMAS),
+                tuple(settings.DWH_SQL_ALLOWED_OBJECTS),
+                budget=budget,
+                max_rows=args.max_rows,
             )
-            records = [dict(zip(headers, row)) for row in rows]
-            tables = sorted(
-                {
-                    str(row.get("TABLE_NAME") or "")
-                    for row in records
-                    if row.get("TABLE_NAME")
-                }
+            tables, columns, found = schema_records_from_oracle_metadata(
+                headers,
+                rows,
+                allowed_schemas=tuple(settings.DWH_SQL_ALLOWED_SCHEMAS),
+                allowed_objects=tuple(settings.DWH_SQL_ALLOWED_OBJECTS),
+                internal_objects=tuple(settings.DWH_SQL_INDEX_INTERNAL_OBJECTS),
             )
-            documents = [
-                {
-                    "kind": "table",
-                    "id": name,
-                    "text": f"Table: {name}",
-                    "metadata": {"table_name": name},
-                }
-                for name in tables
-            ]
-            documents.extend(
-                {
-                    "kind": "column",
-                    "id": f"{row.get('TABLE_NAME')}.{row.get('COLUMN_NAME')}",
-                    "text": f"Table: {row.get('TABLE_NAME')} Column: {row.get('COLUMN_NAME')} Description: {row.get('OBJECT_NAME') or ''}",
-                    "metadata": {
-                        key: str(value)
-                        for key, value in row.items()
-                        if value is not None
-                    },
-                }
-                for row in records
-            )
+            documents = [{"kind": "table", **row} for row in tables]
+            documents.extend({"kind": "column", **row} for row in columns)
             manifest = _harvest_dictionary(
-                iter(documents), args.output, max_rows=args.max_rows * 2
+                iter(documents), args.output, max_rows=args.max_rows
+            )
+            manifest["objects_found"] = sorted(found)
+            manifest["objects_missing"] = sorted(
+                set(item.upper() for item in settings.DWH_SQL_ALLOWED_OBJECTS) - found
+            )
+            args.output.with_suffix(args.output.suffix + ".manifest.json").write_text(
+                json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
             )
         finally:
-            oracle.close_pool()
+            oracle.close_shadow_pool()
         print(
             json.dumps(
                 {
@@ -184,7 +170,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         "collections": (
                             list(schema_collection_names())
                             if args.command == "build-schema-index"
-                            else ["experience_templates"]
+                            else [settings.DWH_SQL_EXPERIENCE_COLLECTION]
                         ),
                     }
                 )
@@ -197,10 +183,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         from services.aml_builder.web.services.dwh_scenario.embeddings import (
             embedding_identity,
         )
-        from services.aml_builder.web.services.settings import settings
 
         if settings.DWH_SQL_CHROMA_PERSIST_DIR is None:
             raise SystemExit("DWH_SQL_CHROMA_PERSIST_DIR is required")
+        if not settings.DWH_SQL_INDEX_INSTITUTION_ID:
+            raise SystemExit(
+                "DWH_SQL_INDEX_INSTITUTION_ID is required for tenant-scoped index builds"
+            )
         client = chromadb.PersistentClient(
             path=str(settings.DWH_SQL_CHROMA_PERSIST_DIR)
         )
@@ -208,13 +197,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         records = read_jsonl(args.input)
         if args.command == "build-experience-index":
             build_experience_collection(
-                client, records, manager, embedding_identity(settings)
+                client,
+                records,
+                manager,
+                embedding_identity(settings),
+                collection_name=settings.DWH_SQL_EXPERIENCE_COLLECTION,
+                institution_id=settings.DWH_SQL_INDEX_INSTITUTION_ID,
             )
         else:
             tables = [row for row in records if row.get("kind") == "table"]
             columns = [row for row in records if row.get("kind") == "column"]
             _build_schema_index(
-                client, tables, columns, manager, embedding_identity(settings)
+                client,
+                tables,
+                columns,
+                manager,
+                embedding_identity(settings),
+                institution_id=settings.DWH_SQL_INDEX_INSTITUTION_ID,
+                config=settings,
             )
         print(json.dumps({"records": len(records), "promoted": True}))
         return 0

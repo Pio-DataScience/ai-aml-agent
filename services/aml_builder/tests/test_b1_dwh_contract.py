@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import date
 from types import SimpleNamespace
 
 import pytest
@@ -14,7 +15,12 @@ from services.aml_builder.web.domain.dwh_scenario.contracts import (
     ScenarioSqlRequest,
     ScenarioSqlResult,
 )
+from services.aml_builder.web.domain.dwh_scenario.sql_policy import (
+    SqlPolicyError,
+    validate_oracle_read,
+)
 from services.aml_builder.web.domain.dwh_scenario.validation import (
+    derive_candidate_bind_values,
     validate_generated_sql,
 )
 from services.aml_builder.web.domain.filter_applied_check import (
@@ -255,7 +261,17 @@ def test_contract_checks_projection_codes_and_rolling_baseline():
         time_window={"unit": "DAYS", "value": 30, "is_rolling": True},
         baseline_window={"unit": "DAYS", "duration": 180, "offset_days": 30},
     )
-    request = ScenarioSqlRequest(intent=intent)
+    request = ScenarioSqlRequest(
+        intent=intent,
+        confirmed_filters=[
+            {
+                "dimension": "explanation_code",
+                "target": {"table": "TX", "column": "EXPL_CODE"},
+                "status": "resolved",
+                "values": ["110"],
+            }
+        ],
+    )
     sql = "SELECT CUS_NUM FROM TX WHERE TX_DATE >= SYSDATE - 210 AND TX_DATE < SYSDATE - 30 AND EXPL_CODE IN ('110') AND TX_DATE >= SYSDATE - 30"
 
     assert validate_generated_sql(request, sql) == []
@@ -264,6 +280,139 @@ def test_contract_checks_projection_codes_and_rolling_baseline():
     assert any("EXPL_CODE" in finding for finding in findings)
     assert any("Rolling" in finding for finding in findings)
     assert any("Baseline" in finding for finding in findings)
+
+
+def _approved_cash_window_request() -> ScenarioSqlRequest:
+    """Build the approved synthetic 14-day scenario with a fixed evaluation date."""
+    intent = _intent(
+        scenario_name="Two week cash",
+        scenario_type="TRANSACTION",
+        transaction_type="CASH DEPOSIT",
+        explanation_codes=["4"],
+        detection_logic="Cash over two weeks",
+        time_window={"unit": "DAYS", "value": 14, "is_rolling": True},
+        anchor_date="2026-10-28",
+    )
+    return ScenarioSqlRequest(
+        intent=intent,
+        confirmed_filters=[
+            {
+                "dimension": "explanation_code",
+                "target": {"table": "PIO_TRANSACTIONS", "column": "EXPL_CODE"},
+                "status": "resolved",
+                "values": ["4"],
+            }
+        ],
+    )
+
+
+def test_approved_b8_bind_sql_passes_b3_and_contract_validation():
+    """Confirmed-code and fixed-date binds pass without literal/SYSDATE checks."""
+    request = _approved_cash_window_request()
+    sql = (
+        "SELECT CUS_NUM FROM BI_DWH.PIO_TRANSACTIONS "
+        "WHERE EXPL_CODE = :cs_b1 "
+        "AND TRA_DATE >= :cs_b2 AND TRA_DATE < :cs_b3"
+    )
+    params = derive_candidate_bind_values(request, sql)
+
+    assert params == {
+        "cs_b1": "4",
+        "cs_b2": date(2026, 10, 14),
+        "cs_b3": date(2026, 10, 28),
+    }
+    assert validate_generated_sql(request, sql, params=params) == []
+    assert validate_oracle_read(
+        sql,
+        params=params,
+        allowed_schemas=("BI_DWH",),
+        allowed_objects=("BI_DWH.PIO_TRANSACTIONS",),
+        required_projection="CUS_NUM",
+        confirmed_filters=[
+            item.model_dump(mode="json") for item in request.confirmed_filters
+        ],
+    ).binds == ("cs_b1", "cs_b2", "cs_b3")
+
+
+def test_bind_sql_fails_closed_for_missing_filter_and_bad_date_range():
+    """A missing code or non-half-open date contract is rejected."""
+    request = _approved_cash_window_request()
+    missing_filter = (
+        "SELECT CUS_NUM FROM BI_DWH.PIO_TRANSACTIONS "
+        "WHERE TRA_DATE >= :cs_b2 AND TRA_DATE < :cs_b3"
+    )
+    assert any(
+        "EXPL_CODE" in finding
+        for finding in validate_generated_sql(request, missing_filter)
+    )
+    with pytest.raises(SqlPolicyError, match="half-open date bind pair"):
+        derive_candidate_bind_values(
+            request,
+            "SELECT CUS_NUM FROM BI_DWH.PIO_TRANSACTIONS "
+            "WHERE EXPL_CODE = :cs_b1 AND TRA_DATE >= :cs_b2 "
+            "AND TRA_DATE <= :cs_b3",
+        )
+
+
+def test_bind_sql_rejects_wrong_confirmed_value_and_uncontracted_bind():
+    """B3 refuses a wrong filter value and derivation refuses extra binds."""
+    request = _approved_cash_window_request()
+    sql = (
+        "SELECT CUS_NUM FROM BI_DWH.PIO_TRANSACTIONS "
+        "WHERE EXPL_CODE = :cs_b1 "
+        "AND TRA_DATE >= :cs_b2 AND TRA_DATE < :cs_b3"
+    )
+    with pytest.raises(SqlPolicyError, match="confirmed filter"):
+        validate_oracle_read(
+            sql,
+            params={
+                "cs_b1": "5",
+                "cs_b2": date(2026, 10, 14),
+                "cs_b3": date(2026, 10, 28),
+            },
+            allowed_schemas=("BI_DWH",),
+            allowed_objects=("BI_DWH.PIO_TRANSACTIONS",),
+            required_projection="CUS_NUM",
+            confirmed_filters=[
+                item.model_dump(mode="json") for item in request.confirmed_filters
+            ],
+        )
+    with pytest.raises(SqlPolicyError, match="outside confirmed filter and temporal"):
+        derive_candidate_bind_values(
+            request,
+            sql.replace(
+                "TRA_DATE < :cs_b3",
+                "TRA_DATE < :cs_b3 AND CUS_NUM = :extra",
+            ),
+        )
+
+
+def test_bind_sql_rejects_unsafe_object_and_write_sql():
+    """The existing B3 policy still rejects unsafe SQL around bind contracts."""
+    request = _approved_cash_window_request()
+    params = {
+        "cs_b1": "4",
+        "cs_b2": date(2026, 10, 14),
+        "cs_b3": date(2026, 10, 28),
+    }
+    for sql in (
+        "SELECT CUS_NUM FROM BI_DWH.PIO_TRANSACTIONS "
+        "JOIN BI_DWH.PIO_CUSTOMERS C ON 1=1 WHERE EXPL_CODE=:cs_b1 "
+        "AND TRA_DATE >= :cs_b2 AND TRA_DATE < :cs_b3",
+        "DELETE FROM BI_DWH.PIO_TRANSACTIONS WHERE EXPL_CODE=:cs_b1",
+    ):
+        with pytest.raises(SqlPolicyError):
+            validate_oracle_read(
+                sql,
+                params=params,
+                allowed_schemas=("BI_DWH",),
+                allowed_objects=("BI_DWH.PIO_TRANSACTIONS",),
+                required_projection="CUS_NUM",
+                confirmed_filters=[
+                    item.model_dump(mode="json")
+                    for item in request.confirmed_filters
+                ],
+            )
 
 
 def test_all_transactions_rejects_invented_explanation_code_filter():

@@ -1,5 +1,38 @@
 # Refactor Status
 
+## B8 — Final integration and cutover readiness
+
+- **Branch:** `refactor/b8-cutover`, based on `refactor/b7-toolchain`.
+- **Implementation:** PASS for the B8 acceptance features and completed scoped
+  checks. Shadow preserves the HTTP result as authority. SQL comparison is
+  semantic, result-shape probes are policy checked, bind evidence is redacted,
+  and local activation blocks on incompatible Chroma versions or a missing
+  required Neo4j manifest. The B7 staged index flow preserves rollback data.
+- **Completed live/synthetic evidence:** approved metadata-only Stage 1 verified
+  seven configured Oracle objects and 180 column records. The institution-
+  scoped local BGE index was rebuilt from OPENBI2 metadata and retrieval-tested
+  across all seven objects. One approved synthetic “Cash deposits over 14 days”
+  A/B generation-only run passed deterministic semantic comparison using
+  `cs_b1`, `cs_b2`, `cs_b3` and the fixed 2026-10-28 half-open date range. No
+  scenario SQL was executed and no customer rows were sent to a model.
+- **Production cutover:** BLOCKED. `DWH_SQL_MODE=http` remains the default. The
+  BI_DWH account has elevated privileges, DBA resource controls are unverified,
+  and least-privilege execution credentials, executed-result parity, and
+  explicit production approval remain outstanding.
+- **Verification:** 26 B8/evaluation tests, 22 B4/B7 retrieval-toolchain tests,
+  24 B3 policy tests, and 4 B1 bind-contract regressions passed; compileall and
+  diff checks passed. Tests use offline fakes except the previously approved
+  metadata-only Stage 1 discovery and synthetic generation-only provider calls.
+  Neither is evidence of production readiness.
+- **Rollback:** set `DWH_SQL_MODE=http` and restart Service A. Keep
+  `PIOTECH_AI_URL` configured. Retain the prior matched Chroma collection pair;
+  restore that version pair before enabling local mode. A partial pair is
+  rejected by readiness and local initialization.
+- **Outstanding gates:** strict least-privilege account and DBA resource-control
+  verification; approved live Oracle result comparison; broader provider-data
+  and production owner approval. See [B8 final readiness](B8_final_readiness.md)
+  and [B8 live validation](B8_live_validation.md).
+
 ## P10 — Performance, context control, observability
 
 - **Branch:** Service A `refactor/p10-perf-observability`; UI `refactor/p10-estimate-label`.

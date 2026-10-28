@@ -7,6 +7,7 @@ Never hardcode secrets or connection strings — per SOLID Dependency Inversion.
 
 from functools import lru_cache
 import os
+import re
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -92,7 +93,9 @@ class Settings(BaseSettings):
 
     # ─── DWH SQL provider policy ───────────────────────────────────────────
     DWH_SQL_MODE: Literal["http", "inprocess", "shadow"] = "http"
-    DWH_SQL_ENVIRONMENT: Literal["development", "test", "staging", "production"] = "development"
+    DWH_SQL_ENVIRONMENT: Literal["development", "test", "staging", "production"] = (
+        "development"
+    )
     DWH_SQL_SHADOW_TIMEOUT_SECONDS: float = Field(default=30.0, gt=0)
     DWH_SQL_GENERATOR_PROVIDER: Optional[str] = None
     DWH_SQL_GENERATOR_MODEL: Optional[str] = None
@@ -115,6 +118,7 @@ class Settings(BaseSettings):
     DWH_SQL_MAX_CANDIDATE_ROWS: int = Field(default=100, ge=1)
     DWH_SQL_ALLOWED_SCHEMAS: tuple[str, ...] = ()
     DWH_SQL_ALLOWED_OBJECTS: tuple[str, ...] = ()
+    DWH_SQL_INDEX_INTERNAL_OBJECTS: tuple[str, ...] = ()
     DWH_SQL_OPENAI_API_KEY: Optional[str] = None
     DWH_SQL_COHERE_API_KEY: Optional[str] = None
     DWH_SQL_SAMBANOVA_API_KEY: Optional[str] = None
@@ -128,6 +132,7 @@ class Settings(BaseSettings):
     DWH_SQL_SCHEMA_COLUMNS_COLLECTION: str = SCHEMA_COLUMNS_COLLECTION_NAME
     DWH_SQL_EXPERIENCE_COLLECTION: str = EXPERIENCE_COLLECTION_NAME
     DWH_SQL_CHROMA_PERSIST_DIR: Optional[Path] = None
+    DWH_SQL_INDEX_INSTITUTION_ID: Optional[str] = None
     DWH_SQL_SCHEMA_TABLES_K: int = Field(default=20, ge=1, le=500)
     DWH_SQL_SCHEMA_COLUMNS_K: int = Field(default=40, ge=1, le=500)
     DWH_SQL_EXPERIENCE_K: int = Field(default=5, ge=1, le=100)
@@ -135,11 +140,18 @@ class Settings(BaseSettings):
     DWH_SQL_SEMANTIC_WEIGHT: float = Field(default=0.5, ge=0, le=1)
     DWH_SQL_GRAPH_WEIGHT: float = Field(default=0.5, ge=0, le=1)
     DWH_SQL_NEO4J_ENABLED: bool = False
+    DWH_SQL_NEO4J_REQUIRED: bool = False
+    DWH_SQL_NEO4J_GRAPH_VERSION: Optional[str] = None
     DWH_SQL_NEO4J_URI: Optional[str] = None
     DWH_SQL_NEO4J_USER: Optional[str] = None
     DWH_SQL_NEO4J_PASSWORD: Optional[str] = None
     DWH_SQL_NEO4J_TIMEOUT_SECONDS: float = Field(default=2.0, gt=0)
     DWH_SQL_NEO4J_MAX_RESULTS: int = Field(default=100, ge=1, le=1000)
+    DWH_SQL_ACCEPTANCE_ENABLED: bool = False
+    DWH_SQL_ACCEPTANCE_DSN: Optional[str] = None
+    DWH_SQL_ACCEPTANCE_USER: Optional[str] = None
+    DWH_SQL_ACCEPTANCE_PASSWORD: Optional[str] = None
+    DWH_SQL_ACCEPTANCE_RESOURCE_PLAN: Optional[str] = None
 
     # ─── Oracle DB (Primary) ──────────────────────────────────────────────────
     ORACLE_DSN: str = Field(
@@ -166,15 +178,15 @@ class Settings(BaseSettings):
     # ─── Shadow Oracle DB (Test Data / Shadow Testing) ────────────────────────
     SHADOW_ORACLE_DSN: Optional[str] = Field(
         default=None,
-        description="Secondary Oracle DSN for shadow testing (5M+ test records). Falls back to ORACLE_DSN if unset.",
+        description="Legacy explicit DWH-reader DSN alias. Never falls back to ORACLE_DSN.",
     )
     SHADOW_ORACLE_USER: Optional[str] = Field(
         default=None,
-        description="Secondary Oracle username for shadow testing. Falls back to ORACLE_USER if unset.",
+        description="Legacy explicit DWH-reader username alias. Never falls back to ORACLE_USER.",
     )
     SHADOW_ORACLE_PASSWORD: Optional[str] = Field(
         default=None,
-        description="Secondary Oracle password for shadow testing. Falls back to ORACLE_PASSWORD if unset.",
+        description="Legacy explicit DWH-reader password alias. Never falls back to ORACLE_PASSWORD.",
     )
     SHADOW_ORACLE_POOL_MIN: int = Field(
         default=2,
@@ -184,6 +196,17 @@ class Settings(BaseSettings):
         default=10,
         description="Maximum connections in shadow Oracle connection pool.",
     )
+    # Explicit DWH reader role. It is intentionally independent of ORACLE_*;
+    # generated SQL must never inherit registry-writer credentials.
+    DWH_ORACLE_DSN: Optional[str] = None
+    DWH_ORACLE_USER: Optional[str] = None
+    DWH_ORACLE_PASSWORD: Optional[str] = None
+    DWH_ORACLE_SCHEMA: Optional[str] = None
+    DWH_ORACLE_POOL_MIN: int = Field(default=1, ge=1)
+    DWH_ORACLE_POOL_MAX: int = Field(default=4, ge=1)
+    ORACLE_REGISTRY_SCHEMA: Optional[str] = None
+    ORACLE_REGISTRY_NAMESPACE: str = "PIO_AML_AGENT"
+    ORACLE_REGISTRY_SCHEMA_PROVISIONING_ENABLED: bool = False
     IO_WORKERS: int = Field(
         default=4,
         ge=1,
@@ -283,6 +306,16 @@ class Settings(BaseSettings):
             self.CHECKPOINT_DB_PATH = self.STATE_DIR / "checkpoints.sqlite"
         if self.APP_STATE_DB_PATH is None:
             self.APP_STATE_DB_PATH = self.STATE_DIR / "app_state.sqlite"
+        for name, schema in (
+            ("DWH_ORACLE_SCHEMA", self.DWH_ORACLE_SCHEMA),
+            ("ORACLE_REGISTRY_SCHEMA", self.ORACLE_REGISTRY_SCHEMA),
+        ):
+            if schema is not None and not re.fullmatch(r"[A-Za-z][A-Za-z0-9_$#]{0,127}", schema.strip()):
+                raise ValueError(f"{name} must be a simple Oracle schema identifier")
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_$#]{0,20}", self.ORACLE_REGISTRY_NAMESPACE):
+            raise ValueError("ORACLE_REGISTRY_NAMESPACE must be a simple identifier prefix")
+        if self.DWH_ORACLE_POOL_MAX < self.DWH_ORACLE_POOL_MIN:
+            raise ValueError("DWH_ORACLE_POOL_MAX must be >= DWH_ORACLE_POOL_MIN")
         return self
 
     @field_validator("LLM_PROVIDER")

@@ -877,8 +877,12 @@ def persist_and_validate_scenario_in_dwh(
             "scenario_name": result.scenario_name,
             "write_success": True,
             "write_verification": {
-                "production_scenarios_table": "PIO_AML_AGENT_PRODUCTION_SCENARIOS",
-                "scenario_metadata_table": "PIO_AML_AGENT_SCENARIOS",
+                "production_scenarios_table": (
+                    f"{settings.ORACLE_REGISTRY_NAMESPACE.upper()}_PRODUCTION_SCENARIOS"
+                ),
+                "scenario_metadata_table": (
+                    f"{settings.ORACLE_REGISTRY_NAMESPACE.upper()}_SCENARIOS"
+                ),
                 "is_active": 1,
             },
             "receipt": result.receipt,

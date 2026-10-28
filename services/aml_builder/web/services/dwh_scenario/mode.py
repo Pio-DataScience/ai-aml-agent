@@ -20,11 +20,15 @@ from services.aml_builder.web.services.settings import Settings, settings
 logger = logging.getLogger(__name__)
 
 
-def build_local_generator(config: Settings = settings) -> ScenarioSqlGenerator:
+def build_local_generator(
+    config: Settings = settings, *, repository: Any | None = None
+) -> ScenarioSqlGenerator:
     """Build the optional local generator lazily from configured adapters.
 
     Args:
         config: Active DWH and application settings.
+        repository: Optional injected repository. B8 acceptance uses this to
+            keep local candidate execution on its dedicated read-only pool.
 
     Returns:
         Fully injected local generator; optional dependencies are loaded on demand.
@@ -33,17 +37,33 @@ def build_local_generator(config: Settings = settings) -> ScenarioSqlGenerator:
         RuntimeError: If local dependencies or configuration are unavailable.
     """
     from services.aml_builder.web.adapters.dwh_oracle_repo import DwhOracleRepository
-    from services.aml_builder.web.services.dwh_scenario.embeddings import embedding_identity
-    from services.aml_builder.web.services.dwh_scenario.graph import build_local_generator as build
-    from services.aml_builder.web.services.dwh_scenario.retrieval import ChromaRetriever
+    from services.aml_builder.web.services.dwh_scenario.embeddings import (
+        EmbeddingProviderManager,
+        embedding_identity,
+    )
+    from services.aml_builder.web.services.dwh_scenario.graph import (
+        build_local_generator as build,
+    )
+    from services.aml_builder.web.services.dwh_scenario.retrieval import (
+        ChromaRetriever,
+        IndexManifest,
+        Neo4jReranker,
+    )
+    from services.aml_builder.web.services.dwh_scenario.toolchain import (
+        validate_schema_collection_versions,
+    )
     from services.aml_builder.web.services.llm_client import build_llm
 
     if config.DWH_SQL_CHROMA_PERSIST_DIR is None:
-        raise RuntimeError("DWH_SQL_CHROMA_PERSIST_DIR is required for local generation")
+        raise RuntimeError(
+            "DWH_SQL_CHROMA_PERSIST_DIR is required for local generation"
+        )
     try:
         import chromadb
     except ImportError as exc:
-        raise RuntimeError("optional chromadb package is required for local generation") from exc
+        raise RuntimeError(
+            "optional chromadb package is required for local generation"
+        ) from exc
     client = chromadb.PersistentClient(path=str(config.DWH_SQL_CHROMA_PERSIST_DIR))
 
     def collection_provider(name: str) -> Any:
@@ -55,21 +75,60 @@ def build_local_generator(config: Settings = settings) -> ScenarioSqlGenerator:
             raise
 
     identity = embedding_identity(config)
+    embedding_provider = EmbeddingProviderManager(config)
+    try:
+        table_collection = collection_provider(config.DWH_SQL_SCHEMA_TABLES_COLLECTION)
+        column_collection = collection_provider(
+            config.DWH_SQL_SCHEMA_COLUMNS_COLLECTION
+        )
+        validate_schema_collection_versions((table_collection, column_collection))
+        for collection in (table_collection, column_collection):
+            manifest = IndexManifest.from_metadata(collection.metadata or {})
+            manifest.validate(identity)
+            if str(manifest.institution_id or "") != str(config.AML_INST_CODE):
+                raise ValueError(
+                    "Chroma schema index institution scope is incompatible"
+                )
+            if int(collection.count()) < 1:
+                raise ValueError("Required Chroma schema collection is empty")
+    except Exception as exc:
+        raise RuntimeError(
+            "Configured Chroma schema indexes are missing, empty, or incompatible "
+            "by version, embedding identity, or institution scope"
+        ) from exc
+    reranker = Neo4jReranker(config) if config.DWH_SQL_NEO4J_ENABLED else None
+    if config.DWH_SQL_NEO4J_REQUIRED and reranker is None:
+        raise RuntimeError("Neo4j is required by configuration but is disabled")
+    if reranker is not None and config.DWH_SQL_NEO4J_REQUIRED:
+        status = reranker.readiness()
+        if status.get("status") != "ok":
+            raise RuntimeError("Required Neo4j graph is not ready")
     return build(
         llm_factory=lambda *, role: build_llm(role=role),
-        repository=DwhOracleRepository(),
+        repository=(repository if repository is not None else DwhOracleRepository()),
         experience_retriever=ChromaRetriever(
-            config.DWH_SQL_EXPERIENCE_COLLECTION, collection_provider, identity,
-            optional_empty=True, threshold=config.DWH_SQL_RETRIEVAL_THRESHOLD,
+            config.DWH_SQL_EXPERIENCE_COLLECTION,
+            collection_provider,
+            identity,
+            query_embedder=embedding_provider.embed_query,
+            optional_empty=True,
+            threshold=config.DWH_SQL_RETRIEVAL_THRESHOLD,
         ),
         table_retriever=ChromaRetriever(
-            config.DWH_SQL_SCHEMA_TABLES_COLLECTION, collection_provider, identity,
+            config.DWH_SQL_SCHEMA_TABLES_COLLECTION,
+            collection_provider,
+            identity,
+            query_embedder=embedding_provider.embed_query,
             threshold=config.DWH_SQL_RETRIEVAL_THRESHOLD,
         ),
         column_retriever=ChromaRetriever(
-            config.DWH_SQL_SCHEMA_COLUMNS_COLLECTION, collection_provider, identity,
+            config.DWH_SQL_SCHEMA_COLUMNS_COLLECTION,
+            collection_provider,
+            identity,
+            query_embedder=embedding_provider.embed_query,
             threshold=config.DWH_SQL_RETRIEVAL_THRESHOLD,
         ),
+        reranker=reranker,
         config=config,
     )
 
@@ -130,12 +189,17 @@ async def generate_by_mode(
     return http_result
 
 
-async def _run_local(factory: Callable[[], ScenarioSqlGenerator], request: ScenarioSqlRequest) -> dict[str, Any]:
+async def _run_local(
+    factory: Callable[[], ScenarioSqlGenerator], request: ScenarioSqlRequest
+) -> dict[str, Any]:
     """Run local generation and return only metrics plus structural observations."""
     started = time.monotonic()
     generator = await asyncio.to_thread(factory)
     result = await generator.generate(request)
-    return {"result": result, "elapsed_ms": round((time.monotonic() - started) * 1000, 3)}
+    return {
+        "result": result,
+        "elapsed_ms": round((time.monotonic() - started) * 1000, 3),
+    }
 
 
 async def _run_http(
@@ -148,7 +212,8 @@ async def _run_http(
 
 
 def compare_results(
-    request: ScenarioSqlRequest, http_result: ScenarioSqlResult,
+    request: ScenarioSqlRequest,
+    http_result: ScenarioSqlResult,
     local_summary: dict[str, Any],
 ) -> dict[str, Any]:
     """Compare structural SQL properties without returning SQL or customer data.
@@ -169,7 +234,9 @@ def compare_results(
 
     local_result = local_summary.get("result")
     if not isinstance(local_result, ScenarioSqlResult):
-        local_result = ScenarioSqlResult(error=str(local_summary.get("error", "local failed")))
+        local_result = ScenarioSqlResult(
+            error=str(local_summary.get("error", "local failed"))
+        )
 
     def facts(result: ScenarioSqlResult) -> dict[str, Any]:
         sql = result.sql or ""
@@ -179,20 +246,37 @@ def compare_results(
         except Exception:
             root = None
         valid = root is not None
-        select_only = valid and isinstance(root, (exp.Select, exp.Union, exp.Intersect, exp.Except))
-        projection = bool(root and any(
-            isinstance(col, exp.Column) and col.name.casefold() == "cus_num"
-            for col in root.find_all(exp.Column)
-        ))
+        select_only = valid and isinstance(
+            root, (exp.Select, exp.Union, exp.Intersect, exp.Except)
+        )
+        projection = bool(
+            root
+            and any(
+                isinstance(col, exp.Column) and col.name.casefold() == "cus_num"
+                for col in root.find_all(exp.Column)
+            )
+        )
         filters = [item.model_dump(mode="python") for item in request.confirmed_filters]
         try:
             validate_oracle_read(
                 sql,
-                allowed_schemas=tuple({table.db for table in root.find_all(exp.Table) if table.db}) if root else (),
-                allowed_objects=tuple(
-                    {table.name for table in root.find_all(exp.Table)}
-                    | {f"{table.db}.{table.name}" for table in root.find_all(exp.Table) if table.db}
-                ) if root else (),
+                allowed_schemas=(
+                    tuple({table.db for table in root.find_all(exp.Table) if table.db})
+                    if root
+                    else ()
+                ),
+                allowed_objects=(
+                    tuple(
+                        {table.name for table in root.find_all(exp.Table)}
+                        | {
+                            f"{table.db}.{table.name}"
+                            for table in root.find_all(exp.Table)
+                            if table.db
+                        }
+                    )
+                    if root
+                    else ()
+                ),
                 required_projection="CUS_NUM",
                 confirmed_filters=filters,
             )
@@ -201,29 +285,50 @@ def compare_results(
             safe = False
         normalized = root.sql(dialect="oracle", normalize=True) if root else None
         return {
-            "sql_parses": valid, "select_only": bool(select_only),
+            "sql_parses": valid,
+            "select_only": bool(select_only),
             "required_projection": projection,
             "sql_safe": safe,
             "confirmed_filter_count": len(filters) if safe else 0,
             "confirmed_filter_total": len(filters),
             "error": result.error is not None,
-            "execution_evidence": result.execution.row_count is not None or result.execution.error is not None,
+            "execution_evidence": result.execution.row_count is not None
+            or result.execution.error is not None,
             "semantic_fingerprint": normalized,
             "metrics": result.metrics,
         }
 
     left, right = facts(http_result), facts(local_result)
-    checks = ("sql_parses", "select_only", "sql_safe", "required_projection", "confirmed_filter_count", "confirmed_filter_total", "error", "execution_evidence")
+    checks = (
+        "sql_parses",
+        "select_only",
+        "sql_safe",
+        "required_projection",
+        "confirmed_filter_count",
+        "confirmed_filter_total",
+        "error",
+        "execution_evidence",
+    )
     discrepancies = [key for key in checks if left[key] != right[key]]
-    if left["semantic_fingerprint"] and right["semantic_fingerprint"] and left["semantic_fingerprint"] != right["semantic_fingerprint"]:
+    if (
+        left["semantic_fingerprint"]
+        and right["semantic_fingerprint"]
+        and left["semantic_fingerprint"] != right["semantic_fingerprint"]
+    ):
         discrepancies.append("semantic_difference")
     # Semantic SQL differences are recorded as observations, not failed comparisons.
     return {
         "discrepancies": discrepancies,
-        "http": {key: value for key, value in left.items() if key != "semantic_fingerprint"},
-        "local": {key: value for key, value in right.items() if key != "semantic_fingerprint"},
+        "http": {
+            key: value for key, value in left.items() if key != "semantic_fingerprint"
+        },
+        "local": {
+            key: value for key, value in right.items() if key != "semantic_fingerprint"
+        },
         "latency_ms": {
             "http": http_result.metrics.get("latency_ms"),
-            "local": local_summary.get("elapsed_ms", local_result.metrics.get("latency_ms")),
+            "local": local_summary.get(
+                "elapsed_ms", local_result.metrics.get("latency_ms")
+            ),
         },
     }

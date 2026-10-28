@@ -178,7 +178,6 @@ class DeployService:
         if workflow.locked and workflow.deployed_revision_id != revision_id:
             raise DeployError("CHAT_LOCKED_DEPLOYED", "This chat is locked after deployment.")
         if workflow.locked:
-            self._ensure_schema()
             existing = self.oracle_repo.get_by_thread(thread_id)
             if existing is None or existing.get("scenario_id") != selected_scenario_id or existing.get("revision_id") != revision_id:
                 raise DeployError("CHAT_LOCKED_DEPLOYED", "This chat is locked after deployment.")
@@ -398,7 +397,6 @@ class DeployService:
             "audit_action": "REVISE" if parent_scenario_id else "CREATE",
             "override_conflicts": override_conflicts,
         }
-        self._ensure_schema()
         existing = self.oracle_repo.get_by_thread(thread_id)
         if existing is not None:
             if existing.get("scenario_id") != scenario_id or existing.get("revision_id") != revision_id:
@@ -412,12 +410,6 @@ class DeployService:
     def _require_permission(self, actor_id: str, action: str) -> None:
         if not self.authorizer(actor_id, action):
             raise DeployError("PERMISSION_DENIED", "Permission denied.")
-
-    def _ensure_schema(self) -> None:
-        """Create missing registry objects only after local hard guards pass."""
-        ensure_schema = getattr(self.oracle_repo, "ensure_schema", None)
-        if ensure_schema:
-            ensure_schema()
 
     def _repeat_existing(self, existing: dict[str, Any]) -> DeploymentResult:
         """Return a previous deployment without rewriting its registry row."""

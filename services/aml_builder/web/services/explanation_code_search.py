@@ -16,7 +16,7 @@ from typing import Any, Dict, List, MutableMapping, Optional
 import numpy as np
 from langchain_openai import OpenAIEmbeddings
 
-from services.aml_builder.web.services.oracle import run_readonly
+from services.aml_builder.web.services.oracle import run_dwh_readonly as run_readonly
 from services.aml_builder.web.services.settings import settings
 from services.aml_builder.web.services.llm_client import build_llm
 from services.aml_builder.web.services.explanation_code_retrieval import (
@@ -151,12 +151,9 @@ def _load_or_build_vector_index() -> Dict[str, Any]:
         settings.AML_COUNTRY_CODE,
         settings.AML_INST_CODE,
     )
-    from services.aml_builder.web.services.oracle import init_pool, run_readonly
+    from services.aml_builder.web.services.oracle import init_shadow_pool, run_dwh_readonly
 
-    try:
-        init_pool()
-    except Exception:
-        pass
+    init_shadow_pool()
 
     sql = """
     SELECT EXPLANATION_CODE, DESC_ENG, DESC_NAT_LAN, LONG_DES_ENG
@@ -165,7 +162,7 @@ def _load_or_build_vector_index() -> Dict[str, Any]:
       AND (COUNTRY_CODE = :cc OR COUNTRY_CODE IS NULL)
       AND (INST_CODE = :ic OR INST_CODE IS NULL)
     """
-    _, rows = run_readonly(sql, {"cc": settings.AML_COUNTRY_CODE, "ic": settings.AML_INST_CODE})
+    _, rows = run_dwh_readonly(sql, {"cc": settings.AML_COUNTRY_CODE, "ic": settings.AML_INST_CODE})
     if not rows:
         logger.error("[EXPL_SEARCH] No explanation codes found in PIO_EXPLANATION_CODE for CC=%s IC=%s!", settings.AML_COUNTRY_CODE, settings.AML_INST_CODE)
         _VECTOR_CACHE = {"embeddings": np.array([]), "metadata": [], "cache_key": current_key}

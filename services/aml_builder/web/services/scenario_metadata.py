@@ -20,7 +20,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
-from services.aml_builder.web.services.oracle import run_readonly
+from services.aml_builder.web.services.oracle import run_dwh_readonly
 from services.aml_builder.web.services.settings import settings
 from services.aml_builder.web.domain.metadata_rules import (
     normalize_and_validate_metadata,
@@ -224,10 +224,10 @@ def fetch_lookup_options(lookup: LookupTableConfig) -> List[Dict[str, str]]:
 
     sql = f"SELECT DISTINCT {lookup.code_column}, {lookup.desc_column} FROM {lookup.table} {where_clause}"
     try:
-        _, rows = run_readonly(sql, params)
+        _, rows = run_dwh_readonly(sql, params)
         if not rows and lookup.filter_by_country_inst:
             fallback_sql = f"SELECT DISTINCT {lookup.code_column}, {lookup.desc_column} FROM {lookup.table}"
-            _, rows = run_readonly(fallback_sql)
+            _, rows = run_dwh_readonly(fallback_sql)
 
         return [
             {"code": str(r[0]).strip(), "description": str(r[1]).strip() if r[1] else str(r[0]).strip()}

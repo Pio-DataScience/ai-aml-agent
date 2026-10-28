@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 from services.aml_builder.web.services.dwh_scenario.embeddings import (
     EmbeddingIdentity,
@@ -23,7 +23,10 @@ class Retriever(Protocol):
     """Retrieve institution-scoped documents from one indexed collection."""
 
     def search(
-        self, query: str, institution_id: str, limit: int,
+        self,
+        query: str,
+        institution_id: str,
+        limit: int,
         metadata_filter: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]: ...
 
@@ -31,7 +34,9 @@ class Retriever(Protocol):
 class GraphReranker(Protocol):
     """Rerank candidate documents using optional graph evidence."""
 
-    def rerank(self, candidates: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]: ...
+    def rerank(
+        self, candidates: list[dict[str, Any]], limit: int
+    ) -> list[dict[str, Any]]: ...
 
 
 @dataclass(frozen=True)
@@ -44,6 +49,7 @@ class IndexManifest:
     fingerprint: str
     built_at: str
     source_row_counts: dict[str, int]
+    institution_id: str | None = None
 
     @classmethod
     def from_metadata(cls, metadata: dict[str, Any]) -> "IndexManifest":
@@ -59,6 +65,11 @@ class IndexManifest:
                 if isinstance(metadata["source_row_counts"], str)
                 else dict(metadata["source_row_counts"])
             ),
+            institution_id=(
+                str(metadata["institution_id"])
+                if metadata.get("institution_id") is not None
+                else None
+            ),
         )
 
     def validate(self, identity: EmbeddingIdentity) -> None:
@@ -72,10 +83,13 @@ class IndexManifest:
 
 
 def make_index_manifest(
-    identity: EmbeddingIdentity, source_row_counts: dict[str, int]
+    identity: EmbeddingIdentity,
+    source_row_counts: dict[str, int],
+    *,
+    institution_id: str | None = None,
 ) -> dict[str, Any]:
     """Return serializable Chroma collection metadata for an index build."""
-    return {
+    manifest = {
         "embedding_provider": identity.provider,
         "embedding_model": identity.model,
         "embedding_dimension": identity.dimension,
@@ -83,6 +97,9 @@ def make_index_manifest(
         "built_at": datetime.now(timezone.utc).isoformat(),
         "source_row_counts": json.dumps(source_row_counts, sort_keys=True),
     }
+    if institution_id is not None:
+        manifest["institution_id"] = str(institution_id)
+    return manifest
 
 
 class ChromaRetriever:
@@ -94,6 +111,7 @@ class ChromaRetriever:
         collection_provider: Any,
         identity: EmbeddingIdentity,
         *,
+        query_embedder: Callable[[str], list[float]] | None = None,
         optional_empty: bool = False,
         threshold: float = 0.0,
     ) -> None:
@@ -101,6 +119,7 @@ class ChromaRetriever:
         self.collection_name = collection_name
         self.collection_provider = collection_provider
         self.identity = identity
+        self.query_embedder = query_embedder
         self.optional_empty = optional_empty
         self.threshold = threshold
 
@@ -111,11 +130,15 @@ class ChromaRetriever:
         except (KeyError, LookupError):
             if self.optional_empty:
                 return None
-            raise RuntimeError(f"Required Chroma collection missing: {self.collection_name}")
+            raise RuntimeError(
+                f"Required Chroma collection missing: {self.collection_name}"
+            )
         if collection is None:
             if self.optional_empty:
                 return None
-            raise RuntimeError(f"Required Chroma collection missing: {self.collection_name}")
+            raise RuntimeError(
+                f"Required Chroma collection missing: {self.collection_name}"
+            )
         metadata = collection.metadata or {}
         if not metadata and self.optional_empty and int(collection.count()) == 0:
             return collection
@@ -146,14 +169,38 @@ class ChromaRetriever:
         collection = self._collection()
         if collection is None or collection.count() == 0:
             return []
-        if metadata_filter and "institution_id" in metadata_filter and metadata_filter["institution_id"] != institution_id:
+        if str((collection.metadata or {}).get("institution_id", "")) != str(
+            institution_id
+        ):
+            raise ValueError("Chroma index institution scope is incompatible")
+        if self.query_embedder is None:
+            raise RuntimeError(
+                "Configured embedding provider is required for Chroma retrieval"
+            )
+        query_embedding = self.query_embedder(query)
+        if len(query_embedding) != self.identity.dimension:
+            raise ValueError(
+                "Query embedding dimension does not match the Chroma index identity"
+            )
+        if (
+            metadata_filter
+            and "institution_id" in metadata_filter
+            and metadata_filter["institution_id"] != institution_id
+        ):
             raise ValueError("metadata_filter cannot change the institution scope")
-        where = {**(metadata_filter or {}), "institution_id": institution_id}
+        predicates = {**(metadata_filter or {}), "institution_id": institution_id}
+        where: dict[str, Any] = (
+            predicates
+            if len(predicates) == 1
+            else {"$and": [{key: value} for key, value in predicates.items()]}
+        )
         result = collection.query(
-            query_texts=[query],
+            query_embeddings=[query_embedding],
             n_results=max(1, limit),
             where=where,
-            include=["documents", "metadatas", "distances", "ids"],
+            # Chroma always returns ids and rejects "ids" in include on current
+            # releases; request only optional payload fields.
+            include=["documents", "metadatas", "distances"],
         )
         ids = (result.get("ids") or [[]])[0]
         documents = (result.get("documents") or [[]])[0]
@@ -165,12 +212,22 @@ class ChromaRetriever:
             # Defensive tenant check even if the vector backend ignores `where`.
             if metadata.get("institution_id") != institution_id:
                 continue
-            if any(metadata.get(key) != value for key, value in (metadata_filter or {}).items()):
+            if any(
+                metadata.get(key) != value
+                for key, value in (metadata_filter or {}).items()
+            ):
                 continue
             score = 1.0 - float(distances[idx])
             if score < self.threshold:
                 continue
-            rows.append({"id": str(doc_id), "document": documents[idx], "metadata": metadata, "score": score})
+            rows.append(
+                {
+                    "id": str(doc_id),
+                    "document": documents[idx],
+                    "metadata": metadata,
+                    "score": score,
+                }
+            )
         rows.sort(key=lambda row: (-row["score"], row["id"]))
         return rows[:limit]
 
@@ -188,14 +245,23 @@ class Neo4jReranker:
         """Initialize the Neo4j driver lazily and require explicit credentials."""
         if not self.config.DWH_SQL_NEO4J_ENABLED:
             raise RuntimeError("Neo4j reranking is disabled")
-        if not all((self.config.DWH_SQL_NEO4J_URI, self.config.DWH_SQL_NEO4J_USER, self.config.DWH_SQL_NEO4J_PASSWORD)):
+        if not all(
+            (
+                self.config.DWH_SQL_NEO4J_URI,
+                self.config.DWH_SQL_NEO4J_USER,
+                self.config.DWH_SQL_NEO4J_PASSWORD,
+            )
+        ):
             raise ValueError("Neo4j URI, user and password are required when enabled")
         if self._driver is None:
             from neo4j import GraphDatabase
 
             self._driver = GraphDatabase.driver(
                 self.config.DWH_SQL_NEO4J_URI,
-                auth=(self.config.DWH_SQL_NEO4J_USER, self.config.DWH_SQL_NEO4J_PASSWORD),
+                auth=(
+                    self.config.DWH_SQL_NEO4J_USER,
+                    self.config.DWH_SQL_NEO4J_PASSWORD,
+                ),
                 connection_timeout=self.config.DWH_SQL_NEO4J_TIMEOUT_SECONDS,
             )
         return self._driver
@@ -205,12 +271,27 @@ class Neo4jReranker:
         if not self.config.DWH_SQL_NEO4J_ENABLED:
             return {"status": "disabled"}
         try:
-            self._get_driver().verify_connectivity()
+            driver = self._get_driver()
+            driver.verify_connectivity()
+            if self.config.DWH_SQL_NEO4J_REQUIRED:
+                expected = self.config.DWH_SQL_NEO4J_GRAPH_VERSION
+                if not expected:
+                    raise ValueError("DWH_SQL_NEO4J_GRAPH_VERSION is required")
+                with driver.session() as session:
+                    records = session.run(
+                        "MATCH (m:DwhScenarioGraphManifest {name: 'active'}) "
+                        "RETURN m.version AS version LIMIT 1"
+                    )
+                    record = next(iter(records), None)
+                if record is None or str(record["version"]) != expected:
+                    raise ValueError("Required Neo4j graph version is not active")
             return {"status": "ok"}
         except Exception as exc:
             return {"status": "degraded", "error": type(exc).__name__}
 
-    def rerank(self, candidates: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    def rerank(
+        self, candidates: list[dict[str, Any]], limit: int
+    ) -> list[dict[str, Any]]:
         """Apply graph score to candidate IDs; return input order on graph failure."""
         if not candidates:
             return []
@@ -228,13 +309,18 @@ class Neo4jReranker:
             graph_w = self.config.DWH_SQL_GRAPH_WEIGHT
             ranked = sorted(
                 candidates,
-                key=lambda row: (-(sem_w * row["score"] + graph_w * ranks.get(row["id"], 0.0)), row["id"]),
+                key=lambda row: (
+                    -(sem_w * row["score"] + graph_w * ranks.get(row["id"], 0.0)),
+                    row["id"],
+                ),
             )
             self.metrics["rerank_success"] += 1
             return ranked[:limit]
         except Exception:
             self.metrics["rerank_degraded"] += 1
-            return sorted(candidates, key=lambda row: (-row["score"], row["id"]))[:limit]
+            return sorted(candidates, key=lambda row: (-row["score"], row["id"]))[
+                :limit
+            ]
 
     def close(self) -> None:
         """Close an initialized driver during application shutdown."""
@@ -250,22 +336,34 @@ def readiness_report(
 ) -> dict[str, Any]:
     """Evaluate dependency probes independently and summarize service readiness."""
     dependencies: dict[str, Any] = {}
-    for name, check in [("oracle", oracle_check), *chroma_checks.items(), ("neo4j", neo4j_check)]:
+    for name, check in [
+        ("oracle", oracle_check),
+        *chroma_checks.items(),
+        ("neo4j", neo4j_check),
+    ]:
         try:
             value = check() if callable(check) else check
-            dependencies[name] = value if isinstance(value, dict) else {"status": str(value)}
+            dependencies[name] = (
+                value if isinstance(value, dict) else {"status": str(value)}
+            )
         except Exception as exc:
             dependencies[name] = {"status": "down", "error": str(exc)}
     states = [item.get("status") for item in dependencies.values()]
     status = (
-        "down" if "down" in states
-        else "degraded" if any(state not in {"ok", "empty", "disabled"} for state in states)
-        else "ready"
+        "down"
+        if "down" in states
+        else (
+            "degraded"
+            if any(state not in {"ok", "empty", "disabled"} for state in states)
+            else "ready"
+        )
     )
     return {"status": status, "dependencies": dependencies}
 
 
-def build_readiness_checks(config: Settings = settings, oracle_check: Any = None) -> tuple[dict[str, Any], Any]:
+def build_readiness_checks(
+    config: Settings = settings, oracle_check: Any = None
+) -> tuple[dict[str, Any], Any]:
     """Build lazy readiness probes; no optional client is constructed here."""
     identity = embedding_identity(config)
     client: Any = None
@@ -280,8 +378,12 @@ def build_readiness_checks(config: Settings = settings, oracle_check: Any = None
             try:
                 import chromadb
             except ImportError as exc:
-                raise RuntimeError("optional chromadb package is not installed") from exc
-            client = chromadb.PersistentClient(path=str(config.DWH_SQL_CHROMA_PERSIST_DIR))
+                raise RuntimeError(
+                    "optional chromadb package is not installed"
+                ) from exc
+            client = chromadb.PersistentClient(
+                path=str(config.DWH_SQL_CHROMA_PERSIST_DIR)
+            )
         try:
             return client.get_collection(name=name)
         except Exception as exc:
@@ -295,7 +397,9 @@ def build_readiness_checks(config: Settings = settings, oracle_check: Any = None
         "experience_templates": config.DWH_SQL_EXPERIENCE_COLLECTION,
     }
     chroma_checks = {
-        key: lambda collection_name=name, optional=(key == "experience_templates"): ChromaRetriever(
+        key: lambda collection_name=name, optional=(
+            key == "experience_templates"
+        ): ChromaRetriever(
             collection_name,
             collection_provider,
             identity,
@@ -303,5 +407,27 @@ def build_readiness_checks(config: Settings = settings, oracle_check: Any = None
         ).readiness()
         for key, name in names.items()
     }
+
+    def schema_set_readiness() -> dict[str, Any]:
+        """Verify that the active table and column indexes are one build."""
+        from services.aml_builder.web.services.dwh_scenario.toolchain import (
+            validate_schema_collection_versions,
+        )
+
+        try:
+            version = validate_schema_collection_versions(
+                (
+                    collection_provider(config.DWH_SQL_SCHEMA_TABLES_COLLECTION),
+                    collection_provider(config.DWH_SQL_SCHEMA_COLUMNS_COLLECTION),
+                )
+            )
+            return {"status": "ok", "version": version}
+        except Exception as exc:
+            return {"status": "down", "error": type(exc).__name__}
+
+    chroma_checks["schema_set"] = schema_set_readiness
     graph = Neo4jReranker(config)
-    return {"oracle": oracle_check or {"status": "unknown"}, "chroma": chroma_checks}, graph
+    return {
+        "oracle": oracle_check or {"status": "unknown"},
+        "chroma": chroma_checks,
+    }, graph

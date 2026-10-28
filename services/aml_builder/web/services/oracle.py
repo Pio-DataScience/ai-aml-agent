@@ -6,6 +6,7 @@ connection pool — the same proven pattern as the PioTech AI services.
 """
 
 import logging
+import re
 from contextlib import contextmanager
 from typing import Generator, List, Optional, Tuple
 
@@ -18,6 +19,34 @@ logger = logging.getLogger(__name__)
 # Module-level pool — created once at startup, shared across all requests
 _pool: Optional[oracledb.ConnectionPool] = None
 _shadow_pool: Optional[oracledb.ConnectionPool] = None
+
+
+def _set_registry_schema(connection: oracledb.Connection, requested_tag: str | None) -> None:
+    """Set the configured default schema on a registry-role session."""
+    del requested_tag
+    schema = settings.ORACLE_REGISTRY_SCHEMA
+    if schema:
+        with connection.cursor() as cursor:
+            cursor.execute(f"ALTER SESSION SET CURRENT_SCHEMA = {schema.upper()}")
+
+
+def _set_dwh_schema(connection: oracledb.Connection, requested_tag: str | None) -> None:
+    """Set the configured default schema on a DWH-reader session."""
+    del requested_tag
+    schema = settings.DWH_ORACLE_SCHEMA
+    if schema:
+        with connection.cursor() as cursor:
+            cursor.execute(f"ALTER SESSION SET CURRENT_SCHEMA = {schema.upper()}")
+
+
+def _registry_namespace_sql(sql: str) -> str:
+    """Apply the configured application registry prefix to registry SQL."""
+    return re.sub(
+        r"\bPIO_AML_AGENT(?=_|\b)",
+        settings.ORACLE_REGISTRY_NAMESPACE.upper(),
+        sql,
+        flags=re.IGNORECASE,
+    )
 
 
 def init_pool() -> None:
@@ -50,15 +79,17 @@ def init_pool() -> None:
         increment=1,
         getmode=oracledb.POOL_GETMODE_WAIT,
         timeout=30,
+        session_callback=_set_registry_schema if settings.ORACLE_REGISTRY_SCHEMA else None,
     )
 
     logger.info("[ORACLE] Connection pool initialized successfully.")
 
 
 def init_shadow_pool() -> None:
-    """Initialize the secondary/shadow Oracle connection pool used for shadow testing.
+    """Initialize the independently configured, read-only DWH connection pool.
 
-    Uses SHADOW_ORACLE_* settings if provided; falls back to primary ORACLE_* settings.
+    The pool is shared by schema reads and SQL shadow execution. It never uses
+    registry credentials as a fallback.
 
     Raises:
         None: Logs error without failing if secondary pool connection fails.
@@ -68,16 +99,21 @@ def init_shadow_pool() -> None:
         logger.info("[ORACLE:SHADOW] Shadow pool already initialized — skipping.")
         return
 
-    dsn = settings.SHADOW_ORACLE_DSN or settings.ORACLE_DSN
-    user = settings.SHADOW_ORACLE_USER or settings.ORACLE_USER
-    password = settings.SHADOW_ORACLE_PASSWORD or settings.ORACLE_PASSWORD
+    dsn = settings.DWH_ORACLE_DSN or settings.SHADOW_ORACLE_DSN
+    user = settings.DWH_ORACLE_USER or settings.SHADOW_ORACLE_USER
+    password = settings.DWH_ORACLE_PASSWORD or settings.SHADOW_ORACLE_PASSWORD
+    if not all((dsn, user, password)):
+        logger.warning(
+            "[ORACLE:DWH] Reader pool is not configured; DWH operations will fail closed."
+        )
+        return
 
     logger.info(
         "[ORACLE:SHADOW] Initializing shadow connection pool: dsn=%s, user=%s, min=%d, max=%d",
         dsn,
         user,
-        settings.SHADOW_ORACLE_POOL_MIN,
-        settings.SHADOW_ORACLE_POOL_MAX,
+        settings.DWH_ORACLE_POOL_MIN,
+        settings.DWH_ORACLE_POOL_MAX,
     )
 
     try:
@@ -85,11 +121,12 @@ def init_shadow_pool() -> None:
             user=user,
             password=password,
             dsn=dsn,
-            min=settings.SHADOW_ORACLE_POOL_MIN,
-            max=settings.SHADOW_ORACLE_POOL_MAX,
+            min=settings.DWH_ORACLE_POOL_MIN,
+            max=settings.DWH_ORACLE_POOL_MAX,
             increment=1,
             getmode=oracledb.POOL_GETMODE_WAIT,
             timeout=30,
+            session_callback=_set_dwh_schema if settings.DWH_ORACLE_SCHEMA else None,
         )
         logger.info("[ORACLE:SHADOW] Shadow connection pool initialized successfully.")
     except Exception as exc:
@@ -211,7 +248,7 @@ def run_readonly(sql: str, params: Optional[dict] = None) -> Tuple[List[str], Li
     """
     import re
 
-    stripped = sql.strip()
+    stripped = _registry_namespace_sql(sql.strip())
     if not re.match(r"^\s*(SELECT|WITH)\s+", stripped, re.IGNORECASE):
         raise ValueError(
             f"run_readonly only accepts SELECT queries. Got: {stripped[:60]}..."
@@ -240,7 +277,7 @@ def run_write(sql: str, params: Optional[dict] = None) -> int:
     """
     with get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute(sql, params or {})
+        cursor.execute(_registry_namespace_sql(sql), params or {})
         affected = cursor.rowcount
         conn.commit()
         logger.debug("[ORACLE] DML committed. Rows affected: %d", affected)
@@ -268,7 +305,7 @@ def run_write_many(sql: str, params_list: List[dict]) -> int:
 
     with get_connection() as conn:
         cursor = conn.cursor()
-        cursor.executemany(sql, params_list)
+        cursor.executemany(_registry_namespace_sql(sql), params_list)
         affected = cursor.rowcount
         conn.commit()
         logger.debug(
@@ -279,18 +316,16 @@ def run_write_many(sql: str, params_list: List[dict]) -> int:
 
 @contextmanager
 def get_shadow_connection() -> Generator[oracledb.Connection, None, None]:
-    """Acquire a connection from the shadow pool as a context manager.
-
-    If shadow pool is not initialized, falls back to the primary pool.
+    """Acquire a connection from the DWH reader pool without role fallback.
 
     Yields:
         oracledb.Connection: A live Oracle connection.
     """
     if _shadow_pool is None:
-        logger.warning("[ORACLE:SHADOW] Shadow pool not initialized — falling back to primary pool.")
-        with get_connection() as conn:
-            yield conn
-        return
+        raise RuntimeError(
+            "DWH reader Oracle pool is not configured or initialized; "
+            "set DWH_ORACLE_DSN, DWH_ORACLE_USER, and DWH_ORACLE_PASSWORD."
+        )
 
     conn = _shadow_pool.acquire()
     try:
@@ -302,12 +337,21 @@ def get_shadow_connection() -> Generator[oracledb.Connection, None, None]:
         _shadow_pool.release(conn)
 
 
-def run_shadow_readonly(sql: str, params: Optional[dict] = None) -> Tuple[List[str], List[tuple]]:
+get_dwh_connection = get_shadow_connection
+
+
+def run_shadow_readonly(
+    sql: str,
+    params: Optional[dict] = None,
+    *,
+    timeout_seconds: float | None = None,
+) -> Tuple[List[str], List[tuple]]:
     """Execute a read-only SELECT query against the shadow test database and return column names + rows.
 
     Args:
         sql (str): The SELECT query to execute. Must start with SELECT or WITH.
         params (Optional[dict]): Named bind parameters for the query.
+        timeout_seconds (float | None): Optional stricter per-statement timeout.
 
     Returns:
         Tuple[List[str], List[tuple]]:
@@ -316,6 +360,8 @@ def run_shadow_readonly(sql: str, params: Optional[dict] = None) -> Tuple[List[s
 
     Raises:
         ValueError: If the query is not a SELECT/WITH statement.
+        ValueError: If the optional statement timeout is not positive.
+        RuntimeError: If the DWH reader pool is unavailable.
         oracledb.Error: On Oracle execution error.
     """
     import re
@@ -328,10 +374,28 @@ def run_shadow_readonly(sql: str, params: Optional[dict] = None) -> Tuple[List[s
 
     with get_shadow_connection() as conn:
         cursor = conn.cursor()
+        timeout = (
+            settings.DWH_SQL_READ_TIMEOUT_SECONDS
+            if timeout_seconds is None
+            else timeout_seconds
+        )
+        if timeout <= 0:
+            raise ValueError("timeout_seconds must be positive")
+        cursor.call_timeout = int(timeout * 1000)
         cursor.execute(stripped, params or {})
         columns = [col[0].lower() for col in cursor.description]
         rows = cursor.fetchall()
         return columns, rows
+
+
+run_dwh_readonly = run_shadow_readonly
+
+# Explicit role names for new integrations; compatibility names above remain
+# available to existing callers and both resolve to the registry role.
+get_registry_connection = get_connection
+registry_atomic_connection = atomic_connection
+run_registry_readonly = run_readonly
+run_registry_write = run_write
 
 
 

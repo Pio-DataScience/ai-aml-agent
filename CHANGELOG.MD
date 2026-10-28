@@ -3,6 +3,28 @@
 All notable changes to this project are documented here.
 Format: `[DATE] TYPE: Description`
 
+## [2026-10-28] feat: Complete B8 acceptance and bind validation
+
+- Preserved HTTP as the production default and separated the configurable DWH
+  reader from registry access. Registry schema creation remains explicitly gated.
+- Built and promoted a version-compatible, institution-scoped local Chroma index
+  from verified OPENBI2 metadata: seven configured objects and 180 columns,
+  using local BGE embeddings. Promotion retains rollback collections.
+- Completed approved metadata-only Oracle Stage 1 discovery. All seven objects
+  were visible; elevated BI_DWH privileges were recorded as an operations
+  warning, and database-side resource controls remain unverified by DBA.
+- The approved synthetic “Cash deposits over 14 days” generation-only A/B run
+  produced semantically equivalent bind-based SQL using cs_b1/cs_b2/cs_b3 and
+  half-open bounds for 2026-10-28. It did not execute scenario SQL, expose
+  customer rows, or call critics.
+- Replaced local-generator literal-code and SYSDATE assumptions with confirmed
+  filter and temporal bind-contract validation through B3 policy. Added semantic
+  parity checks, no-row shape probes, redacted bind evidence, mixed-index
+  version gates, rollback handling, and a fail-closed Neo4j requirement gate.
+- Production cutover remains blocked: no production approval or executed-result
+  parity was established, and least-privilege credentials and DBA resource
+  controls still require verification. No production-readiness claim is made.
+
 ## [2026-10-26] feat: Add B6 generator mode selection and shadow comparison
 
 - Added `DWH_SQL_MODE` (`http` default, `inprocess`, `shadow`) and a production guard for shadow mode; local dependencies are initialized only when the local path is selected.

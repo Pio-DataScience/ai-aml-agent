@@ -15,6 +15,64 @@ from sqlglot import exp
 Generator = Callable[[dict[str, Any]], dict[str, Any]]
 
 
+def semantic_signature(sql: str) -> tuple[Any, ...] | None:
+    """Build a formatting-independent SQL meaning profile from the Oracle AST.
+
+    Conjunct order and harmless parentheses do not affect the signature. The
+    profile retains source tables, projections, joins, grouping and predicates.
+    It is intentionally structural; it does not claim database-equivalence for
+    arbitrary Oracle functions.
+    """
+    try:
+        statements = sqlglot.parse(sql, read="oracle")
+    except sqlglot.errors.ParseError:
+        return None
+    if len(statements) != 1 or statements[0] is None:
+        return None
+    root = statements[0]
+    if not isinstance(root, (exp.Select, exp.Union, exp.Intersect, exp.Except)):
+        return None
+
+    def canonical(node: exp.Expression) -> str:
+        while isinstance(node, exp.Paren):
+            node = node.this
+        if isinstance(node, exp.And):
+            terms: list[exp.Expression] = []
+
+            def flatten(term: exp.Expression) -> None:
+                if isinstance(term, exp.And):
+                    flatten(term.this)
+                    flatten(term.expression)
+                else:
+                    terms.append(term)
+
+            flatten(node)
+            return " AND ".join(sorted(canonical(term) for term in terms))
+        return node.sql(dialect="oracle", normalize=True, pretty=False).casefold()
+
+    select = root if isinstance(root, exp.Select) else root.this
+    if not isinstance(select, exp.Select):
+        return None
+    where_terms = [
+        canonical(term)
+        for clause in root.find_all(exp.Where)
+        for term in ([clause.this] if clause.this is not None else [])
+    ]
+    return (
+        tuple(
+            sorted(
+                table.sql(dialect="oracle", normalize=True).casefold()
+                for table in root.find_all(exp.Table)
+            )
+        ),
+        tuple(canonical(item) for item in select.expressions),
+        tuple(sorted(where_terms)),
+        tuple(canonical(item) for item in root.find_all(exp.Join)),
+        tuple(canonical(item) for item in root.find_all(exp.Group)),
+        bool(select.args.get("distinct")),
+    )
+
+
 def load_cases(path: Path) -> list[dict[str, Any]]:
     """Load line-delimited evaluation cases.
 
@@ -27,7 +85,11 @@ def load_cases(path: Path) -> list[dict[str, Any]]:
     Raises:
         ValueError: If a case omits required top-level fields.
     """
-    cases = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    cases = [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
     required = {"scenario_description", "intent", "expected_constraints", "source"}
     for index, case in enumerate(cases, start=1):
         missing = required - case.keys()
@@ -67,20 +129,62 @@ def score_case(case: dict[str, Any], generator: Generator) -> dict[str, Any]:
         is_select = isinstance(tree.this, exp.Select)
     constraints = case["expected_constraints"]
     projection = constraints.get("required_projection", "CUS_NUM").upper()
-    projection_ok = bool(tree and any(
-        isinstance(node, exp.Column) and node.name.upper() == projection
-        for node in tree.find_all(exp.Column)
-    ))
-    sql_upper = sql.upper()
-    filters_ok = all(
-        item["column"].upper() in sql_upper and str(item.get("value", "")) in sql
-        for item in constraints.get("required_filters", [])
+    projection_ok = bool(
+        tree
+        and any(
+            isinstance(node, exp.Column) and node.name.upper() == projection
+            for node in tree.find_all(exp.Column)
+        )
     )
-    forbidden_ok = not any(token in sql_upper for token in constraints.get("forbidden_constructs", []))
+    sql_upper = sql.upper()
+    from services.aml_builder.web.domain.dwh_scenario.sql_policy import (
+        SqlPolicyError,
+        validate_oracle_read,
+    )
+
+    required_filters = constraints.get("required_filters", [])
+    confirmed = [
+        {
+            "target": {
+                "column": item["column"],
+                "table": item.get("table", ""),
+            },
+            "values": (
+                [str(item["value"])]
+                if "value" in item
+                else [str(value) for value in item.get("values", [])]
+            ),
+            "polarity": item.get("polarity", "positive"),
+            "polarity_allowed": item.get("polarity") == "negative",
+        }
+        for item in required_filters
+    ]
+    try:
+        validate_oracle_read(
+            sql,
+            allowed_schemas=tuple(constraints.get("allowed_schemas", ["BI_DWH"])),
+            allowed_objects=tuple(constraints.get("allowed_tables", [])),
+            required_projection=projection,
+            confirmed_filters=confirmed,
+        )
+        filters_ok, safety_ok = True, True
+    except (SqlPolicyError, ValueError):
+        filters_ok, safety_ok = not required_filters and False, False
+    forbidden = {
+        str(value).upper() for value in constraints.get("forbidden_constructs", [])
+    }
+    forbidden_ok = bool(tree) and not any(
+        node.key.upper() in forbidden for node in tree.walk()
+    )
     allowed_tables = {name.upper() for name in constraints.get("allowed_tables", [])}
-    tables = {table.name.upper() for table in tree.find_all(exp.Table)} if tree else set()
+    tables = (
+        {table.name.upper() for table in tree.find_all(exp.Table)} if tree else set()
+    )
     tables_ok = not allowed_tables or tables <= allowed_tables
-    date_literals_ok = not constraints.get("forbid_date_text_literals") or "LAST MONTH" not in sql_upper
+    date_literals_ok = (
+        not constraints.get("forbid_date_text_literals")
+        or "LAST MONTH" not in sql_upper
+    )
     expected_window = constraints.get("window", "none")
     if expected_window.startswith("rolling_days:"):
         days = expected_window.split(":", 1)[1]
@@ -104,7 +208,7 @@ def score_case(case: dict[str, Any], generator: Generator) -> dict[str, Any]:
         "case": case["scenario_description"],
         "source": case["source"],
         "sql_parses": parse_ok,
-        "select_only": is_select,
+        "select_only": is_select and safety_ok,
         "projection_present": projection_ok,
         "confirmed_filters_present": filters_ok,
         "window_semantics": window_ok,
@@ -112,18 +216,32 @@ def score_case(case: dict[str, Any], generator: Generator) -> dict[str, Any]:
         "forbidden_constructs_absent": forbidden_ok,
         "allowed_tables_only": tables_ok,
         "date_literals_clear": date_literals_ok,
-        "execution_success": bool(output.get("execution_success", parse_ok and is_select)),
+        "execution_success": bool(
+            output.get("execution_success", parse_ok and is_select)
+        ),
         "latency_ms": round(float(output.get("latency_ms", elapsed_ms)), 3),
         "llm_calls": int(output.get("llm_calls", 0)),
         "tool_calls": int(output.get("tool_calls", 0)),
         "tokens": int(output.get("tokens", 0)),
     }
     if "expected_sql" in case:
-        result["exact_match"] = sql.strip().rstrip(";").casefold() == case["expected_sql"].strip().rstrip(";").casefold()
+        result["semantic_match"] = semantic_signature(
+            sql
+        ) is not None and semantic_signature(sql) == semantic_signature(
+            case["expected_sql"]
+        )
+        # Retain the B0 optional diagnostic for future officer pairs. Parity
+        # decisions use semantic_match, never this byte-level indicator.
+        result["exact_match"] = (
+            sql.strip().rstrip(";").casefold()
+            == case["expected_sql"].strip().rstrip(";").casefold()
+        )
     return result
 
 
-def evaluate(cases: Iterable[dict[str, Any]], generator: Generator) -> list[dict[str, Any]]:
+def evaluate(
+    cases: Iterable[dict[str, Any]], generator: Generator
+) -> list[dict[str, Any]]:
     """Score an iterable of cases using the provided generator.
 
     Args:
@@ -156,16 +274,29 @@ def stub_generator(case: dict[str, Any]) -> dict[str, Any]:
     else:
         filters = case["expected_constraints"].get("required_filters", [])
         where = " AND ".join(
-            f"{item['column']} = '{item['value']}'" if "value" in item
-            else f"{item['column']} IN ({', '.join(repr(value) for value in item.get('values', []))})"
+            (
+                f"{item['column']} = '{item['value']}'"
+                if "value" in item
+                else f"{item['column']} IN ({', '.join(repr(value) for value in item.get('values', []))})"
+            )
             for item in filters
         )
         date_window = case["expected_constraints"].get("window", "")
         if date_window.startswith("rolling_days:"):
             days = date_window.split(":", 1)[1]
-            where = " AND ".join(part for part in [where, f"TRA_DATE >= SYSDATE - {days}"] if part)
-        sql = "SELECT CUS_NUM FROM BI_DWH.PIO_TRANSACTIONS" + (f" WHERE {where}" if where else "")
-    return {"sql": sql, "execution_success": sql.lstrip().upper().startswith("SELECT"), "llm_calls": 1, "tool_calls": 1, "tokens": 128}
+            where = " AND ".join(
+                part for part in [where, f"TRA_DATE >= SYSDATE - {days}"] if part
+            )
+        sql = "SELECT CUS_NUM FROM BI_DWH.PIO_TRANSACTIONS" + (
+            f" WHERE {where}" if where else ""
+        )
+    return {
+        "sql": sql,
+        "execution_success": sql.lstrip().upper().startswith("SELECT"),
+        "llm_calls": 1,
+        "tool_calls": 1,
+        "tokens": 128,
+    }
 
 
 def main() -> None:
