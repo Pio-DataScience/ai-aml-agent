@@ -127,9 +127,10 @@ def build_filter_prompt_section(catalog: Any) -> str:
 
 
 def build_service_b_intent(intent: dict[str, Any], catalog: Any) -> dict[str, Any]:
-    """Add resolved filters and catalog-derived instructions to the existing intent."""
+    """Add resolved filters and deterministic temporal semantics to the handoff."""
     result = dict(intent)
     result.pop("filters", None)
+    result["temporal_contract"] = _service_b_temporal_contract(intent)
     dimensions = _mapping(catalog).get("dimensions", {})
     resolved = [
         dict(item)
@@ -161,6 +162,63 @@ def build_service_b_intent(intent: dict[str, Any], catalog: Any) -> dict[str, An
     result["resolved_filters"] = resolved
     result["filter_instructions"] = "\n".join(instructions)
     return result
+
+
+def _service_b_temporal_contract(intent: dict[str, Any]) -> dict[str, str]:
+    """Express supported temporal boundaries and relationships as typed values.
+
+    The numeric durations remain in the validated time-window fields. This
+    contract preserves their meaning when Service B receives the reduced AML
+    intent, without carrying free-text descriptions into its model context.
+    """
+    window = _mapping(intent.get("time_window"))
+    baseline = _mapping(intent.get("baseline_window"))
+    none = {
+        "current_lower_boundary": "NONE",
+        "current_upper_boundary": "NONE",
+        "baseline_lower_boundary": "NONE",
+        "baseline_upper_boundary": "NONE",
+        "baseline_relationship": "NONE",
+    }
+    if not window and not baseline:
+        return {"kind": "NONE", **none}
+    if (
+        window.get("unit") == "MONTHS"
+        and window.get("value") == 1
+        and window.get("is_rolling") is False
+        and not baseline
+    ):
+        return {
+            "kind": "CALENDAR",
+            **none,
+            "current_lower_boundary": "CALENDAR_MONTH_START",
+            "current_upper_boundary": "NEXT_CALENDAR_MONTH_START",
+        }
+    if window.get("unit") == "DAYS" and window.get("is_rolling") is True:
+        if not baseline:
+            return {
+                "kind": "ROLLING",
+                **none,
+                "current_lower_boundary": "SYSDATE_MINUS_DURATION",
+                "current_upper_boundary": "SYSDATE_EXCLUSIVE",
+            }
+        if (
+            baseline.get("unit", "DAYS") == "DAYS"
+            and baseline.get("exclude_current_window") is True
+            and isinstance(baseline.get("duration"), int)
+            and isinstance(baseline.get("offset_days"), int)
+        ):
+            return {
+                "kind": "COMPARISON",
+                "current_lower_boundary": "SYSDATE_MINUS_CURRENT_DURATION",
+                "current_upper_boundary": "SYSDATE_EXCLUSIVE",
+                "baseline_lower_boundary": (
+                    "SYSDATE_MINUS_CURRENT_AND_BASELINE_DURATIONS"
+                ),
+                "baseline_upper_boundary": "SYSDATE_MINUS_CURRENT_OFFSET",
+                "baseline_relationship": "IMMEDIATELY_PRECEDING_NON_OVERLAPPING",
+            }
+    return {"kind": "UNSUPPORTED", **none}
 
 
 def _base_row(name: str, item: dict[str, Any], dimension: Any) -> dict[str, Any]:

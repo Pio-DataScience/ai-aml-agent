@@ -96,6 +96,12 @@ class Settings(BaseSettings):
     DWH_SQL_ENVIRONMENT: Literal["development", "test", "staging", "production"] = (
         "development"
     )
+    DWH_SQL_GENERATION_ONLY_ENABLED: bool = Field(
+        default=False,
+        description="Explicit development-only gate for hash-approved SQL generation evaluation.",
+    )
+    DWH_SQL_GENERATION_ONLY_SCOPE_SHA256: Optional[str] = None
+    DWH_SQL_GENERATION_ONLY_PROMPT_SHA256: Optional[str] = None
     DWH_SQL_SHADOW_TIMEOUT_SECONDS: float = Field(default=30.0, gt=0)
     DWH_SQL_GENERATOR_PROVIDER: Optional[str] = None
     DWH_SQL_GENERATOR_MODEL: Optional[str] = None

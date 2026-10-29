@@ -1,0 +1,107 @@
+{
+  "scope_version": "b9-generation-only-v1",
+  "status": "pending_new_authorization",
+  "fixtures_path": "services/aml_builder/tests/eval/dwh_scenario/b9_cases.jsonl",
+  "fixtures_sha256": "1f23dbe7ae51eb3dfc0d10a07926b29122369672acefc2aa2592254acda48f9e",
+  "synthetic_intents": [
+    "Customers with confirmed explanation code 4 during a rolling 14-day window.",
+    "Customers with a transaction amount at least 10000.",
+    "Customers whose total transaction amount is at least 50000.",
+    "Customers with at least five transactions.",
+    "Customers with at least three distinct transaction dates.",
+    "Customers with transactions in the rolling 30-day window.",
+    "Customers with transactions in the current calendar month.",
+    "Compare each customer transaction count in the recent 30-day period with the immediately prior 30-day period.",
+    "Customers whose total transaction amount is greater than 25000.",
+    "Customers with confirmed explanation code 4 or 7 and transaction amount greater than 5000.",
+    "Customers with activity in the rolling seven-day window; an empty result is valid.",
+    "Calculate the average transaction amount for each customer."
+  ],
+  "schema_scope": {
+    "object": "BI_DWH.PIO_TRANSACTIONS",
+    "columns": [
+      {
+        "name": "CUS_NUM",
+        "type": "VARCHAR2"
+      },
+      {
+        "name": "TRA_DATE",
+        "type": "DATE"
+      },
+      {
+        "name": "EXPL_CODE",
+        "type": "VARCHAR2"
+      },
+      {
+        "name": "TRA_AMT",
+        "type": "NUMBER"
+      }
+    ],
+    "experience_examples": []
+  },
+  "service_a": {
+    "route": "LocalScenarioSqlGenerator.generate_only_for_approved_evaluation",
+    "provider": "openai",
+    "model": "gpt-5.4-mini",
+    "prompt_path": "services/aml_builder/web/services/dwh_scenario/prompts/generator_v1.md",
+    "prompt_sha256": "60af5ac8732e93eb8c71a3400c50c44c228d427468acf287d0f351b03dc73f59",
+    "payload_binding": "SHA256(provider, model, complete system and assembled user messages per case)",
+    "provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+    "payload_hashes": {
+      "b9-01": "bb6a62aab6d42b2f90039cf09732296eb73194a81f8d89532fc4774af7cc7fa8",
+      "b9-02": "8d4073b8361d48818b18139d0320018f28390a5e5ae74deec135d69faff5407f",
+      "b9-03": "1e4c005b27d39d61a3e917c5bae1430f2616e7fd5f5ce7e6a5b9f80569e5c266",
+      "b9-04": "f8cda7774303ae44e7071032fab5bb3770f499e90894a5e2e468afd448daf1c0",
+      "b9-05": "adf2b718e6325f728ca6a66a7b0f97d06f82a5b9c01217e1a0105edc6f79e3d9",
+      "b9-06": "92ef3382447a2a9fb7f9d1dfc7d136625c4b2e2e4319ff161eafe523e8928fb9",
+      "b9-07": "6e2b781d5c38b7ec2cea0f00e9ef3cf31d0053a740509fa4495fa687b8df7dc1",
+      "b9-08": "0dd11753f2ac74e93f9ce0a528a5234414dc21d5fb0be3e8e1c2170f8cb861b3",
+      "b9-09": "fe91060f4512ada5385ba6914274b59fdd8304f5fa730e2410d44b6be3fc1bf2",
+      "b9-10": "e17d0d1d92ed7515a0d84d8f1c02493d97a6a40bb902f7dbd2cb24634c385d3a",
+      "b9-11": "be39d88788e57ed745b411b60cfb67a0ac3f6867086fa23fdf0ed24cf317b684",
+      "b9-12": "08bbd8d304c6cbe93aae4a70bf3858ba1434094f1c63148a2e0a6bed2d432a4c"
+    }
+  },
+  "service_b": {
+    "route": "http://localhost:8006/chat/stream",
+    "wire_contract": "HttpScenarioSqlGenerator AML_SCENARIO_GENERATION SSE envelope",
+    "provider": "openai",
+    "model": "gpt-5-nano",
+    "reasoning_mode": "instant",
+    "prompt_path": "services/dwh_scenario_agent/web/services/prompts/generation_only_system.md",
+    "prompt_sha256": "c2b26ed52577a23abfa9bb3449d55f6fb0adbc4e39e8a7ce3ca5247737efdf54",
+    "execution_guard": "default-disabled, development-only, fail-closed; no tools, execution, critic, retrieval, export, or deployment",
+    "provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1",
+    "payload_hashes": {
+      "b9-01": "b03d013ae6301527765ae8390723ff511a0a5f5bba7ff7c4a27a02dd29d9d66b",
+      "b9-02": "57e87a69141564a7e2964f1aced7ee8d41a7d6b4649cbe35ebb62312c81262c2",
+      "b9-03": "f18a233af3a3df6288ff19c2daebc5c7d544f55d4d0e0696ee25c368ceac8eac",
+      "b9-04": "4913a7ea618d39807d7e9063c5334fa9b2bd9e020cc017819972693dcbe30882",
+      "b9-05": "2bef308d55b63a343e098ecb6ec1f5a320a8abc7643fe7585b85c23038d157da",
+      "b9-06": "280d845dd48cd078fbd949a40b4ebbfbf89fb63a2afc4b06871084181fa5da8e",
+      "b9-07": "78299f82d755eb23a590ae4cd5d1ccadbded52ae6a1d22c88a9998ab0f2108da",
+      "b9-08": "22c6fd290641cc690fd582432f6fe04a3ce148dd960147cf8a1d597ab370719d",
+      "b9-09": "8da7c6943a9f77a33cb9257c3828a8409543d9413b51408274aec69c274bb0ac",
+      "b9-10": "4300aaf7a520f9ed5aa450a4064abc0899949730bcf4eb9898295cf173ae998d",
+      "b9-11": "b0fad4e913d01fb4de079e5f32b87c9a0c1756d30c37bf44a14e51e13ac04777",
+      "b9-12": "2691c14c9077d639529dc5c07e08c299754b238a8101c58ff38b7a2b8bd1080d"
+    }
+  },
+  "verification": {
+    "required_projection": "CUS_NUM",
+    "oracle_execution": false,
+    "customer_rows": false,
+    "critic": false,
+    "deployment": false,
+    "persistence": false,
+    "dwh_sql_mode": "http",
+    "live_calls_made": false,
+    "model_payloads_disclosed": true,
+    "service_b_guard_enabled_only_in_development": true
+  },
+  "payload_manifest_path": "Docs/B9_model_payloads.json",
+  "payload_manifest_sha256": "71bed309ddb74f77afe94802a3e49e7114c35dcd5af74b53e1bfdda0785693a3",
+  "schema_records_sha256": "965e20e5c9a8ab6d6b1853b65610887072bc4b9e8f1f268490975061f1fc3742",
+  "supersedes_scope_sha256": "bd9bf5e7a65667f6029017e93925ae689dbb9313cf86baeaebcf5699c2dbf2ad",
+  "scope_sha256": "d24ceb8538482a8e8b551a22890f704c78f07c4a135f3878be599e56569766a9"
+}

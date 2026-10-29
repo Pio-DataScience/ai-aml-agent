@@ -1,0 +1,622 @@
+{
+  "scope_sha256": "bd9bf5e7a65667f6029017e93925ae689dbb9313cf86baeaebcf5699c2dbf2ad",
+  "run_completed_at_utc": "2026-10-29T11:37:25.871950+00:00",
+  "synthetic_only": true,
+  "oracle_execution": false,
+  "customer_row_retrieval": false,
+  "critics": false,
+  "deployment": false,
+  "persistence": false,
+  "tracing_disabled": true,
+  "retries_enabled": false,
+  "dwh_sql_mode": "http",
+  "service_b_transport": "real local HTTP /chat/stream SSE route",
+  "results": [
+    {
+      "case_id": "b9-01",
+      "scenario": "Confirmed explanation code 4 in rolling 14 days",
+      "service_a": {
+        "provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+        "payload_sha256": "3c2e7173d62a95cb3db27dacb966489842cc92bd1bf40cac5522ba8af49d9c89",
+        "candidate_sql": "SELECT\n  t.CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS t\nWHERE t.EXPL_CODE IN (:cs_b1)\n  AND t.TRA_DATE >= SYSDATE - :cs_b2\n  AND t.TRA_DATE < SYSDATE\nGROUP BY t.CUS_NUM",
+        "candidate_accepted_by_service_a": true,
+        "validation_findings": [],
+        "error": "Generation-only candidate is not execution or deployment approved",
+        "metrics": {
+          "llm_calls": 1,
+          "tool_calls": 1,
+          "critique_attempts": 0,
+          "oracle_statements": 0,
+          "tokens": 1111,
+          "elapsed_seconds": 4.228
+        },
+        "approved": false
+      },
+      "service_b": {
+        "provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1",
+        "payload_sha256": "b03d013ae6301527765ae8390723ff511a0a5f5bba7ff7c4a27a02dd29d9d66b",
+        "candidate_sql": "SELECT t.CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS t\nWHERE t.EXPL_CODE IN (:cs_b2)\n  AND t.TRA_DATE >= (SYSDATE - :cs_b1)\n  AND t.TRA_DATE < SYSDATE\nGROUP BY t.CUS_NUM;",
+        "candidate_sql_extracted_by_adapter": "SELECT t.CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS t\nWHERE t.EXPL_CODE IN (:cs_b2)\n  AND t.TRA_DATE >= (SYSDATE - :cs_b1)\n  AND t.TRA_DATE < SYSDATE\nGROUP BY t.CUS_NUM",
+        "candidate_accepted_by_service_b": true,
+        "service_b_validation_findings": [],
+        "service_a_parity_validation_findings": [],
+        "normalizations": [],
+        "sse_events": [
+          {
+            "type": "generation_only_candidate",
+            "text": "SELECT t.CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS t\nWHERE t.EXPL_CODE IN (:cs_b2)\n  AND t.TRA_DATE >= (SYSDATE - :cs_b1)\n  AND t.TRA_DATE < SYSDATE\nGROUP BY t.CUS_NUM;",
+            "approved": false
+          },
+          {
+            "type": "done"
+          }
+        ],
+        "error": "Generation-only candidate is not execution or deployment approved",
+        "approved": false
+      },
+      "semantic_assessment": {
+        "service_a_vs_fixture": "differs_from_fixture",
+        "service_b_vs_fixture": "differs_from_fixture",
+        "service_a_vs_service_b_match": false,
+        "fixture_signature_is_deterministic_reference_only": true
+      }
+    },
+    {
+      "case_id": "b9-02",
+      "scenario": "Transaction amount threshold",
+      "service_a": {
+        "provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+        "payload_sha256": "df8708a343c0ad5f4d8293230b3751f53aa358edb9edd53f27a8529ca22028b0",
+        "candidate_sql": "SELECT DISTINCT\n  CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_AMT >= :cs_b1",
+        "candidate_accepted_by_service_a": true,
+        "validation_findings": [],
+        "error": "Generation-only candidate is not execution or deployment approved",
+        "metrics": {
+          "llm_calls": 1,
+          "tool_calls": 1,
+          "critique_attempts": 0,
+          "oracle_statements": 0,
+          "tokens": 983,
+          "elapsed_seconds": 1.172
+        },
+        "approved": false
+      },
+      "service_b": {
+        "provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1",
+        "payload_sha256": "57e87a69141564a7e2964f1aced7ee8d41a7d6b4649cbe35ebb62312c81262c2",
+        "candidate_sql": "SELECT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_AMT >= :cs_b1\nGROUP BY CUS_NUM;",
+        "candidate_sql_extracted_by_adapter": "SELECT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_AMT >= :cs_b1\nGROUP BY CUS_NUM",
+        "candidate_accepted_by_service_b": true,
+        "service_b_validation_findings": [],
+        "service_a_parity_validation_findings": [],
+        "normalizations": [],
+        "sse_events": [
+          {
+            "type": "generation_only_candidate",
+            "text": "SELECT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_AMT >= :cs_b1\nGROUP BY CUS_NUM;",
+            "approved": false
+          },
+          {
+            "type": "done"
+          }
+        ],
+        "error": "Generation-only candidate is not execution or deployment approved",
+        "approved": false
+      },
+      "semantic_assessment": {
+        "service_a_vs_fixture": "differs_from_fixture",
+        "service_b_vs_fixture": "differs_from_fixture",
+        "service_a_vs_service_b_match": false,
+        "fixture_signature_is_deterministic_reference_only": true
+      }
+    },
+    {
+      "case_id": "b9-03",
+      "scenario": "Customer aggregate amount threshold",
+      "service_a": {
+        "provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+        "payload_sha256": "1c489c101e62261b25f914f55d08485ad0b7216341d244345d9c3229f69819f1",
+        "candidate_sql": "SELECT\n  CUS_NUM,\n  SUM(TRA_AMT) AS TOTAL_TRA_AMT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING SUM(TRA_AMT) >= :cs_b1",
+        "candidate_accepted_by_service_a": true,
+        "validation_findings": [],
+        "error": "Generation-only candidate is not execution or deployment approved",
+        "metrics": {
+          "llm_calls": 1,
+          "tool_calls": 1,
+          "critique_attempts": 0,
+          "oracle_statements": 0,
+          "tokens": 1037,
+          "elapsed_seconds": 1.116
+        },
+        "approved": false
+      },
+      "service_b": {
+        "provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1",
+        "payload_sha256": "f18a233af3a3df6288ff19c2daebc5c7d544f55d4d0e0696ee25c368ceac8eac",
+        "candidate_sql": "SELECT\n  CUS_NUM,\n  SUM(TRA_AMT) AS SUM_TRA_AMT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING SUM(TRA_AMT) >= :cs_b1;",
+        "candidate_sql_extracted_by_adapter": "SELECT\n  CUS_NUM,\n  SUM(TRA_AMT) AS SUM_TRA_AMT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING SUM(TRA_AMT) >= :cs_b1",
+        "candidate_accepted_by_service_b": true,
+        "service_b_validation_findings": [],
+        "service_a_parity_validation_findings": [],
+        "normalizations": [],
+        "sse_events": [
+          {
+            "type": "generation_only_candidate",
+            "text": "SELECT\n  CUS_NUM,\n  SUM(TRA_AMT) AS SUM_TRA_AMT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING SUM(TRA_AMT) >= :cs_b1;",
+            "approved": false
+          },
+          {
+            "type": "done"
+          }
+        ],
+        "error": "Generation-only candidate is not execution or deployment approved",
+        "approved": false
+      },
+      "semantic_assessment": {
+        "service_a_vs_fixture": "matches_fixture",
+        "service_b_vs_fixture": "matches_fixture",
+        "service_a_vs_service_b_match": true,
+        "fixture_signature_is_deterministic_reference_only": true
+      }
+    },
+    {
+      "case_id": "b9-04",
+      "scenario": "At least five qualifying transactions",
+      "service_a": {
+        "provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+        "payload_sha256": "b254a5ab93eec5cff7154d20ae125d247a3c5a1490d79fa53fa8c1fc0600fce8",
+        "candidate_sql": "SELECT\n  CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING COUNT(*) >= :cs_b1",
+        "candidate_accepted_by_service_a": false,
+        "validation_findings": [
+          {
+            "message": "Aggregate intent requires an aliased COUNT(*) projection"
+          }
+        ],
+        "error": "Generation-only candidate is not execution or deployment approved",
+        "metrics": {
+          "llm_calls": 1,
+          "tool_calls": 1,
+          "critique_attempts": 0,
+          "oracle_statements": 0,
+          "tokens": 1014,
+          "elapsed_seconds": 0.917
+        },
+        "approved": false
+      },
+      "service_b": {
+        "provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1",
+        "payload_sha256": "4913a7ea618d39807d7e9063c5334fa9b2bd9e020cc017819972693dcbe30882",
+        "candidate_sql": "SELECT\n  CUS_NUM,\n  COUNT(*) AS \"Transaction count\"\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING COUNT(*) >= :cs_b1",
+        "candidate_sql_extracted_by_adapter": "SELECT\n  CUS_NUM,\n  COUNT(*) AS \"Transaction count\"\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING COUNT(*) >= :cs_b1",
+        "candidate_accepted_by_service_b": true,
+        "service_b_validation_findings": [],
+        "service_a_parity_validation_findings": [],
+        "normalizations": [],
+        "sse_events": [
+          {
+            "type": "generation_only_candidate",
+            "text": "SELECT\n  CUS_NUM,\n  COUNT(*) AS \"Transaction count\"\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING COUNT(*) >= :cs_b1",
+            "approved": false
+          },
+          {
+            "type": "done"
+          }
+        ],
+        "error": "Generation-only candidate is not execution or deployment approved",
+        "approved": false
+      },
+      "semantic_assessment": {
+        "service_a_vs_fixture": "differs_from_fixture",
+        "service_b_vs_fixture": "matches_fixture",
+        "service_a_vs_service_b_match": false,
+        "fixture_signature_is_deterministic_reference_only": true
+      }
+    },
+    {
+      "case_id": "b9-05",
+      "scenario": "At least three distinct transaction dates",
+      "service_a": {
+        "provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+        "payload_sha256": "376da88eecb6e154a5eaddd6301265863936b834fc14bf8d2de9053fd8f322b9",
+        "candidate_sql": "SELECT\n  CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING COUNT(DISTINCT TRA_DATE) >= :cs_b1",
+        "candidate_accepted_by_service_a": false,
+        "validation_findings": [
+          {
+            "message": "Aggregate intent requires an aliased COUNT_DISTINCT(TRA_DATE) projection"
+          }
+        ],
+        "error": "Generation-only candidate is not execution or deployment approved",
+        "metrics": {
+          "llm_calls": 1,
+          "tool_calls": 1,
+          "critique_attempts": 0,
+          "oracle_statements": 0,
+          "tokens": 1028,
+          "elapsed_seconds": 1.441
+        },
+        "approved": false
+      },
+      "service_b": {
+        "provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1",
+        "payload_sha256": "2bef308d55b63a343e098ecb6ec1f5a320a8abc7643fe7585b85c23038d157da",
+        "candidate_sql": "SELECT\n  CUS_NUM,\n  COUNT(DISTINCT TRA_DATE) AS \"Distinct transaction dates\"\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING COUNT(DISTINCT TRA_DATE) >= :cs_b1;",
+        "candidate_sql_extracted_by_adapter": "SELECT\n  CUS_NUM,\n  COUNT(DISTINCT TRA_DATE) AS \"Distinct transaction dates\"\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING COUNT(DISTINCT TRA_DATE) >= :cs_b1",
+        "candidate_accepted_by_service_b": true,
+        "service_b_validation_findings": [],
+        "service_a_parity_validation_findings": [],
+        "normalizations": [],
+        "sse_events": [
+          {
+            "type": "generation_only_candidate",
+            "text": "SELECT\n  CUS_NUM,\n  COUNT(DISTINCT TRA_DATE) AS \"Distinct transaction dates\"\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING COUNT(DISTINCT TRA_DATE) >= :cs_b1;",
+            "approved": false
+          },
+          {
+            "type": "done"
+          }
+        ],
+        "error": "Generation-only candidate is not execution or deployment approved",
+        "approved": false
+      },
+      "semantic_assessment": {
+        "service_a_vs_fixture": "differs_from_fixture",
+        "service_b_vs_fixture": "matches_fixture",
+        "service_a_vs_service_b_match": false,
+        "fixture_signature_is_deterministic_reference_only": true
+      }
+    },
+    {
+      "case_id": "b9-06",
+      "scenario": "Rolling 30 day transaction window",
+      "service_a": {
+        "provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+        "payload_sha256": "cf42057e2629d76c307dc0fd2b90e3de51a26f9a283ed3e8d235998195086e23",
+        "candidate_sql": "SELECT\n  t.CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS t\nWHERE t.TRA_DATE >= SYSDATE - :cs_b1\n  AND t.TRA_DATE < SYSDATE\nGROUP BY t.CUS_NUM",
+        "candidate_accepted_by_service_a": true,
+        "validation_findings": [],
+        "error": "Generation-only candidate is not execution or deployment approved",
+        "metrics": {
+          "llm_calls": 1,
+          "tool_calls": 1,
+          "critique_attempts": 0,
+          "oracle_statements": 0,
+          "tokens": 978,
+          "elapsed_seconds": 1.094
+        },
+        "approved": false
+      },
+      "service_b": {
+        "provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1",
+        "payload_sha256": "280d845dd48cd078fbd949a40b4ebbfbf89fb63a2afc4b06871084181fa5da8e",
+        "candidate_sql": "SELECT DISTINCT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_DATE >= SYSDATE - :cs_b1\n  AND TRA_DATE < SYSDATE;",
+        "candidate_sql_extracted_by_adapter": "SELECT DISTINCT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_DATE >= SYSDATE - :cs_b1\n  AND TRA_DATE < SYSDATE",
+        "candidate_accepted_by_service_b": true,
+        "service_b_validation_findings": [],
+        "service_a_parity_validation_findings": [],
+        "normalizations": [],
+        "sse_events": [
+          {
+            "type": "generation_only_candidate",
+            "text": "SELECT DISTINCT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_DATE >= SYSDATE - :cs_b1\n  AND TRA_DATE < SYSDATE;",
+            "approved": false
+          },
+          {
+            "type": "done"
+          }
+        ],
+        "error": "Generation-only candidate is not execution or deployment approved",
+        "approved": false
+      },
+      "semantic_assessment": {
+        "service_a_vs_fixture": "differs_from_fixture",
+        "service_b_vs_fixture": "differs_from_fixture",
+        "service_a_vs_service_b_match": false,
+        "fixture_signature_is_deterministic_reference_only": true
+      }
+    },
+    {
+      "case_id": "b9-07",
+      "scenario": "Current calendar month activity",
+      "service_a": {
+        "provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+        "payload_sha256": "d3dcae1035b1b15dd2f8295d429dfa10bbcc59094b00339b3649093bc2af9c1c",
+        "candidate_sql": "SELECT\n  CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_DATE >= TRUNC(SYSDATE, 'MM')\n  AND TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)\nGROUP BY CUS_NUM",
+        "candidate_accepted_by_service_a": true,
+        "validation_findings": [],
+        "error": "Generation-only candidate is not execution or deployment approved",
+        "metrics": {
+          "llm_calls": 1,
+          "tool_calls": 1,
+          "critique_attempts": 0,
+          "oracle_statements": 0,
+          "tokens": 982,
+          "elapsed_seconds": 1.192
+        },
+        "approved": false
+      },
+      "service_b": {
+        "provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1",
+        "payload_sha256": "78299f82d755eb23a590ae4cd5d1ccadbded52ae6a1d22c88a9998ab0f2108da",
+        "candidate_sql": "SELECT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_DATE >= TRUNC(SYSDATE, 'MM')\n  AND TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)\nGROUP BY CUS_NUM",
+        "candidate_sql_extracted_by_adapter": "SELECT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_DATE >= TRUNC(SYSDATE, 'MM')\n  AND TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)\nGROUP BY CUS_NUM",
+        "candidate_accepted_by_service_b": true,
+        "service_b_validation_findings": [],
+        "service_a_parity_validation_findings": [],
+        "normalizations": [],
+        "sse_events": [
+          {
+            "type": "generation_only_candidate",
+            "text": "SELECT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_DATE >= TRUNC(SYSDATE, 'MM')\n  AND TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)\nGROUP BY CUS_NUM",
+            "approved": false
+          },
+          {
+            "type": "done"
+          }
+        ],
+        "error": "Generation-only candidate is not execution or deployment approved",
+        "approved": false
+      },
+      "semantic_assessment": {
+        "service_a_vs_fixture": "differs_from_fixture",
+        "service_b_vs_fixture": "differs_from_fixture",
+        "service_a_vs_service_b_match": true,
+        "fixture_signature_is_deterministic_reference_only": true
+      }
+    },
+    {
+      "case_id": "b9-08",
+      "scenario": "Compare recent and preceding 30 day counts",
+      "service_a": {
+        "provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+        "payload_sha256": "61892a2c5d7aadcc773bc080eda2f2c56d2cddedc08094ad04af67dba320d787",
+        "candidate_sql": "SELECT\n    CUS_NUM,\n    COUNT(CASE\n        WHEN TRA_DATE >= SYSDATE - :cs_b1\n         AND TRA_DATE < SYSDATE\n        THEN 1\n    END) AS recent_30_day_txn_count,\n    COUNT(CASE\n        WHEN TRA_DATE >= SYSDATE - (:cs_b2 + :cs_b3)\n         AND TRA_DATE < SYSDATE - :cs_b4\n        THEN 1\n    END) AS preceding_30_day_txn_count\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM",
+        "candidate_accepted_by_service_a": true,
+        "validation_findings": [],
+        "error": "Generation-only candidate is not execution or deployment approved",
+        "metrics": {
+          "llm_calls": 1,
+          "tool_calls": 1,
+          "critique_attempts": 0,
+          "oracle_statements": 0,
+          "tokens": 1137,
+          "elapsed_seconds": 1.583
+        },
+        "approved": false
+      },
+      "service_b": {
+        "provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1",
+        "payload_sha256": "22c6fd290641cc690fd582432f6fe04a3ce148dd960147cf8a1d597ab370719d",
+        "candidate_sql": "SELECT\n  CUS_NUM,\n  SUM(CASE WHEN TRA_DATE >= (SYSDATE - :cs_b1) AND TRA_DATE < SYSDATE THEN 1 ELSE 0 END) AS CURRENT_TXN_CNT,\n  SUM(CASE WHEN TRA_DATE >= (SYSDATE - (:cs_b1 + :cs_b2)) AND TRA_DATE < (SYSDATE - :cs_b3) THEN 1 ELSE 0 END) AS BASELINE_TXN_CNT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM;",
+        "candidate_sql_extracted_by_adapter": "SELECT\n  CUS_NUM,\n  SUM(CASE WHEN TRA_DATE >= (SYSDATE - :cs_b1) AND TRA_DATE < SYSDATE THEN 1 ELSE 0 END) AS CURRENT_TXN_CNT,\n  SUM(CASE WHEN TRA_DATE >= (SYSDATE - (:cs_b1 + :cs_b2)) AND TRA_DATE < (SYSDATE - :cs_b3) THEN 1 ELSE 0 END) AS BASELINE_TXN_CNT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM",
+        "candidate_accepted_by_service_b": true,
+        "service_b_validation_findings": [],
+        "service_a_parity_validation_findings": [],
+        "normalizations": [],
+        "sse_events": [
+          {
+            "type": "generation_only_candidate",
+            "text": "SELECT\n  CUS_NUM,\n  SUM(CASE WHEN TRA_DATE >= (SYSDATE - :cs_b1) AND TRA_DATE < SYSDATE THEN 1 ELSE 0 END) AS CURRENT_TXN_CNT,\n  SUM(CASE WHEN TRA_DATE >= (SYSDATE - (:cs_b1 + :cs_b2)) AND TRA_DATE < (SYSDATE - :cs_b3) THEN 1 ELSE 0 END) AS BASELINE_TXN_CNT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM;",
+            "approved": false
+          },
+          {
+            "type": "done"
+          }
+        ],
+        "error": "Generation-only candidate is not execution or deployment approved",
+        "approved": false
+      },
+      "semantic_assessment": {
+        "service_a_vs_fixture": "differs_from_fixture",
+        "service_b_vs_fixture": "differs_from_fixture",
+        "service_a_vs_service_b_match": false,
+        "fixture_signature_is_deterministic_reference_only": true
+      }
+    },
+    {
+      "case_id": "b9-09",
+      "scenario": "Customer-level repeated amount aggregation",
+      "service_a": {
+        "provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+        "payload_sha256": "1a2a8eaca5f614f13405601f4870cae7532fab1c929baa5635427ceabafd3f07",
+        "candidate_sql": "SELECT\n  CUS_NUM,\n  SUM(TRA_AMT) AS TOTAL_TRA_AMT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING SUM(TRA_AMT) > :cs_b1",
+        "candidate_accepted_by_service_a": true,
+        "validation_findings": [],
+        "error": "Generation-only candidate is not execution or deployment approved",
+        "metrics": {
+          "llm_calls": 1,
+          "tool_calls": 1,
+          "critique_attempts": 0,
+          "oracle_statements": 0,
+          "tokens": 1038,
+          "elapsed_seconds": 1.212
+        },
+        "approved": false
+      },
+      "service_b": {
+        "provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1",
+        "payload_sha256": "8da7c6943a9f77a33cb9257c3828a8409543d9413b51408274aec69c274bb0ac",
+        "candidate_sql": "SELECT\n  CUS_NUM,\n  SUM(TRA_AMT) AS TOTAL_TRA_AMT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING SUM(TRA_AMT) > :cs_b1;",
+        "candidate_sql_extracted_by_adapter": "SELECT\n  CUS_NUM,\n  SUM(TRA_AMT) AS TOTAL_TRA_AMT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING SUM(TRA_AMT) > :cs_b1",
+        "candidate_accepted_by_service_b": true,
+        "service_b_validation_findings": [],
+        "service_a_parity_validation_findings": [],
+        "normalizations": [],
+        "sse_events": [
+          {
+            "type": "generation_only_candidate",
+            "text": "SELECT\n  CUS_NUM,\n  SUM(TRA_AMT) AS TOTAL_TRA_AMT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING SUM(TRA_AMT) > :cs_b1;",
+            "approved": false
+          },
+          {
+            "type": "done"
+          }
+        ],
+        "error": "Generation-only candidate is not execution or deployment approved",
+        "approved": false
+      },
+      "semantic_assessment": {
+        "service_a_vs_fixture": "matches_fixture",
+        "service_b_vs_fixture": "matches_fixture",
+        "service_a_vs_service_b_match": true,
+        "fixture_signature_is_deterministic_reference_only": true
+      }
+    },
+    {
+      "case_id": "b9-10",
+      "scenario": "Confirmed code and amount filters",
+      "service_a": {
+        "provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+        "payload_sha256": "a7962c65e8504a0a0d0cb6cfef0b3492d85dc4433b6139a695ab459fcd3a6d00",
+        "candidate_sql": "SELECT\n  CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE EXPL_CODE IN (:cs_b1, :cs_b2)\n  AND TRA_AMT > :cs_b3\nGROUP BY CUS_NUM",
+        "candidate_accepted_by_service_a": true,
+        "validation_findings": [],
+        "error": "Generation-only candidate is not execution or deployment approved",
+        "metrics": {
+          "llm_calls": 1,
+          "tool_calls": 1,
+          "critique_attempts": 0,
+          "oracle_statements": 0,
+          "tokens": 1136,
+          "elapsed_seconds": 1.332
+        },
+        "approved": false
+      },
+      "service_b": {
+        "provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1",
+        "payload_sha256": "4300aaf7a520f9ed5aa450a4064abc0899949730bcf4eb9898295cf173ae998d",
+        "candidate_sql": "SELECT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_AMT > :cs_b1\n  AND EXPL_CODE IN (:cs_b2, :cs_b3)\nGROUP BY CUS_NUM",
+        "candidate_sql_extracted_by_adapter": "SELECT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_AMT > :cs_b1\n  AND EXPL_CODE IN (:cs_b2, :cs_b3)\nGROUP BY CUS_NUM",
+        "candidate_accepted_by_service_b": true,
+        "service_b_validation_findings": [],
+        "service_a_parity_validation_findings": [],
+        "normalizations": [],
+        "sse_events": [
+          {
+            "type": "generation_only_candidate",
+            "text": "SELECT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_AMT > :cs_b1\n  AND EXPL_CODE IN (:cs_b2, :cs_b3)\nGROUP BY CUS_NUM",
+            "approved": false
+          },
+          {
+            "type": "done"
+          }
+        ],
+        "error": "Generation-only candidate is not execution or deployment approved",
+        "approved": false
+      },
+      "semantic_assessment": {
+        "service_a_vs_fixture": "differs_from_fixture",
+        "service_b_vs_fixture": "differs_from_fixture",
+        "service_a_vs_service_b_match": false,
+        "fixture_signature_is_deterministic_reference_only": true
+      }
+    },
+    {
+      "case_id": "b9-11",
+      "scenario": "Zero activity customer set remains empty",
+      "service_a": {
+        "provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+        "payload_sha256": "63d6aec8fe51a5232cc05b912950044e62fce5f36399cdae9bd196c2abe32892",
+        "candidate_sql": "SELECT\n  CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_DATE >= SYSDATE - :cs_b1\n  AND TRA_DATE < SYSDATE\nGROUP BY CUS_NUM",
+        "candidate_accepted_by_service_a": true,
+        "validation_findings": [],
+        "error": "Generation-only candidate is not execution or deployment approved",
+        "metrics": {
+          "llm_calls": 1,
+          "tool_calls": 1,
+          "critique_attempts": 0,
+          "oracle_statements": 0,
+          "tokens": 978,
+          "elapsed_seconds": 1.059
+        },
+        "approved": false
+      },
+      "service_b": {
+        "provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1",
+        "payload_sha256": "b0fad4e913d01fb4de079e5f32b87c9a0c1756d30c37bf44a14e51e13ac04777",
+        "candidate_sql": "SELECT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_DATE >= (SYSDATE - :cs_b1)\n  AND TRA_DATE < SYSDATE\nGROUP BY CUS_NUM;",
+        "candidate_sql_extracted_by_adapter": "SELECT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_DATE >= (SYSDATE - :cs_b1)\n  AND TRA_DATE < SYSDATE\nGROUP BY CUS_NUM",
+        "candidate_accepted_by_service_b": true,
+        "service_b_validation_findings": [],
+        "service_a_parity_validation_findings": [],
+        "normalizations": [],
+        "sse_events": [
+          {
+            "type": "generation_only_candidate",
+            "text": "SELECT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_DATE >= (SYSDATE - :cs_b1)\n  AND TRA_DATE < SYSDATE\nGROUP BY CUS_NUM;",
+            "approved": false
+          },
+          {
+            "type": "done"
+          }
+        ],
+        "error": "Generation-only candidate is not execution or deployment approved",
+        "approved": false
+      },
+      "semantic_assessment": {
+        "service_a_vs_fixture": "differs_from_fixture",
+        "service_b_vs_fixture": "differs_from_fixture",
+        "service_a_vs_service_b_match": false,
+        "fixture_signature_is_deterministic_reference_only": true
+      }
+    },
+    {
+      "case_id": "b9-12",
+      "scenario": "Customer average transaction amount",
+      "service_a": {
+        "provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+        "payload_sha256": "04273f83d6d31dfe9c4a2c989e14808b69f86fc1c721cc0287e028590fded1fe",
+        "candidate_sql": "SELECT\n  CUS_NUM,\n  AVG(TRA_AMT) AS AVG_TRA_AMT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM",
+        "candidate_accepted_by_service_a": true,
+        "validation_findings": [],
+        "error": "Generation-only candidate is not execution or deployment approved",
+        "metrics": {
+          "llm_calls": 1,
+          "tool_calls": 1,
+          "critique_attempts": 0,
+          "oracle_statements": 0,
+          "tokens": 960,
+          "elapsed_seconds": 1.253
+        },
+        "approved": false
+      },
+      "service_b": {
+        "provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1",
+        "payload_sha256": "2691c14c9077d639529dc5c07e08c299754b238a8101c58ff38b7a2b8bd1080d",
+        "candidate_sql": "SELECT CUS_NUM, AVG(TRA_AMT) AS AVG_TRA_AMT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM",
+        "candidate_sql_extracted_by_adapter": "SELECT CUS_NUM, AVG(TRA_AMT) AS AVG_TRA_AMT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM",
+        "candidate_accepted_by_service_b": true,
+        "service_b_validation_findings": [],
+        "service_a_parity_validation_findings": [],
+        "normalizations": [],
+        "sse_events": [
+          {
+            "type": "generation_only_candidate",
+            "text": "SELECT CUS_NUM, AVG(TRA_AMT) AS AVG_TRA_AMT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM",
+            "approved": false
+          },
+          {
+            "type": "done"
+          }
+        ],
+        "error": "Generation-only candidate is not execution or deployment approved",
+        "approved": false
+      },
+      "semantic_assessment": {
+        "service_a_vs_fixture": "matches_fixture",
+        "service_b_vs_fixture": "matches_fixture",
+        "service_a_vs_service_b_match": true,
+        "fixture_signature_is_deterministic_reference_only": true
+      }
+    }
+  ],
+  "run_started_at_utc": "2026-10-29T11:34:06.393379+00:00",
+  "elapsed_seconds": 199.623,
+  "summary": {
+    "cases": 12,
+    "service_a_validator_pass": 10,
+    "service_b_validator_pass": 12,
+    "service_a_matches_fixture_semantics": 3,
+    "service_b_matches_fixture_semantics": 5,
+    "service_a_service_b_semantic_matches": 4
+  }
+}

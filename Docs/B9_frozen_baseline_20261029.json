@@ -1,0 +1,542 @@
+{
+  "format": "b9-frozen-sql-baseline-v1",
+  "created_at_utc": "2026-10-29",
+  "live_model_calls_made_during_freeze": 0,
+  "frozen_source": {
+    "results_path": "Docs/B9_live_results_6690f75a_auth2_20261029.json",
+    "results_sha256": "8bb4cab23487edf2a9c264a7055f40e83fce8c45065a20239ae62874cd2d1415",
+    "payloads_sha256": "77c62d91956bfc2b0e14ffc2071423e92a5c7138e35a6a264dcdca3918814ef8",
+    "fixture_path": "services/aml_builder/tests/eval/dwh_scenario/b9_cases.jsonl",
+    "fixtures_sha256": "1f23dbe7ae51eb3dfc0d10a07926b29122369672acefc2aa2592254acda48f9e",
+    "scope_sha256": "6690f75a0acc814a5be7cb3ea2e679818b99aac267d25624d812837edb7e54ce",
+    "approval_scope_sha256": "6690f75a0acc814a5be7cb3ea2e679818b99aac267d25624d812837edb7e54ce",
+    "candidate_count": 24
+  },
+  "implementation_versions": {
+    "service_a_validator_path": "services/aml_builder/web/domain/dwh_scenario/validation.py",
+    "service_a_validator_sha256": "a0cae924023424bca894950ab290ed28682e6b3fb27526a81c86b85534a5f8a4",
+    "service_b_validator_path": "../PioTech-AI/services/dwh_scenario_agent/web/services/cloud_safe.py",
+    "service_b_validator_sha256": "b6770d73e73bfb09edc382b5fe298cba3b9ea4329c2208623b1d366ed1145628",
+    "comparator_path": "services/aml_builder/tests/eval/dwh_scenario/runner.py",
+    "comparator_sha256": "82894635bdc08bbeff96bca25703d324b7d57de427f4a9aa599fb5c58178e775",
+    "service_a_prompt_sha256": "a905e6b9c76257228c1c6b9d35f91779a6b0aaac4f27f7b316345e4135fb5c48",
+    "service_b_prompt_sha256": "5deb4bfc1efeaf343b671ec1c77e8cdcdafc3f9cd8e69a1133b33cf157a3e65a"
+  },
+  "offline_semantic_comparison": {
+    "matches": [
+      "b9-03",
+      "b9-04",
+      "b9-05",
+      "b9-08",
+      "b9-12"
+    ],
+    "match_count": 5,
+    "case_count": 12,
+    "method": "Oracle AST structure with projection alias labels ignored, HAVING included, and only each candidate’s current intent-derived bind values substituted; no Oracle equivalence or customer-set claim."
+  },
+  "cases": [
+    {
+      "case_id": "b9-01",
+      "scenario": "Confirmed explanation code 4 in rolling 14 days",
+      "services": {
+        "Service A": {
+          "provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+          "payload_sha256": "0f82af39920cedcbf07b2baff7bcceffaa68f29dbc4aa666390d36b70282126c",
+          "candidate_sql": "SELECT\n  t.CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS t\nWHERE t.EXPL_CODE IN (:cs_b1)\n  AND t.TRA_DATE >= SYSDATE - :cs_b2\n  AND t.TRA_DATE < SYSDATE\nGROUP BY t.CUS_NUM",
+          "candidate_sql_sha256": "a09c34236a14f386fc14c90883fe1175f1c8da1fe98ffc5e322227ecd6fcde51",
+          "at_call_accepted": true,
+          "at_call_findings": [],
+          "current_offline_validation": {
+            "accepted": true,
+            "findings": []
+          },
+          "intent_derived_binds": {
+            "cs_b1": "4",
+            "cs_b2": 14
+          },
+          "semantic_signature_sha256": "2850ab408f1f102289da304242d54c2256b0bdcd807d9f676fed300bd8aba46a"
+        },
+        "Service B": {
+          "provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1",
+          "payload_sha256": "4cf895feee89fbe84933db3550b84d79d5f2a190973246d452b824fcb70230b2",
+          "candidate_sql": "SELECT\n  CUS_NUM,\n  SUM(TRA_AMT) AS total_trade_amount\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_DATE >= (SYSDATE - :cs_b1)\n  AND TRA_DATE < SYSDATE\n  AND EXPL_CODE IN (:cs_b2)\nGROUP BY CUS_NUM;",
+          "candidate_sql_sha256": "6110a2606dd89723a7a4c6bc62d02df18d8b42ddda1746c483d029c5dfe642dd",
+          "at_call_accepted": false,
+          "at_call_findings": [
+            {
+              "message": "CloudSafeError: Rolling temporal predicate is missing or unverifiable"
+            }
+          ],
+          "current_offline_validation": {
+            "accepted": false,
+            "findings": [
+              "CloudSafeError: SQL projects an aggregate measure not requested by intent"
+            ]
+          },
+          "intent_derived_binds": null,
+          "semantic_signature_sha256": null
+        }
+      },
+      "current_offline_semantic_structure_match": false
+    },
+    {
+      "case_id": "b9-02",
+      "scenario": "Transaction amount threshold",
+      "services": {
+        "Service A": {
+          "provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+          "payload_sha256": "8a1cf616c894cff623bd356b7fb58222b58deefa6647da2c207b021aeedee136",
+          "candidate_sql": "SELECT\n    t.CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS t\nGROUP BY t.CUS_NUM\nHAVING MAX(CASE WHEN t.TRA_AMT >= :cs_b1 THEN 1 ELSE 0 END) = 1",
+          "candidate_sql_sha256": "1526bd91a8d1a74592c159c934bd440cbee3f01c12c8e6812b7fbc5a7d95a592",
+          "at_call_accepted": false,
+          "at_call_findings": [
+            {
+              "message": "A threshold predicate is missing or differs from intent"
+            }
+          ],
+          "current_offline_validation": {
+            "accepted": true,
+            "findings": []
+          },
+          "intent_derived_binds": {
+            "cs_b1": 10000.0
+          },
+          "semantic_signature_sha256": "f48e7e8cfbad71e84060b2fa28dddce49b61157990b4b9e1bf4e8a339abe3c4e"
+        },
+        "Service B": {
+          "provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1",
+          "payload_sha256": "10acae4394064d704a9a6a1a2d58284e28855778251cccc0547d86d537ce5f10",
+          "candidate_sql": "SELECT\n  CUS_NUM,\n  COUNT(*) AS NUM_TRANSACTIONS_ABOVE_THRESHOLD\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_AMT >= :cs_b1\nGROUP BY CUS_NUM;",
+          "candidate_sql_sha256": "25a90bc2e01ca40712ee056a9733c881579bdaeffee29f7a8268f8b4ae2d8b84",
+          "at_call_accepted": true,
+          "at_call_findings": [],
+          "current_offline_validation": {
+            "accepted": false,
+            "findings": [
+              "CloudSafeError: SQL projects an aggregate measure not requested by intent"
+            ]
+          },
+          "intent_derived_binds": null,
+          "semantic_signature_sha256": null
+        }
+      },
+      "current_offline_semantic_structure_match": false
+    },
+    {
+      "case_id": "b9-03",
+      "scenario": "Customer aggregate amount threshold",
+      "services": {
+        "Service A": {
+          "provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+          "payload_sha256": "83774257daa4acc3e48855a117748317035451e93ad089e003d25ef851825018",
+          "candidate_sql": "SELECT\n  t.CUS_NUM,\n  SUM(t.TRA_AMT) AS total_tra_amt\nFROM BI_DWH.PIO_TRANSACTIONS t\nGROUP BY t.CUS_NUM\nHAVING SUM(t.TRA_AMT) >= :cs_b1",
+          "candidate_sql_sha256": "24932384918ad692cdb2202d6ed62d3007ad3d8da8c99a2c03dc7e6a5e0eb03f",
+          "at_call_accepted": true,
+          "at_call_findings": [],
+          "current_offline_validation": {
+            "accepted": true,
+            "findings": []
+          },
+          "intent_derived_binds": {
+            "cs_b1": 50000.0
+          },
+          "semantic_signature_sha256": "66b96707ad17c7efe347a204d6ca23b1ed39cfa461727d34346526e883b14ab7"
+        },
+        "Service B": {
+          "provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1",
+          "payload_sha256": "c80afae326e23c31d6753d17029208473de3bca1916caf5439795944c6db3c7b",
+          "candidate_sql": "SELECT\n  CUS_NUM,\n  SUM(TRA_AMT) AS total_transaction_amount\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING SUM(TRA_AMT) >= :cs_b1;",
+          "candidate_sql_sha256": "58c38f049eb6a9f645f33b1abf5fa920fc29530b73c0b4dffc14614fa919966a",
+          "at_call_accepted": true,
+          "at_call_findings": [],
+          "current_offline_validation": {
+            "accepted": true,
+            "findings": []
+          },
+          "intent_derived_binds": {
+            "cs_b1": 50000.0
+          },
+          "semantic_signature_sha256": "66b96707ad17c7efe347a204d6ca23b1ed39cfa461727d34346526e883b14ab7"
+        }
+      },
+      "current_offline_semantic_structure_match": true
+    },
+    {
+      "case_id": "b9-04",
+      "scenario": "At least five qualifying transactions",
+      "services": {
+        "Service A": {
+          "provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+          "payload_sha256": "dd30f5cbadfff542d3085c30a4601a7f9fc2d56ac8895cd45b633b5415c0097c",
+          "candidate_sql": "SELECT\n    CUS_NUM,\n    COUNT(*) AS TXN_COUNT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING COUNT(*) >= :cs_b1",
+          "candidate_sql_sha256": "7b114d7827669e0ddac87feb4b6cda8d63afe9b30afa1650a31d998195ce21bd",
+          "at_call_accepted": true,
+          "at_call_findings": [],
+          "current_offline_validation": {
+            "accepted": true,
+            "findings": []
+          },
+          "intent_derived_binds": {
+            "cs_b1": 5.0
+          },
+          "semantic_signature_sha256": "c179f17efe2c273e19e6aee4ba248859ba3eea8f5b1f9b119886c3ba7bf3b09d"
+        },
+        "Service B": {
+          "provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1",
+          "payload_sha256": "695e3370f419a7b5d60f1549418e67b698713eeb1bb861377371911322e215c6",
+          "candidate_sql": "SELECT\n  CUS_NUM,\n  COUNT(*) AS Transaction_count\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING COUNT(*) >= :cs_b1;",
+          "candidate_sql_sha256": "8321a4451e784812de0bf8c14c6b224ec79359e4154527b40c5c42251e2c0a5c",
+          "at_call_accepted": true,
+          "at_call_findings": [],
+          "current_offline_validation": {
+            "accepted": true,
+            "findings": []
+          },
+          "intent_derived_binds": {
+            "cs_b1": 5.0
+          },
+          "semantic_signature_sha256": "c179f17efe2c273e19e6aee4ba248859ba3eea8f5b1f9b119886c3ba7bf3b09d"
+        }
+      },
+      "current_offline_semantic_structure_match": true
+    },
+    {
+      "case_id": "b9-05",
+      "scenario": "At least three distinct transaction dates",
+      "services": {
+        "Service A": {
+          "provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+          "payload_sha256": "ff19225f15a5a84eb464fc8c027534fa813cc53212313abd000dcf93e4f0bf75",
+          "candidate_sql": "SELECT\n    CUS_NUM,\n    COUNT(DISTINCT TRA_DATE) AS DISTINCT_TRA_DATE_CNT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING COUNT(DISTINCT TRA_DATE) >= :cs_b1",
+          "candidate_sql_sha256": "749840d1a6b970f9947cfc7bb3b44a49170f8046d31b6293e5b081068b04e947",
+          "at_call_accepted": true,
+          "at_call_findings": [],
+          "current_offline_validation": {
+            "accepted": true,
+            "findings": []
+          },
+          "intent_derived_binds": {
+            "cs_b1": 3.0
+          },
+          "semantic_signature_sha256": "a14fbd75403253df47e6f35ef52a4265bc74126508ad08c15d440615c894ec39"
+        },
+        "Service B": {
+          "provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1",
+          "payload_sha256": "ddfca391e2aa6d5e34b0c5390744c4556fc56ef91438dfcbfa54355e29d6cad8",
+          "candidate_sql": "SELECT\n  p.CUS_NUM,\n  COUNT(DISTINCT p.TRA_DATE) AS DISTINCT_TRANSACTION_DATES\nFROM BI_DWH.PIO_TRANSACTIONS p\nGROUP BY p.CUS_NUM\nHAVING COUNT(DISTINCT p.TRA_DATE) >= :cs_b1;",
+          "candidate_sql_sha256": "7d46c065b688008d202ce8d2b11140e296c12c522b7d876a4051777477ed36c1",
+          "at_call_accepted": true,
+          "at_call_findings": [],
+          "current_offline_validation": {
+            "accepted": true,
+            "findings": []
+          },
+          "intent_derived_binds": {
+            "cs_b1": 3.0
+          },
+          "semantic_signature_sha256": "a14fbd75403253df47e6f35ef52a4265bc74126508ad08c15d440615c894ec39"
+        }
+      },
+      "current_offline_semantic_structure_match": true
+    },
+    {
+      "case_id": "b9-06",
+      "scenario": "Rolling 30 day transaction window",
+      "services": {
+        "Service A": {
+          "provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+          "payload_sha256": "23aac17140c98bbf17abc8d84b2130c60d761429fe4d76e18cb9a7330cf0a7ae",
+          "candidate_sql": "SELECT\n    t.CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS t\nWHERE t.TRA_DATE >= SYSDATE - :cs_b1\n  AND t.TRA_DATE < SYSDATE\nGROUP BY t.CUS_NUM",
+          "candidate_sql_sha256": "21c36622c02bd46c587a3b44a64c5ef4389a1f35b5b9a3504fe273949ec2f31b",
+          "at_call_accepted": true,
+          "at_call_findings": [],
+          "current_offline_validation": {
+            "accepted": true,
+            "findings": []
+          },
+          "intent_derived_binds": {
+            "cs_b1": 30
+          },
+          "semantic_signature_sha256": "2115ddf6d39c62958f8ac406ff8eff9a235f2e10e6fbcc3720f313d6e261dedd"
+        },
+        "Service B": {
+          "provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1",
+          "payload_sha256": "8e5b9899309befc5afa79e038c41d40e441e1e181c2a4c28d55a245230b4fe03",
+          "candidate_sql": "SELECT\n  CUS_NUM,\n  SUM(TRA_AMT) AS total_tra_amt_rolling_30d\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_DATE >= (SYSDATE - :cs_b1)\n  AND TRA_DATE < SYSDATE\nGROUP BY CUS_NUM",
+          "candidate_sql_sha256": "2c69b5e8054b80926aaf74fb5df8b26e266c96aca09def74ebd563e6d2e236a9",
+          "at_call_accepted": false,
+          "at_call_findings": [
+            {
+              "message": "CloudSafeError: Rolling temporal predicate is missing or unverifiable"
+            }
+          ],
+          "current_offline_validation": {
+            "accepted": false,
+            "findings": [
+              "CloudSafeError: SQL projects an aggregate measure not requested by intent"
+            ]
+          },
+          "intent_derived_binds": null,
+          "semantic_signature_sha256": null
+        }
+      },
+      "current_offline_semantic_structure_match": false
+    },
+    {
+      "case_id": "b9-07",
+      "scenario": "Current calendar month activity",
+      "services": {
+        "Service A": {
+          "provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+          "payload_sha256": "85c3393a1ebdee7e42ecafca35df94b82257400b4cc4c8b70beff2c97a280fdd",
+          "candidate_sql": "SELECT\n    t.CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS t\nWHERE t.TRA_DATE >= TRUNC(SYSDATE, 'MM')\n  AND t.TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)\nGROUP BY t.CUS_NUM",
+          "candidate_sql_sha256": "f8be1c12987a9a23f4bd7a0b03c97bac4df2c68cb79275e28e2aa10140217ef3",
+          "at_call_accepted": true,
+          "at_call_findings": [],
+          "current_offline_validation": {
+            "accepted": true,
+            "findings": []
+          },
+          "intent_derived_binds": {},
+          "semantic_signature_sha256": "f9418bfdf0c2d74c770fa81db5557f0e662944c0ae376e1522d3ec37de96a5e1"
+        },
+        "Service B": {
+          "provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1",
+          "payload_sha256": "72e93bac04c6f1642717bcd0876d3228af02b48fcf3096ede940836e84824158",
+          "candidate_sql": "SELECT t.CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS t\nWHERE t.TRA_DATE >= :cs_b1\n  AND t.TRA_DATE < :cs_b2\nGROUP BY t.CUS_NUM;",
+          "candidate_sql_sha256": "749a9a77853c6bfccabb6ec255dd649a9d03f286d26b183898e3a98161fa6d9a",
+          "at_call_accepted": false,
+          "at_call_findings": [
+            {
+              "message": "CloudSafeError: Current calendar-month boundaries are missing"
+            }
+          ],
+          "current_offline_validation": {
+            "accepted": false,
+            "findings": [
+              "SqlPolicyError: SQL contains binds outside confirmed filter and temporal contracts"
+            ]
+          },
+          "intent_derived_binds": null,
+          "semantic_signature_sha256": null
+        }
+      },
+      "current_offline_semantic_structure_match": false
+    },
+    {
+      "case_id": "b9-08",
+      "scenario": "Compare recent and preceding 30 day counts",
+      "services": {
+        "Service A": {
+          "provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+          "payload_sha256": "637b9375b64f25c86d0f170e98767289f18cd8a8774d56479d4e471ac02e8b3a",
+          "candidate_sql": "SELECT\n    t.CUS_NUM,\n    COUNT(CASE\n            WHEN t.TRA_DATE >= SYSDATE - :cs_b1\n             AND t.TRA_DATE < SYSDATE\n            THEN 1\n         END) AS current_30_day_txn_count,\n    COUNT(CASE\n            WHEN t.TRA_DATE >= SYSDATE - (:cs_b1 + :cs_b2)\n             AND t.TRA_DATE < SYSDATE - :cs_b2\n            THEN 1\n         END) AS prior_30_day_txn_count\nFROM BI_DWH.PIO_TRANSACTIONS t\nGROUP BY t.CUS_NUM",
+          "candidate_sql_sha256": "863c94344cad954054637ca37db4c6e1ccf9ecdaf52624b614412a875d96e78c",
+          "at_call_accepted": false,
+          "at_call_findings": [
+            {
+              "message": "Prior baseline-comparison window is missing"
+            }
+          ],
+          "current_offline_validation": {
+            "accepted": true,
+            "findings": []
+          },
+          "intent_derived_binds": {
+            "cs_b1": 30,
+            "cs_b2": 30
+          },
+          "semantic_signature_sha256": "ff6b3849c507809937c1813c3249090f8c7fa7059e5474e9f96aec52bbdf1c52"
+        },
+        "Service B": {
+          "provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1",
+          "payload_sha256": "d5c2b835eb2e7d8fadc78e7ef6aef45edf47f0d792a6dd601116b4b796436c47",
+          "candidate_sql": "SELECT\n  CUS_NUM,\n  COUNT(CASE WHEN TRA_DATE >= SYSDATE - :cs_b1 AND TRA_DATE < SYSDATE THEN 1 END) AS CURRENT_PERIOD_TXN_COUNT,\n  COUNT(CASE WHEN TRA_DATE >= SYSDATE - (:cs_b1 + :cs_b2) AND TRA_DATE < SYSDATE - :cs_b3 THEN 1 END) AS BASELINE_PERIOD_TXN_COUNT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM;",
+          "candidate_sql_sha256": "75937a929c3c7e720737bafd7a63f4e3d18b7021ef478df849775d9953455450",
+          "at_call_accepted": false,
+          "at_call_findings": [
+            {
+              "message": "CloudSafeError: Repeated bind placeholders are not permitted"
+            }
+          ],
+          "current_offline_validation": {
+            "accepted": true,
+            "findings": []
+          },
+          "intent_derived_binds": {
+            "cs_b1": 30,
+            "cs_b2": 30,
+            "cs_b3": 30
+          },
+          "semantic_signature_sha256": "ff6b3849c507809937c1813c3249090f8c7fa7059e5474e9f96aec52bbdf1c52"
+        }
+      },
+      "current_offline_semantic_structure_match": true
+    },
+    {
+      "case_id": "b9-09",
+      "scenario": "Customer-level repeated amount aggregation",
+      "services": {
+        "Service A": {
+          "provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+          "payload_sha256": "f1c7f7e9ea7052d2d24561ed472c955cd03c220083f6a1622871ac877393a5ca",
+          "candidate_sql": "SELECT\n  t.CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS t\nGROUP BY t.CUS_NUM\nHAVING SUM(t.TRA_AMT) > :cs_b1",
+          "candidate_sql_sha256": "349b8a49d3825875b6d7b6789343e1d84ecf5ead1fc5b1e3a5d9aa474b71bc76",
+          "at_call_accepted": false,
+          "at_call_findings": [
+            {
+              "message": "Aggregate intent requires an aliased SUM(TRA_AMT) projection"
+            }
+          ],
+          "current_offline_validation": {
+            "accepted": false,
+            "findings": [
+              "Aggregate intent requires an aliased SUM(TRA_AMT) projection"
+            ]
+          },
+          "intent_derived_binds": {
+            "cs_b1": 25000.0
+          },
+          "semantic_signature_sha256": "b0d4de4d48b397b11b372857714ea0fb5fe7a58b0bb845a1ea182b12dbdc8072"
+        },
+        "Service B": {
+          "provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1",
+          "payload_sha256": "c28125e797d82b8fc4e5f0e1e553b40e0d7448ddd2d9e7d02a2864bf5286b559",
+          "candidate_sql": "SELECT\n  CUS_NUM,\n  SUM(TRA_AMT) AS TOTAL_TRA_AMT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING SUM(TRA_AMT) > :cs_b1;",
+          "candidate_sql_sha256": "018e75ed9ed052961877718ea86877e43992a5fa814d547f878a4326c2c9c584",
+          "at_call_accepted": true,
+          "at_call_findings": [],
+          "current_offline_validation": {
+            "accepted": true,
+            "findings": []
+          },
+          "intent_derived_binds": {
+            "cs_b1": 25000.0
+          },
+          "semantic_signature_sha256": "d3d2962ca490fe8e39d6a90eeb624d75e81a2ae005a0384bc91281c242050e4a"
+        }
+      },
+      "current_offline_semantic_structure_match": false
+    },
+    {
+      "case_id": "b9-10",
+      "scenario": "Confirmed code and amount filters",
+      "services": {
+        "Service A": {
+          "provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+          "payload_sha256": "e6e5acf556474bbd87781419a293f7d3a7bf9d4742ddce8194968258cf87081a",
+          "candidate_sql": "SELECT\n    t.CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS t\nWHERE t.EXPL_CODE IN (:cs_b1, :cs_b2)\n  AND t.TRA_AMT > :cs_b3\nGROUP BY t.CUS_NUM",
+          "candidate_sql_sha256": "05ff080195d7733022cb20a9adcb8c8130c561f5253147347acee7a44c03bf7a",
+          "at_call_accepted": true,
+          "at_call_findings": [],
+          "current_offline_validation": {
+            "accepted": true,
+            "findings": []
+          },
+          "intent_derived_binds": {
+            "cs_b1": "4",
+            "cs_b2": "7",
+            "cs_b3": 5000.0
+          },
+          "semantic_signature_sha256": "5861c53d7d843817963043349f662bbc8cf874fa73a1951e102cae5e200148fc"
+        },
+        "Service B": {
+          "provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1",
+          "payload_sha256": "13f18f60668e23d4b009efe0f9ce1b0ddc0d6ac25691616f71707c27ada475bd",
+          "candidate_sql": "SELECT\n  CUS_NUM,\n  COUNT(*) AS NUM_TRANSACTIONS_OVER_5K\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_AMT > :cs_b1\n  AND EXPL_CODE IN (:cs_b2, :cs_b3)\nGROUP BY CUS_NUM;",
+          "candidate_sql_sha256": "a125cca82c228f6935c13d74d4d1167898688baf37a1d737dc74d70a9912029f",
+          "at_call_accepted": true,
+          "at_call_findings": [],
+          "current_offline_validation": {
+            "accepted": false,
+            "findings": [
+              "CloudSafeError: SQL projects an aggregate measure not requested by intent"
+            ]
+          },
+          "intent_derived_binds": null,
+          "semantic_signature_sha256": null
+        }
+      },
+      "current_offline_semantic_structure_match": false
+    },
+    {
+      "case_id": "b9-11",
+      "scenario": "Zero activity customer set remains empty",
+      "services": {
+        "Service A": {
+          "provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+          "payload_sha256": "8d5379008d893a1d9c39e2169dc9cbf474613eb5138d47970e12037a2b26c46d",
+          "candidate_sql": "SELECT\n  t.CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS t\nWHERE t.TRA_DATE >= SYSDATE - :cs_b1\n  AND t.TRA_DATE < SYSDATE\nGROUP BY t.CUS_NUM",
+          "candidate_sql_sha256": "154323fc05aae73d26492d59df0a173ec957d54d239a125d072532db043d707b",
+          "at_call_accepted": true,
+          "at_call_findings": [],
+          "current_offline_validation": {
+            "accepted": true,
+            "findings": []
+          },
+          "intent_derived_binds": {
+            "cs_b1": 7
+          },
+          "semantic_signature_sha256": "165ba60232c72c37e97bb312d44334776cd5a513f6bd1a61ad6acb4e978570c9"
+        },
+        "Service B": {
+          "provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1",
+          "payload_sha256": "197bb770305df26e27a1ad39e7f8ffc25481f1ae6754eb1cc28ff0d58fae4fa2",
+          "candidate_sql": "SELECT CUS_NUM,\n       COUNT(*) AS txn_count,\n       SUM(TRA_AMT) AS total_tran_amt\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_DATE >= (SYSDATE - :cs_b1)\n  AND TRA_DATE < SYSDATE\nGROUP BY CUS_NUM",
+          "candidate_sql_sha256": "c16b1579b33d9b7e0f644f6d2239859e7049297a6eabcce2be6dcd26c9c5f0cd",
+          "at_call_accepted": false,
+          "at_call_findings": [
+            {
+              "message": "CloudSafeError: Rolling temporal predicate is missing or unverifiable"
+            }
+          ],
+          "current_offline_validation": {
+            "accepted": false,
+            "findings": [
+              "CloudSafeError: SQL projects an aggregate measure not requested by intent"
+            ]
+          },
+          "intent_derived_binds": null,
+          "semantic_signature_sha256": null
+        }
+      },
+      "current_offline_semantic_structure_match": false
+    },
+    {
+      "case_id": "b9-12",
+      "scenario": "Customer average transaction amount",
+      "services": {
+        "Service A": {
+          "provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+          "payload_sha256": "dc7ccc5045b94cfcd818b6900061f5d7c3533e87bc25ca9bfd4f835ce166003d",
+          "candidate_sql": "SELECT\n    t.CUS_NUM,\n    AVG(t.TRA_AMT) AS AVG_TRA_AMT\nFROM BI_DWH.PIO_TRANSACTIONS t\nGROUP BY t.CUS_NUM",
+          "candidate_sql_sha256": "feb27f59e913d2a656b8898d9837c30ca0e1886e21150fc41f5879b1c22906ab",
+          "at_call_accepted": true,
+          "at_call_findings": [],
+          "current_offline_validation": {
+            "accepted": true,
+            "findings": []
+          },
+          "intent_derived_binds": {},
+          "semantic_signature_sha256": "d153eb4bf645c56fc12bd87c0bf95c35c89979d064b7e661a81cb5bba23c7bc1"
+        },
+        "Service B": {
+          "provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1",
+          "payload_sha256": "1deac896b9e8fc0588b3840528b811e794563c6416939d18c884d5546f617e25",
+          "candidate_sql": "SELECT\n  CUS_NUM,\n  AVG(TRA_AMT) AS AVG_TRA_AMT\nFROM\n  BI_DWH.PIO_TRANSACTIONS\nGROUP BY\n  CUS_NUM;",
+          "candidate_sql_sha256": "df37171041de749c6cbe8bf0551aa3ac3a011c24b88894f1a8c219be686f7c78",
+          "at_call_accepted": true,
+          "at_call_findings": [],
+          "current_offline_validation": {
+            "accepted": true,
+            "findings": []
+          },
+          "intent_derived_binds": {},
+          "semantic_signature_sha256": "d153eb4bf645c56fc12bd87c0bf95c35c89979d064b7e661a81cb5bba23c7bc1"
+        }
+      },
+      "current_offline_semantic_structure_match": true
+    }
+  ],
+  "baseline_sha256": "9772b9b5f632114356b2d64877b3ba757d3b81f20d0510f76f945bfcf5ff0ca6"
+}

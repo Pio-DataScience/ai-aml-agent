@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
+import os
 import time
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -48,6 +51,19 @@ class RequestCounters:
     critique_attempts: int = 0
     oracle_statements: int = 0
     tokens: int = 0
+
+
+@dataclass(frozen=True)
+class GenerationOnlyApproval:
+    """Exact development-only authorization for one model-bound payload."""
+
+    payload_sha256: str
+    scope_sha256: str
+    prompt_sha256: str
+    provider_identity: str
+    approved_by: str
+    provider_data_approval_ref: str
+    context_snapshot: dict[str, list[dict[str, Any]]]
 
 
 class LocalScenarioSqlGenerator:
@@ -288,6 +304,120 @@ class LocalScenarioSqlGenerator:
         except Exception as exc:
             return self._failure(f"Generation failed: {type(exc).__name__}", counters)
 
+    async def generate_only_for_approved_evaluation(
+        self,
+        request: ScenarioSqlRequest,
+        approval: GenerationOnlyApproval,
+    ) -> ScenarioSqlResult:
+        """Generate and deterministically validate one approved candidate only.
+
+        This explicit development-only path returns before Oracle execution or
+        critic construction. It is unavailable unless its setting and payload
+        hash approval both match.
+        """
+        started = self._clock()
+        counters = RequestCounters()
+        try:
+            if (
+                not self._config.DWH_SQL_GENERATION_ONLY_ENABLED
+                or self._config.DWH_SQL_ENVIRONMENT != "development"
+                or self._config.DWH_SQL_MODE != "http"
+            ):
+                raise PermissionError("Generation-only evaluation is disabled")
+            if not approval.approved_by.strip() or not approval.provider_data_approval_ref.strip():
+                raise PermissionError("Generation-only approval metadata is incomplete")
+            deadline = started + self._config.DWH_SQL_DEADLINE_SECONDS
+            encoded = assemble_context(
+                request,
+                experience=approval.context_snapshot.get("experience", []),
+                tables=approval.context_snapshot.get("tables", []),
+                columns=approval.context_snapshot.get("columns", []),
+                budget=self._config.DWH_SQL_CONTEXT_BUDGET,
+            )
+            prompt = load_prompt("generator_v1.md")
+            provider = self._config.DWH_SQL_GENERATOR_PROVIDER or self._config.LLM_PROVIDER
+            model = self._config.DWH_SQL_GENERATOR_MODEL or self._config.LLM_MODEL
+            endpoint = _generator_endpoint(provider, self._config)
+            provider_identity = f"{provider.casefold()}|{model.strip()}|{endpoint}"
+            prompt_sha256 = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+            if (
+                not approval.scope_sha256
+                or approval.scope_sha256 != self._config.DWH_SQL_GENERATION_ONLY_SCOPE_SHA256
+            ):
+                raise PermissionError("Generation-only scope hash is not approved")
+            if (
+                not self._config.DWH_SQL_GENERATION_ONLY_PROMPT_SHA256
+                or prompt_sha256 != self._config.DWH_SQL_GENERATION_ONLY_PROMPT_SHA256
+                or prompt_sha256 != approval.prompt_sha256
+            ):
+                raise PermissionError("Generation-only prompt hash is not approved")
+            if provider_identity != approval.provider_identity:
+                raise PermissionError("Generation-only provider identity is not approved")
+            if _tracing_is_enabled(self._config):
+                raise PermissionError("Generation-only evaluation refuses tracing")
+            messages = [
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": encoded + "\nREPAIR FEEDBACK: "},
+            ]
+            payload_hash = _generation_payload_hash(provider, model, messages, endpoint)
+            if payload_hash != approval.payload_sha256:
+                raise PermissionError("Generation-only payload is outside approved scope")
+            self._reserve(counters, deadline)
+            counters.llm_calls += 1
+            counters.tool_calls += 1
+            generator = self._llm_factory(role="generator")
+            response = await asyncio.wait_for(
+                asyncio.to_thread(generator.invoke, messages),
+                timeout=max(0.001, deadline - self._clock()),
+            )
+            counters.tokens += _usage_tokens(response)
+            sql = _response_text(response).strip()
+            response_metadata = getattr(response, "response_metadata", {})
+            provider_request_id = None
+            if isinstance(response_metadata, dict):
+                provider_request_id = (
+                    response_metadata.get("request_id")
+                    or response_metadata.get("x-request-id")
+                )
+                headers = response_metadata.get("headers")
+                if not provider_request_id and isinstance(headers, dict):
+                    provider_request_id = headers.get("x-request-id") or headers.get("X-Request-ID")
+            try:
+                bind_values = derive_candidate_bind_values(request, sql)
+                validate_oracle_read(
+                    sql,
+                    params=bind_values,
+                    allowed_schemas=tuple(self._config.DWH_SQL_ALLOWED_SCHEMAS),
+                    allowed_objects=tuple(self._config.DWH_SQL_ALLOWED_OBJECTS),
+                    required_projection="CUS_NUM",
+                    confirmed_filters=[
+                        item.model_dump(mode="json") for item in request.confirmed_filters
+                    ],
+                )
+                findings = validate_generated_sql(request, sql, params=bind_values)
+            except SqlPolicyError as exc:
+                findings = [str(exc)]
+            return ScenarioSqlResult(
+                sql=sql if not findings else None,
+                approved=False,
+                generation_only_candidate_sql=sql,
+                generation_only_provider_request_id=(
+                    str(provider_request_id) if provider_request_id else None
+                ),
+                error="Generation-only candidate is not execution or deployment approved",
+                validation_findings=[{"message": item} for item in findings],
+                provider=provider,
+                model=model,
+                trace_id=payload_hash,
+                metrics=_metrics(counters, self._clock() - started),
+            )
+        except asyncio.TimeoutError:
+            return self._failure("Request wall-time budget exhausted", counters)
+        except (PermissionError, RuntimeError, TimeoutError, ValueError) as exc:
+            return self._failure(str(exc), counters)
+        except Exception as exc:
+            return self._failure(f"Generation failed: {type(exc).__name__}", counters)
+
     def _reserve(self, counters: RequestCounters, deadline: float) -> None:
         """Check wall-time and tool-call budgets before each external action."""
         if self._clock() >= deadline:
@@ -320,6 +450,55 @@ def _response_text(response: Any) -> str:
             for item in content
         )
     return str(content)
+
+
+def _generation_payload_hash(
+    provider: str,
+    model: str,
+    messages: list[dict[str, str]],
+    endpoint: str | None = None,
+) -> str:
+    """Hash provider identity and the complete exact model-bound messages."""
+    endpoint = endpoint or {
+        "openai": "https://api.openai.com/v1",
+        "cohere": "https://api.cohere.com/v1",
+        "sambanova": "https://api.sambanova.ai/v1",
+        "openrouter": "https://openrouter.ai/api/v1",
+        "lmstudio": "http://127.0.0.1:1234/v1",
+    }.get(provider.casefold())
+    if not endpoint:
+        raise ValueError("Generation-only provider endpoint is not configured")
+    material = json.dumps(
+        {
+            "provider_identity": f"{provider.casefold()}|{model.strip()}|{endpoint.rstrip('/')}",
+            "messages": messages,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    )
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def _generator_endpoint(provider: str, config: Settings) -> str:
+    """Return the same endpoint used by the configured generator client."""
+    configured = config.DWH_SQL_BASE_URL or config.LLM_BASE_URL
+    return (configured or {
+        "openai": "https://api.openai.com/v1",
+        "cohere": "https://api.cohere.com/v1",
+        "sambanova": "https://api.sambanova.ai/v1",
+        "openrouter": "https://openrouter.ai/api/v1",
+        "lmstudio": "http://127.0.0.1:1234/v1",
+    }.get(provider.casefold(), "")).rstrip("/")
+
+
+def _tracing_is_enabled(config: Settings) -> bool:
+    """Reject configured or ambient LangSmith tracing for approved evaluation."""
+    enabled = {"true", "1", "yes", "on"}
+    return bool(getattr(config, "LANGCHAIN_TRACING_V2", False)) or any(
+        os.getenv(name, "").strip().casefold() in enabled
+        for name in ("LANGCHAIN_TRACING_V2", "LANGSMITH_TRACING")
+    )
 
 
 def _metrics(

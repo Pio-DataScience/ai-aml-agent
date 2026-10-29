@@ -1,0 +1,949 @@
+{
+  "format": "b9-model-bound-payloads-v1",
+  "disclosure": "Each message list is the complete provider-bound conversation; no developer messages or hidden tool outputs are present.",
+  "synthetic_only": true,
+  "evaluator_sql_sent": false,
+  "schema_records_sha256": "965e20e5c9a8ab6d6b1853b65610887072bc4b9e8f1f268490975061f1fc3742",
+  "schema_records": [
+    {
+      "metadata": {
+        "tenant_id": "b9-development-synthetic",
+        "institution_id": "b9-development-synthetic",
+        "source": "oracle_dictionary",
+        "object_type": "TABLE",
+        "table_name": "BI_DWH.PIO_TRANSACTIONS",
+        "column_name": "CUS_NUM",
+        "data_type": "VARCHAR2"
+      }
+    },
+    {
+      "metadata": {
+        "tenant_id": "b9-development-synthetic",
+        "institution_id": "b9-development-synthetic",
+        "source": "oracle_dictionary",
+        "object_type": "TABLE",
+        "table_name": "BI_DWH.PIO_TRANSACTIONS",
+        "column_name": "TRA_DATE",
+        "data_type": "DATE"
+      }
+    },
+    {
+      "metadata": {
+        "tenant_id": "b9-development-synthetic",
+        "institution_id": "b9-development-synthetic",
+        "source": "oracle_dictionary",
+        "object_type": "TABLE",
+        "table_name": "BI_DWH.PIO_TRANSACTIONS",
+        "column_name": "EXPL_CODE",
+        "data_type": "VARCHAR2"
+      }
+    },
+    {
+      "metadata": {
+        "tenant_id": "b9-development-synthetic",
+        "institution_id": "b9-development-synthetic",
+        "source": "oracle_dictionary",
+        "object_type": "TABLE",
+        "table_name": "BI_DWH.PIO_TRANSACTIONS",
+        "column_name": "TRA_AMT",
+        "data_type": "NUMBER"
+      }
+    }
+  ],
+  "service_a_prompt_sha256": "60af5ac8732e93eb8c71a3400c50c44c228d427468acf287d0f351b03dc73f59",
+  "service_a_system_prompt": "Generate one Oracle SELECT query implementing the supplied AML scenario. Use only retrieved\nschema metadata and project CUS_NUM. Honor all confirmed filter values exactly. Preserve\ntransaction-code semantics, rolling windows, and non-overlapping baseline windows. Do not\ninvent tables, columns, values, or restrictions. Return SQL only; deterministic code enforces\nsafety and completeness.\n\n### SQL result contract\n- Put every confirmed filter and numeric threshold in an approved `:cs_bN` bind; do not write\n  filter or threshold values as SQL literals. Use distinct bind names for distinct values.\n- A CUSTOMER result must contain one row per CUS_NUM. Do not project transaction-level columns\n  such as TRA_DATE, EXPL_CODE, or TRA_AMT. For aggregate thresholds or per-customer measures,\n  include each required aggregate as an explicit aliased SELECT measure alongside CUS_NUM and\n  group at CUS_NUM only. Project exactly the measures requested by the intent; a threshold\n  predicate does not authorize an extra COUNT, SUM, or other evidence column. A filter-only\n  customer intent returns CUS_NUM only.\n- For an AGGREGATE threshold on SUM(TRA_AMT), include `SUM(TRA_AMT) AS <evidence_alias>` in\n  the final SELECT even when that same SUM appears in HAVING. For a DETAIL threshold, put the\n  row-level predicate in WHERE and do not add an aggregate projection unless separately requested.\n- For an AGGREGATE transaction-count threshold, include `COUNT(*) AS <evidence_alias>` in the\n  final SELECT even when the same count appears in HAVING. For an AGGREGATE distinct-date count\n  threshold, include `COUNT(DISTINCT TRA_DATE) AS <evidence_alias>` in the final SELECT even\n  when that same count appears in HAVING. Keep the alias descriptive and project no other\n  measures unless the intent separately requests them.\n- Follow `temporal_contract` exactly. ROLLING uses\n  `TRA_DATE >= SYSDATE - :cs_bN AND TRA_DATE < SYSDATE`. CALENDAR uses\n  `TRA_DATE >= TRUNC(SYSDATE, 'MM') AND TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)`;\n  calendar boundaries are expressions, not date binds.\n  COMPARISON returns the current `[SYSDATE-current_duration, SYSDATE)` and immediately\n  preceding `[SYSDATE-(current_duration+baseline_duration), SYSDATE-current_offset)` measures;\n  the two windows must be complete, half-open, and non-overlapping. Use a distinct bind token for\n  every temporal placeholder occurrence. For the baseline lower boundary, bind the current and\n  baseline durations separately so their sum equals the required start offset; bind the exclusive\n  baseline upper boundary to the current offset.\n- Do not add HAVING predicates or customer restrictions unless they are explicit in thresholds\n  or semantic conditions. A comparison request asks for the comparison measures; it does not\n  imply that the current measure must exceed the baseline.\n",
+  "service_b_prompt_sha256": "c2b26ed52577a23abfa9bb3449d55f6fb0adbc4e39e8a7ce3ca5247737efdf54",
+  "service_b_generation_prompt": "Generate one Oracle SELECT statement for the validated AML scenario in the user message.\n\nUse only the pinned approved schema context included below. Project CUS_NUM. Apply every confirmed filter exactly. Preserve transaction-code semantics, threshold scopes, and all temporal windows. Use opaque cs_bN bind names for values supplied by the validated intent. Do not invent tables, columns, values, joins, or restrictions. Return SQL only.\n\nThis request is generation-only. Do not request or invoke tools. Do not execute or explain SQL, retrieve customer data or values, critique a candidate, export results, deploy, persist, or perform any database operation. If the pinned schema or intent is insufficient, return no SQL and state that generation is unavailable.\n\n### Result and temporal contract\n- Bind every confirmed filter, numeric threshold, and temporal offset with an opaque `:cs_bN` bind; never encode these values as SQL literals.\n- For CUSTOMER results, project `CUS_NUM` and exactly the explicitly requested, aliased measures; group by `CUS_NUM` only. Never project transaction-level columns or add a COUNT/SUM merely because it appears in a filter. Filter-only customer intents return `CUS_NUM` only.\n- Follow the typed `temporal_contract` supplied with the intent. For a current CALENDAR month, use exactly `TRA_DATE >= TRUNC(SYSDATE, 'MM') AND TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)`; do not substitute opaque date binds. A ROLLING window is half-open `[SYSDATE-duration, SYSDATE)`; a COMPARISON returns separate current and baseline measures over the exact stated half-open boundaries and relationship.\n- A comparison asks for both measures; do not add a `HAVING` predicate or imply that one measure must exceed the other unless the intent explicitly requires it.\n- For transaction-count comparisons, return exactly the two requested measures using conditional `SUM(CASE WHEN date_predicate THEN 1 ELSE 0 END)` or `COUNT(CASE WHEN date_predicate THEN 1 END)`. The date predicates must independently implement the typed temporal boundaries. Use a distinct opaque bind token at each temporal occurrence: current duration, baseline duration, and baseline exclusive offset each retain their own contract value. The baseline lower expression must sum the current and baseline durations; do not infer a comparison filter.\n",
+  "service_b_system_prompt_sha256": "f1e9235d4f2d6d3e7f6ed448eb62764e7ca89859b5b59da5e4d85cd803e0d0de",
+  "service_b_provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1",
+  "service_a_provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+  "cases": [
+    {
+      "case_id": "b9-01",
+      "scenario": "Confirmed explanation code 4 in rolling 14 days",
+      "intent_text": "Customers with confirmed explanation code 4 during a rolling 14-day window.",
+      "typed_intent": {
+        "scenario_name": "Confirmed explanation code 4 in rolling 14 days",
+        "scenario_type": "CUSTOMER",
+        "transaction_type": null,
+        "transaction_types": null,
+        "explanation_codes": [
+          "4"
+        ],
+        "explanation_codes_by_type": null,
+        "filters": [],
+        "resolved_filters": [],
+        "detection_logic": "Customers with confirmed explanation code 4 during a rolling 14-day window.",
+        "thresholds": [],
+        "time_window": {
+          "unit": "DAYS",
+          "value": 14,
+          "is_rolling": true,
+          "provenance": "stated"
+        },
+        "baseline_window": null,
+        "customer_segments": null,
+        "exclusions": null,
+        "mapped_keywords": null,
+        "clarification_needed": false,
+        "clarification_questions": [],
+        "aggregation": null,
+        "semantic_conditions": [],
+        "clarifications": [],
+        "applied_defaults": [],
+        "field_provenance": {},
+        "ready_for_handoff": true,
+        "expected_alert_range_min": null,
+        "expected_alert_range_max": null,
+        "anchor_date": null
+      },
+      "confirmed_filters": [
+        {
+          "dimension": "explanation_code",
+          "raw_mention": "confirmed explanation code 4",
+          "polarity": "positive",
+          "level": "transaction",
+          "status": "resolved",
+          "options": [],
+          "values": [
+            "4"
+          ],
+          "confidence": null,
+          "provenance": "catalog_resolver",
+          "audit_choice": null,
+          "acknowledged_without_filter": null,
+          "target": {
+            "table": "PIO_TRANSACTIONS",
+            "column": "EXPL_CODE"
+          },
+          "match": "any_of",
+          "polarity_allowed": false
+        }
+      ],
+      "service_b_wire_user_content": "{\n  \"request_type\": \"AML_SCENARIO_GENERATION\",\n  \"intent\": {\n    \"scenario_name\": \"Confirmed explanation code 4 in rolling 14 days\",\n    \"scenario_type\": \"CUSTOMER\",\n    \"transaction_type\": null,\n    \"transaction_types\": null,\n    \"explanation_codes\": [\n      \"4\"\n    ],\n    \"explanation_codes_by_type\": null,\n    \"resolved_filters\": [\n      {\n        \"dimension\": \"explanation_code\",\n        \"raw_mention\": \"confirmed explanation code 4\",\n        \"polarity\": \"positive\",\n        \"level\": \"transaction\",\n        \"status\": \"resolved\",\n        \"values\": [\n          \"4\"\n        ],\n        \"provenance\": \"catalog_resolver\",\n        \"target\": {\n          \"table\": \"PIO_TRANSACTIONS\",\n          \"column\": \"EXPL_CODE\"\n        },\n        \"match\": \"any_of\",\n        \"polarity_allowed\": false\n      }\n    ],\n    \"detection_logic\": \"Customers with confirmed explanation code 4 during a rolling 14-day window.\",\n    \"thresholds\": [],\n    \"time_window\": {\n      \"unit\": \"DAYS\",\n      \"value\": 14,\n      \"is_rolling\": true,\n      \"provenance\": \"stated\"\n    },\n    \"baseline_window\": null,\n    \"customer_segments\": null,\n    \"exclusions\": null,\n    \"mapped_keywords\": null,\n    \"clarification_needed\": false,\n    \"clarification_questions\": [],\n    \"aggregation\": null,\n    \"semantic_conditions\": [],\n    \"clarifications\": [],\n    \"applied_defaults\": [],\n    \"field_provenance\": {},\n    \"ready_for_handoff\": true,\n    \"expected_alert_range_min\": null,\n    \"expected_alert_range_max\": null,\n    \"anchor_date\": null,\n    \"temporal_contract\": {\n      \"kind\": \"ROLLING\",\n      \"current_lower_boundary\": \"SYSDATE_MINUS_DURATION\",\n      \"current_upper_boundary\": \"SYSDATE_EXCLUSIVE\",\n      \"baseline_lower_boundary\": \"NONE\",\n      \"baseline_upper_boundary\": \"NONE\",\n      \"baseline_relationship\": \"NONE\"\n    },\n    \"filter_instructions\": \"\"\n  }\n}",
+      "service_a_messages": [
+        {
+          "role": "system",
+          "content": "Generate one Oracle SELECT query implementing the supplied AML scenario. Use only retrieved\nschema metadata and project CUS_NUM. Honor all confirmed filter values exactly. Preserve\ntransaction-code semantics, rolling windows, and non-overlapping baseline windows. Do not\ninvent tables, columns, values, or restrictions. Return SQL only; deterministic code enforces\nsafety and completeness.\n\n### SQL result contract\n- Put every confirmed filter and numeric threshold in an approved `:cs_bN` bind; do not write\n  filter or threshold values as SQL literals. Use distinct bind names for distinct values.\n- A CUSTOMER result must contain one row per CUS_NUM. Do not project transaction-level columns\n  such as TRA_DATE, EXPL_CODE, or TRA_AMT. For aggregate thresholds or per-customer measures,\n  include each required aggregate as an explicit aliased SELECT measure alongside CUS_NUM and\n  group at CUS_NUM only. Project exactly the measures requested by the intent; a threshold\n  predicate does not authorize an extra COUNT, SUM, or other evidence column. A filter-only\n  customer intent returns CUS_NUM only.\n- For an AGGREGATE threshold on SUM(TRA_AMT), include `SUM(TRA_AMT) AS <evidence_alias>` in\n  the final SELECT even when that same SUM appears in HAVING. For a DETAIL threshold, put the\n  row-level predicate in WHERE and do not add an aggregate projection unless separately requested.\n- For an AGGREGATE transaction-count threshold, include `COUNT(*) AS <evidence_alias>` in the\n  final SELECT even when the same count appears in HAVING. For an AGGREGATE distinct-date count\n  threshold, include `COUNT(DISTINCT TRA_DATE) AS <evidence_alias>` in the final SELECT even\n  when that same count appears in HAVING. Keep the alias descriptive and project no other\n  measures unless the intent separately requests them.\n- Follow `temporal_contract` exactly. ROLLING uses\n  `TRA_DATE >= SYSDATE - :cs_bN AND TRA_DATE < SYSDATE`. CALENDAR uses\n  `TRA_DATE >= TRUNC(SYSDATE, 'MM') AND TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)`;\n  calendar boundaries are expressions, not date binds.\n  COMPARISON returns the current `[SYSDATE-current_duration, SYSDATE)` and immediately\n  preceding `[SYSDATE-(current_duration+baseline_duration), SYSDATE-current_offset)` measures;\n  the two windows must be complete, half-open, and non-overlapping. Use a distinct bind token for\n  every temporal placeholder occurrence. For the baseline lower boundary, bind the current and\n  baseline durations separately so their sum equals the required start offset; bind the exclusive\n  baseline upper boundary to the current offset.\n- Do not add HAVING predicates or customer restrictions unless they are explicit in thresholds\n  or semantic conditions. A comparison request asks for the comparison measures; it does not\n  imply that the current measure must exceed the baseline.\n"
+        },
+        {
+          "role": "user",
+          "content": "{\"intent\": {\"scenario_name\": \"Confirmed explanation code 4 in rolling 14 days\", \"scenario_type\": \"CUSTOMER\", \"transaction_type\": null, \"transaction_types\": null, \"explanation_codes\": [\"4\"], \"explanation_codes_by_type\": null, \"filters\": [], \"resolved_filters\": [], \"detection_logic\": \"Customers with confirmed explanation code 4 during a rolling 14-day window.\", \"thresholds\": [], \"time_window\": {\"unit\": \"DAYS\", \"value\": 14, \"is_rolling\": true, \"provenance\": \"stated\"}, \"baseline_window\": null, \"customer_segments\": null, \"exclusions\": null, \"mapped_keywords\": null, \"clarification_needed\": false, \"clarification_questions\": [], \"aggregation\": null, \"semantic_conditions\": [], \"clarifications\": [], \"applied_defaults\": [], \"field_provenance\": {}, \"ready_for_handoff\": true, \"expected_alert_range_min\": null, \"expected_alert_range_max\": null, \"anchor_date\": null}, \"confirmed_filters\": [{\"dimension\": \"explanation_code\", \"raw_mention\": \"confirmed explanation code 4\", \"polarity\": \"positive\", \"level\": \"transaction\", \"status\": \"resolved\", \"options\": [], \"values\": [\"4\"], \"confidence\": null, \"provenance\": \"catalog_resolver\", \"audit_choice\": null, \"acknowledged_without_filter\": null, \"target\": {\"table\": \"PIO_TRANSACTIONS\", \"column\": \"EXPL_CODE\"}, \"match\": \"any_of\", \"polarity_allowed\": false}], \"experience\": [], \"tables\": [{\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\"}], \"columns\": [{\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"CUS_NUM\", \"data_type\": \"VARCHAR2\"}, {\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"TRA_DATE\", \"data_type\": \"DATE\"}, {\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"EXPL_CODE\", \"data_type\": \"VARCHAR2\"}, {\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"TRA_AMT\", \"data_type\": \"NUMBER\"}]}\nREPAIR FEEDBACK: "
+        }
+      ],
+      "service_a_payload_sha256": "bb6a62aab6d42b2f90039cf09732296eb73194a81f8d89532fc4774af7cc7fa8",
+      "service_a_provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+      "service_b_model_messages": [
+        {
+          "role": "system",
+          "content": "Generate one Oracle SELECT statement for the validated AML scenario in the user message.\n\nUse only the pinned approved schema context included below. Project CUS_NUM. Apply every confirmed filter exactly. Preserve transaction-code semantics, threshold scopes, and all temporal windows. Use opaque cs_bN bind names for values supplied by the validated intent. Do not invent tables, columns, values, joins, or restrictions. Return SQL only.\n\nThis request is generation-only. Do not request or invoke tools. Do not execute or explain SQL, retrieve customer data or values, critique a candidate, export results, deploy, persist, or perform any database operation. If the pinned schema or intent is insufficient, return no SQL and state that generation is unavailable.\n\n### Result and temporal contract\n- Bind every confirmed filter, numeric threshold, and temporal offset with an opaque `:cs_bN` bind; never encode these values as SQL literals.\n- For CUSTOMER results, project `CUS_NUM` and exactly the explicitly requested, aliased measures; group by `CUS_NUM` only. Never project transaction-level columns or add a COUNT/SUM merely because it appears in a filter. Filter-only customer intents return `CUS_NUM` only.\n- Follow the typed `temporal_contract` supplied with the intent. For a current CALENDAR month, use exactly `TRA_DATE >= TRUNC(SYSDATE, 'MM') AND TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)`; do not substitute opaque date binds. A ROLLING window is half-open `[SYSDATE-duration, SYSDATE)`; a COMPARISON returns separate current and baseline measures over the exact stated half-open boundaries and relationship.\n- A comparison asks for both measures; do not add a `HAVING` predicate or imply that one measure must exceed the other unless the intent explicitly requires it.\n- For transaction-count comparisons, return exactly the two requested measures using conditional `SUM(CASE WHEN date_predicate THEN 1 ELSE 0 END)` or `COUNT(CASE WHEN date_predicate THEN 1 END)`. The date predicates must independently implement the typed temporal boundaries. Use a distinct opaque bind token at each temporal occurrence: current duration, baseline duration, and baseline exclusive offset each retain their own contract value. The baseline lower expression must sum the current and baseline durations; do not infer a comparison filter.\n\n\nPINNED APPROVED SCHEMA METADATA:\n{\"kind\":\"approved_schema_context\",\"objects\":[{\"object\":\"BI_DWH.PIO_TRANSACTIONS\",\"columns\":[{\"name\":\"CUS_NUM\",\"type\":\"VARCHAR2\"},{\"name\":\"TRA_DATE\",\"type\":\"DATE\"},{\"name\":\"EXPL_CODE\",\"type\":\"VARCHAR2\"},{\"name\":\"TRA_AMT\",\"type\":\"NUMBER\"}]}],\"relationships\":[]}"
+        },
+        {
+          "role": "user",
+          "content": "{\"request_type\":\"AML_SCENARIO_GENERATION\",\"intent\":{\"scenario_type\":\"CUSTOMER\",\"thresholds\":[],\"explanation_codes\":[\"4\"],\"time_window\":{\"unit\":\"DAYS\",\"value\":14,\"is_rolling\":true},\"baseline_window\":null,\"temporal_contract\":{\"kind\":\"ROLLING\",\"current_lower_boundary\":\"SYSDATE_MINUS_DURATION\",\"current_upper_boundary\":\"SYSDATE_EXCLUSIVE\",\"baseline_lower_boundary\":\"NONE\",\"baseline_upper_boundary\":\"NONE\",\"baseline_relationship\":\"NONE\"},\"ready_for_handoff\":true,\"resolved_filters\":[{\"dimension\":\"explanation_code\",\"polarity\":\"positive\",\"level\":\"transaction\",\"status\":\"resolved\",\"values\":[\"4\"],\"target\":{\"table\":\"PIO_TRANSACTIONS\",\"column\":\"EXPL_CODE\"},\"match\":\"any_of\",\"polarity_allowed\":false}],\"aggregation\":null}}"
+        }
+      ],
+      "service_b_payload_sha256": "b03d013ae6301527765ae8390723ff511a0a5f5bba7ff7c4a27a02dd29d9d66b",
+      "service_b_provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1"
+    },
+    {
+      "case_id": "b9-02",
+      "scenario": "Transaction amount threshold",
+      "intent_text": "Customers with a transaction amount at least 10000.",
+      "typed_intent": {
+        "scenario_name": "Transaction amount threshold",
+        "scenario_type": "CUSTOMER",
+        "transaction_type": null,
+        "transaction_types": null,
+        "explanation_codes": null,
+        "explanation_codes_by_type": null,
+        "filters": [],
+        "resolved_filters": [],
+        "detection_logic": "Customers with a transaction amount at least 10000.",
+        "thresholds": [
+          {
+            "field": "TRA_AMT",
+            "operator": ">=",
+            "value_from": 10000.0,
+            "value_to": null,
+            "provenance": "stated",
+            "target_scope": "DETAIL",
+            "transaction_type": null,
+            "explanation_codes": null
+          }
+        ],
+        "time_window": null,
+        "baseline_window": null,
+        "customer_segments": null,
+        "exclusions": null,
+        "mapped_keywords": null,
+        "clarification_needed": false,
+        "clarification_questions": [],
+        "aggregation": null,
+        "semantic_conditions": [],
+        "clarifications": [],
+        "applied_defaults": [],
+        "field_provenance": {},
+        "ready_for_handoff": true,
+        "expected_alert_range_min": null,
+        "expected_alert_range_max": null,
+        "anchor_date": null
+      },
+      "confirmed_filters": [],
+      "service_b_wire_user_content": "{\n  \"request_type\": \"AML_SCENARIO_GENERATION\",\n  \"intent\": {\n    \"scenario_name\": \"Transaction amount threshold\",\n    \"scenario_type\": \"CUSTOMER\",\n    \"transaction_type\": null,\n    \"transaction_types\": null,\n    \"explanation_codes\": null,\n    \"explanation_codes_by_type\": null,\n    \"resolved_filters\": [],\n    \"detection_logic\": \"Customers with a transaction amount at least 10000.\",\n    \"thresholds\": [\n      {\n        \"field\": \"TRA_AMT\",\n        \"operator\": \">=\",\n        \"value_from\": 10000.0,\n        \"value_to\": null,\n        \"provenance\": \"stated\",\n        \"target_scope\": \"DETAIL\",\n        \"transaction_type\": null,\n        \"explanation_codes\": null\n      }\n    ],\n    \"time_window\": null,\n    \"baseline_window\": null,\n    \"customer_segments\": null,\n    \"exclusions\": null,\n    \"mapped_keywords\": null,\n    \"clarification_needed\": false,\n    \"clarification_questions\": [],\n    \"aggregation\": null,\n    \"semantic_conditions\": [],\n    \"clarifications\": [],\n    \"applied_defaults\": [],\n    \"field_provenance\": {},\n    \"ready_for_handoff\": true,\n    \"expected_alert_range_min\": null,\n    \"expected_alert_range_max\": null,\n    \"anchor_date\": null,\n    \"temporal_contract\": {\n      \"kind\": \"NONE\",\n      \"current_lower_boundary\": \"NONE\",\n      \"current_upper_boundary\": \"NONE\",\n      \"baseline_lower_boundary\": \"NONE\",\n      \"baseline_upper_boundary\": \"NONE\",\n      \"baseline_relationship\": \"NONE\"\n    },\n    \"filter_instructions\": \"\"\n  }\n}",
+      "service_a_messages": [
+        {
+          "role": "system",
+          "content": "Generate one Oracle SELECT query implementing the supplied AML scenario. Use only retrieved\nschema metadata and project CUS_NUM. Honor all confirmed filter values exactly. Preserve\ntransaction-code semantics, rolling windows, and non-overlapping baseline windows. Do not\ninvent tables, columns, values, or restrictions. Return SQL only; deterministic code enforces\nsafety and completeness.\n\n### SQL result contract\n- Put every confirmed filter and numeric threshold in an approved `:cs_bN` bind; do not write\n  filter or threshold values as SQL literals. Use distinct bind names for distinct values.\n- A CUSTOMER result must contain one row per CUS_NUM. Do not project transaction-level columns\n  such as TRA_DATE, EXPL_CODE, or TRA_AMT. For aggregate thresholds or per-customer measures,\n  include each required aggregate as an explicit aliased SELECT measure alongside CUS_NUM and\n  group at CUS_NUM only. Project exactly the measures requested by the intent; a threshold\n  predicate does not authorize an extra COUNT, SUM, or other evidence column. A filter-only\n  customer intent returns CUS_NUM only.\n- For an AGGREGATE threshold on SUM(TRA_AMT), include `SUM(TRA_AMT) AS <evidence_alias>` in\n  the final SELECT even when that same SUM appears in HAVING. For a DETAIL threshold, put the\n  row-level predicate in WHERE and do not add an aggregate projection unless separately requested.\n- For an AGGREGATE transaction-count threshold, include `COUNT(*) AS <evidence_alias>` in the\n  final SELECT even when the same count appears in HAVING. For an AGGREGATE distinct-date count\n  threshold, include `COUNT(DISTINCT TRA_DATE) AS <evidence_alias>` in the final SELECT even\n  when that same count appears in HAVING. Keep the alias descriptive and project no other\n  measures unless the intent separately requests them.\n- Follow `temporal_contract` exactly. ROLLING uses\n  `TRA_DATE >= SYSDATE - :cs_bN AND TRA_DATE < SYSDATE`. CALENDAR uses\n  `TRA_DATE >= TRUNC(SYSDATE, 'MM') AND TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)`;\n  calendar boundaries are expressions, not date binds.\n  COMPARISON returns the current `[SYSDATE-current_duration, SYSDATE)` and immediately\n  preceding `[SYSDATE-(current_duration+baseline_duration), SYSDATE-current_offset)` measures;\n  the two windows must be complete, half-open, and non-overlapping. Use a distinct bind token for\n  every temporal placeholder occurrence. For the baseline lower boundary, bind the current and\n  baseline durations separately so their sum equals the required start offset; bind the exclusive\n  baseline upper boundary to the current offset.\n- Do not add HAVING predicates or customer restrictions unless they are explicit in thresholds\n  or semantic conditions. A comparison request asks for the comparison measures; it does not\n  imply that the current measure must exceed the baseline.\n"
+        },
+        {
+          "role": "user",
+          "content": "{\"intent\": {\"scenario_name\": \"Transaction amount threshold\", \"scenario_type\": \"CUSTOMER\", \"transaction_type\": null, \"transaction_types\": null, \"explanation_codes\": null, \"explanation_codes_by_type\": null, \"filters\": [], \"resolved_filters\": [], \"detection_logic\": \"Customers with a transaction amount at least 10000.\", \"thresholds\": [{\"field\": \"TRA_AMT\", \"operator\": \">=\", \"value_from\": 10000.0, \"value_to\": null, \"provenance\": \"stated\", \"target_scope\": \"DETAIL\", \"transaction_type\": null, \"explanation_codes\": null}], \"time_window\": null, \"baseline_window\": null, \"customer_segments\": null, \"exclusions\": null, \"mapped_keywords\": null, \"clarification_needed\": false, \"clarification_questions\": [], \"aggregation\": null, \"semantic_conditions\": [], \"clarifications\": [], \"applied_defaults\": [], \"field_provenance\": {}, \"ready_for_handoff\": true, \"expected_alert_range_min\": null, \"expected_alert_range_max\": null, \"anchor_date\": null}, \"confirmed_filters\": [], \"experience\": [], \"tables\": [{\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\"}], \"columns\": [{\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"CUS_NUM\", \"data_type\": \"VARCHAR2\"}, {\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"TRA_DATE\", \"data_type\": \"DATE\"}, {\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"EXPL_CODE\", \"data_type\": \"VARCHAR2\"}, {\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"TRA_AMT\", \"data_type\": \"NUMBER\"}]}\nREPAIR FEEDBACK: "
+        }
+      ],
+      "service_a_payload_sha256": "8d4073b8361d48818b18139d0320018f28390a5e5ae74deec135d69faff5407f",
+      "service_a_provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+      "service_b_model_messages": [
+        {
+          "role": "system",
+          "content": "Generate one Oracle SELECT statement for the validated AML scenario in the user message.\n\nUse only the pinned approved schema context included below. Project CUS_NUM. Apply every confirmed filter exactly. Preserve transaction-code semantics, threshold scopes, and all temporal windows. Use opaque cs_bN bind names for values supplied by the validated intent. Do not invent tables, columns, values, joins, or restrictions. Return SQL only.\n\nThis request is generation-only. Do not request or invoke tools. Do not execute or explain SQL, retrieve customer data or values, critique a candidate, export results, deploy, persist, or perform any database operation. If the pinned schema or intent is insufficient, return no SQL and state that generation is unavailable.\n\n### Result and temporal contract\n- Bind every confirmed filter, numeric threshold, and temporal offset with an opaque `:cs_bN` bind; never encode these values as SQL literals.\n- For CUSTOMER results, project `CUS_NUM` and exactly the explicitly requested, aliased measures; group by `CUS_NUM` only. Never project transaction-level columns or add a COUNT/SUM merely because it appears in a filter. Filter-only customer intents return `CUS_NUM` only.\n- Follow the typed `temporal_contract` supplied with the intent. For a current CALENDAR month, use exactly `TRA_DATE >= TRUNC(SYSDATE, 'MM') AND TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)`; do not substitute opaque date binds. A ROLLING window is half-open `[SYSDATE-duration, SYSDATE)`; a COMPARISON returns separate current and baseline measures over the exact stated half-open boundaries and relationship.\n- A comparison asks for both measures; do not add a `HAVING` predicate or imply that one measure must exceed the other unless the intent explicitly requires it.\n- For transaction-count comparisons, return exactly the two requested measures using conditional `SUM(CASE WHEN date_predicate THEN 1 ELSE 0 END)` or `COUNT(CASE WHEN date_predicate THEN 1 END)`. The date predicates must independently implement the typed temporal boundaries. Use a distinct opaque bind token at each temporal occurrence: current duration, baseline duration, and baseline exclusive offset each retain their own contract value. The baseline lower expression must sum the current and baseline durations; do not infer a comparison filter.\n\n\nPINNED APPROVED SCHEMA METADATA:\n{\"kind\":\"approved_schema_context\",\"objects\":[{\"object\":\"BI_DWH.PIO_TRANSACTIONS\",\"columns\":[{\"name\":\"CUS_NUM\",\"type\":\"VARCHAR2\"},{\"name\":\"TRA_DATE\",\"type\":\"DATE\"},{\"name\":\"EXPL_CODE\",\"type\":\"VARCHAR2\"},{\"name\":\"TRA_AMT\",\"type\":\"NUMBER\"}]}],\"relationships\":[]}"
+        },
+        {
+          "role": "user",
+          "content": "{\"request_type\":\"AML_SCENARIO_GENERATION\",\"intent\":{\"scenario_type\":\"CUSTOMER\",\"thresholds\":[{\"field\":\"TRA_AMT\",\"operator\":\">=\",\"target_scope\":\"DETAIL\",\"value_from\":10000.0}],\"explanation_codes\":null,\"time_window\":null,\"baseline_window\":null,\"temporal_contract\":{\"kind\":\"NONE\",\"current_lower_boundary\":\"NONE\",\"current_upper_boundary\":\"NONE\",\"baseline_lower_boundary\":\"NONE\",\"baseline_upper_boundary\":\"NONE\",\"baseline_relationship\":\"NONE\"},\"ready_for_handoff\":true,\"resolved_filters\":[],\"aggregation\":null}}"
+        }
+      ],
+      "service_b_payload_sha256": "57e87a69141564a7e2964f1aced7ee8d41a7d6b4649cbe35ebb62312c81262c2",
+      "service_b_provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1"
+    },
+    {
+      "case_id": "b9-03",
+      "scenario": "Customer aggregate amount threshold",
+      "intent_text": "Customers whose total transaction amount is at least 50000.",
+      "typed_intent": {
+        "scenario_name": "Customer aggregate amount threshold",
+        "scenario_type": "CUSTOMER",
+        "transaction_type": null,
+        "transaction_types": null,
+        "explanation_codes": null,
+        "explanation_codes_by_type": null,
+        "filters": [],
+        "resolved_filters": [],
+        "detection_logic": "Customers whose total transaction amount is at least 50000.",
+        "thresholds": [
+          {
+            "field": "TRA_AMT",
+            "operator": ">=",
+            "value_from": 50000.0,
+            "value_to": null,
+            "provenance": "stated",
+            "target_scope": "AGGREGATE",
+            "transaction_type": null,
+            "explanation_codes": null
+          }
+        ],
+        "time_window": null,
+        "baseline_window": null,
+        "customer_segments": null,
+        "exclusions": null,
+        "mapped_keywords": null,
+        "clarification_needed": false,
+        "clarification_questions": [],
+        "aggregation": {
+          "metric": "Transaction amount",
+          "function": "SUM",
+          "grain": "Per Customer",
+          "provenance": "stated"
+        },
+        "semantic_conditions": [],
+        "clarifications": [],
+        "applied_defaults": [],
+        "field_provenance": {},
+        "ready_for_handoff": true,
+        "expected_alert_range_min": null,
+        "expected_alert_range_max": null,
+        "anchor_date": null
+      },
+      "confirmed_filters": [],
+      "service_b_wire_user_content": "{\n  \"request_type\": \"AML_SCENARIO_GENERATION\",\n  \"intent\": {\n    \"scenario_name\": \"Customer aggregate amount threshold\",\n    \"scenario_type\": \"CUSTOMER\",\n    \"transaction_type\": null,\n    \"transaction_types\": null,\n    \"explanation_codes\": null,\n    \"explanation_codes_by_type\": null,\n    \"resolved_filters\": [],\n    \"detection_logic\": \"Customers whose total transaction amount is at least 50000.\",\n    \"thresholds\": [\n      {\n        \"field\": \"TRA_AMT\",\n        \"operator\": \">=\",\n        \"value_from\": 50000.0,\n        \"value_to\": null,\n        \"provenance\": \"stated\",\n        \"target_scope\": \"AGGREGATE\",\n        \"transaction_type\": null,\n        \"explanation_codes\": null\n      }\n    ],\n    \"time_window\": null,\n    \"baseline_window\": null,\n    \"customer_segments\": null,\n    \"exclusions\": null,\n    \"mapped_keywords\": null,\n    \"clarification_needed\": false,\n    \"clarification_questions\": [],\n    \"aggregation\": {\n      \"metric\": \"Transaction amount\",\n      \"function\": \"SUM\",\n      \"grain\": \"Per Customer\",\n      \"provenance\": \"stated\"\n    },\n    \"semantic_conditions\": [],\n    \"clarifications\": [],\n    \"applied_defaults\": [],\n    \"field_provenance\": {},\n    \"ready_for_handoff\": true,\n    \"expected_alert_range_min\": null,\n    \"expected_alert_range_max\": null,\n    \"anchor_date\": null,\n    \"temporal_contract\": {\n      \"kind\": \"NONE\",\n      \"current_lower_boundary\": \"NONE\",\n      \"current_upper_boundary\": \"NONE\",\n      \"baseline_lower_boundary\": \"NONE\",\n      \"baseline_upper_boundary\": \"NONE\",\n      \"baseline_relationship\": \"NONE\"\n    },\n    \"filter_instructions\": \"\"\n  }\n}",
+      "service_a_messages": [
+        {
+          "role": "system",
+          "content": "Generate one Oracle SELECT query implementing the supplied AML scenario. Use only retrieved\nschema metadata and project CUS_NUM. Honor all confirmed filter values exactly. Preserve\ntransaction-code semantics, rolling windows, and non-overlapping baseline windows. Do not\ninvent tables, columns, values, or restrictions. Return SQL only; deterministic code enforces\nsafety and completeness.\n\n### SQL result contract\n- Put every confirmed filter and numeric threshold in an approved `:cs_bN` bind; do not write\n  filter or threshold values as SQL literals. Use distinct bind names for distinct values.\n- A CUSTOMER result must contain one row per CUS_NUM. Do not project transaction-level columns\n  such as TRA_DATE, EXPL_CODE, or TRA_AMT. For aggregate thresholds or per-customer measures,\n  include each required aggregate as an explicit aliased SELECT measure alongside CUS_NUM and\n  group at CUS_NUM only. Project exactly the measures requested by the intent; a threshold\n  predicate does not authorize an extra COUNT, SUM, or other evidence column. A filter-only\n  customer intent returns CUS_NUM only.\n- For an AGGREGATE threshold on SUM(TRA_AMT), include `SUM(TRA_AMT) AS <evidence_alias>` in\n  the final SELECT even when that same SUM appears in HAVING. For a DETAIL threshold, put the\n  row-level predicate in WHERE and do not add an aggregate projection unless separately requested.\n- For an AGGREGATE transaction-count threshold, include `COUNT(*) AS <evidence_alias>` in the\n  final SELECT even when the same count appears in HAVING. For an AGGREGATE distinct-date count\n  threshold, include `COUNT(DISTINCT TRA_DATE) AS <evidence_alias>` in the final SELECT even\n  when that same count appears in HAVING. Keep the alias descriptive and project no other\n  measures unless the intent separately requests them.\n- Follow `temporal_contract` exactly. ROLLING uses\n  `TRA_DATE >= SYSDATE - :cs_bN AND TRA_DATE < SYSDATE`. CALENDAR uses\n  `TRA_DATE >= TRUNC(SYSDATE, 'MM') AND TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)`;\n  calendar boundaries are expressions, not date binds.\n  COMPARISON returns the current `[SYSDATE-current_duration, SYSDATE)` and immediately\n  preceding `[SYSDATE-(current_duration+baseline_duration), SYSDATE-current_offset)` measures;\n  the two windows must be complete, half-open, and non-overlapping. Use a distinct bind token for\n  every temporal placeholder occurrence. For the baseline lower boundary, bind the current and\n  baseline durations separately so their sum equals the required start offset; bind the exclusive\n  baseline upper boundary to the current offset.\n- Do not add HAVING predicates or customer restrictions unless they are explicit in thresholds\n  or semantic conditions. A comparison request asks for the comparison measures; it does not\n  imply that the current measure must exceed the baseline.\n"
+        },
+        {
+          "role": "user",
+          "content": "{\"intent\": {\"scenario_name\": \"Customer aggregate amount threshold\", \"scenario_type\": \"CUSTOMER\", \"transaction_type\": null, \"transaction_types\": null, \"explanation_codes\": null, \"explanation_codes_by_type\": null, \"filters\": [], \"resolved_filters\": [], \"detection_logic\": \"Customers whose total transaction amount is at least 50000.\", \"thresholds\": [{\"field\": \"TRA_AMT\", \"operator\": \">=\", \"value_from\": 50000.0, \"value_to\": null, \"provenance\": \"stated\", \"target_scope\": \"AGGREGATE\", \"transaction_type\": null, \"explanation_codes\": null}], \"time_window\": null, \"baseline_window\": null, \"customer_segments\": null, \"exclusions\": null, \"mapped_keywords\": null, \"clarification_needed\": false, \"clarification_questions\": [], \"aggregation\": {\"metric\": \"Transaction amount\", \"function\": \"SUM\", \"grain\": \"Per Customer\", \"provenance\": \"stated\"}, \"semantic_conditions\": [], \"clarifications\": [], \"applied_defaults\": [], \"field_provenance\": {}, \"ready_for_handoff\": true, \"expected_alert_range_min\": null, \"expected_alert_range_max\": null, \"anchor_date\": null}, \"confirmed_filters\": [], \"experience\": [], \"tables\": [{\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\"}], \"columns\": [{\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"CUS_NUM\", \"data_type\": \"VARCHAR2\"}, {\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"TRA_DATE\", \"data_type\": \"DATE\"}, {\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"EXPL_CODE\", \"data_type\": \"VARCHAR2\"}, {\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"TRA_AMT\", \"data_type\": \"NUMBER\"}]}\nREPAIR FEEDBACK: "
+        }
+      ],
+      "service_a_payload_sha256": "1e4c005b27d39d61a3e917c5bae1430f2616e7fd5f5ce7e6a5b9f80569e5c266",
+      "service_a_provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+      "service_b_model_messages": [
+        {
+          "role": "system",
+          "content": "Generate one Oracle SELECT statement for the validated AML scenario in the user message.\n\nUse only the pinned approved schema context included below. Project CUS_NUM. Apply every confirmed filter exactly. Preserve transaction-code semantics, threshold scopes, and all temporal windows. Use opaque cs_bN bind names for values supplied by the validated intent. Do not invent tables, columns, values, joins, or restrictions. Return SQL only.\n\nThis request is generation-only. Do not request or invoke tools. Do not execute or explain SQL, retrieve customer data or values, critique a candidate, export results, deploy, persist, or perform any database operation. If the pinned schema or intent is insufficient, return no SQL and state that generation is unavailable.\n\n### Result and temporal contract\n- Bind every confirmed filter, numeric threshold, and temporal offset with an opaque `:cs_bN` bind; never encode these values as SQL literals.\n- For CUSTOMER results, project `CUS_NUM` and exactly the explicitly requested, aliased measures; group by `CUS_NUM` only. Never project transaction-level columns or add a COUNT/SUM merely because it appears in a filter. Filter-only customer intents return `CUS_NUM` only.\n- Follow the typed `temporal_contract` supplied with the intent. For a current CALENDAR month, use exactly `TRA_DATE >= TRUNC(SYSDATE, 'MM') AND TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)`; do not substitute opaque date binds. A ROLLING window is half-open `[SYSDATE-duration, SYSDATE)`; a COMPARISON returns separate current and baseline measures over the exact stated half-open boundaries and relationship.\n- A comparison asks for both measures; do not add a `HAVING` predicate or imply that one measure must exceed the other unless the intent explicitly requires it.\n- For transaction-count comparisons, return exactly the two requested measures using conditional `SUM(CASE WHEN date_predicate THEN 1 ELSE 0 END)` or `COUNT(CASE WHEN date_predicate THEN 1 END)`. The date predicates must independently implement the typed temporal boundaries. Use a distinct opaque bind token at each temporal occurrence: current duration, baseline duration, and baseline exclusive offset each retain their own contract value. The baseline lower expression must sum the current and baseline durations; do not infer a comparison filter.\n\n\nPINNED APPROVED SCHEMA METADATA:\n{\"kind\":\"approved_schema_context\",\"objects\":[{\"object\":\"BI_DWH.PIO_TRANSACTIONS\",\"columns\":[{\"name\":\"CUS_NUM\",\"type\":\"VARCHAR2\"},{\"name\":\"TRA_DATE\",\"type\":\"DATE\"},{\"name\":\"EXPL_CODE\",\"type\":\"VARCHAR2\"},{\"name\":\"TRA_AMT\",\"type\":\"NUMBER\"}]}],\"relationships\":[]}"
+        },
+        {
+          "role": "user",
+          "content": "{\"request_type\":\"AML_SCENARIO_GENERATION\",\"intent\":{\"scenario_type\":\"CUSTOMER\",\"thresholds\":[{\"field\":\"TRA_AMT\",\"operator\":\">=\",\"target_scope\":\"AGGREGATE\",\"value_from\":50000.0}],\"explanation_codes\":null,\"time_window\":null,\"baseline_window\":null,\"temporal_contract\":{\"kind\":\"NONE\",\"current_lower_boundary\":\"NONE\",\"current_upper_boundary\":\"NONE\",\"baseline_lower_boundary\":\"NONE\",\"baseline_upper_boundary\":\"NONE\",\"baseline_relationship\":\"NONE\"},\"ready_for_handoff\":true,\"resolved_filters\":[],\"aggregation\":{\"metric\":\"Transaction amount\",\"function\":\"SUM\",\"grain\":\"Per Customer\"}}}"
+        }
+      ],
+      "service_b_payload_sha256": "f18a233af3a3df6288ff19c2daebc5c7d544f55d4d0e0696ee25c368ceac8eac",
+      "service_b_provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1"
+    },
+    {
+      "case_id": "b9-04",
+      "scenario": "At least five qualifying transactions",
+      "intent_text": "Customers with at least five transactions.",
+      "typed_intent": {
+        "scenario_name": "At least five qualifying transactions",
+        "scenario_type": "CUSTOMER",
+        "transaction_type": null,
+        "transaction_types": null,
+        "explanation_codes": null,
+        "explanation_codes_by_type": null,
+        "filters": [],
+        "resolved_filters": [],
+        "detection_logic": "Customers with at least five transactions.",
+        "thresholds": [
+          {
+            "field": "COUNT(*)",
+            "operator": ">=",
+            "value_from": 5.0,
+            "value_to": null,
+            "provenance": "stated",
+            "target_scope": "AGGREGATE",
+            "transaction_type": null,
+            "explanation_codes": null
+          }
+        ],
+        "time_window": null,
+        "baseline_window": null,
+        "customer_segments": null,
+        "exclusions": null,
+        "mapped_keywords": null,
+        "clarification_needed": false,
+        "clarification_questions": [],
+        "aggregation": {
+          "metric": "Transaction count",
+          "function": "COUNT",
+          "grain": "Per Customer",
+          "provenance": "stated"
+        },
+        "semantic_conditions": [],
+        "clarifications": [],
+        "applied_defaults": [],
+        "field_provenance": {},
+        "ready_for_handoff": true,
+        "expected_alert_range_min": null,
+        "expected_alert_range_max": null,
+        "anchor_date": null
+      },
+      "confirmed_filters": [],
+      "service_b_wire_user_content": "{\n  \"request_type\": \"AML_SCENARIO_GENERATION\",\n  \"intent\": {\n    \"scenario_name\": \"At least five qualifying transactions\",\n    \"scenario_type\": \"CUSTOMER\",\n    \"transaction_type\": null,\n    \"transaction_types\": null,\n    \"explanation_codes\": null,\n    \"explanation_codes_by_type\": null,\n    \"resolved_filters\": [],\n    \"detection_logic\": \"Customers with at least five transactions.\",\n    \"thresholds\": [\n      {\n        \"field\": \"COUNT(*)\",\n        \"operator\": \">=\",\n        \"value_from\": 5.0,\n        \"value_to\": null,\n        \"provenance\": \"stated\",\n        \"target_scope\": \"AGGREGATE\",\n        \"transaction_type\": null,\n        \"explanation_codes\": null\n      }\n    ],\n    \"time_window\": null,\n    \"baseline_window\": null,\n    \"customer_segments\": null,\n    \"exclusions\": null,\n    \"mapped_keywords\": null,\n    \"clarification_needed\": false,\n    \"clarification_questions\": [],\n    \"aggregation\": {\n      \"metric\": \"Transaction count\",\n      \"function\": \"COUNT\",\n      \"grain\": \"Per Customer\",\n      \"provenance\": \"stated\"\n    },\n    \"semantic_conditions\": [],\n    \"clarifications\": [],\n    \"applied_defaults\": [],\n    \"field_provenance\": {},\n    \"ready_for_handoff\": true,\n    \"expected_alert_range_min\": null,\n    \"expected_alert_range_max\": null,\n    \"anchor_date\": null,\n    \"temporal_contract\": {\n      \"kind\": \"NONE\",\n      \"current_lower_boundary\": \"NONE\",\n      \"current_upper_boundary\": \"NONE\",\n      \"baseline_lower_boundary\": \"NONE\",\n      \"baseline_upper_boundary\": \"NONE\",\n      \"baseline_relationship\": \"NONE\"\n    },\n    \"filter_instructions\": \"\"\n  }\n}",
+      "service_a_messages": [
+        {
+          "role": "system",
+          "content": "Generate one Oracle SELECT query implementing the supplied AML scenario. Use only retrieved\nschema metadata and project CUS_NUM. Honor all confirmed filter values exactly. Preserve\ntransaction-code semantics, rolling windows, and non-overlapping baseline windows. Do not\ninvent tables, columns, values, or restrictions. Return SQL only; deterministic code enforces\nsafety and completeness.\n\n### SQL result contract\n- Put every confirmed filter and numeric threshold in an approved `:cs_bN` bind; do not write\n  filter or threshold values as SQL literals. Use distinct bind names for distinct values.\n- A CUSTOMER result must contain one row per CUS_NUM. Do not project transaction-level columns\n  such as TRA_DATE, EXPL_CODE, or TRA_AMT. For aggregate thresholds or per-customer measures,\n  include each required aggregate as an explicit aliased SELECT measure alongside CUS_NUM and\n  group at CUS_NUM only. Project exactly the measures requested by the intent; a threshold\n  predicate does not authorize an extra COUNT, SUM, or other evidence column. A filter-only\n  customer intent returns CUS_NUM only.\n- For an AGGREGATE threshold on SUM(TRA_AMT), include `SUM(TRA_AMT) AS <evidence_alias>` in\n  the final SELECT even when that same SUM appears in HAVING. For a DETAIL threshold, put the\n  row-level predicate in WHERE and do not add an aggregate projection unless separately requested.\n- For an AGGREGATE transaction-count threshold, include `COUNT(*) AS <evidence_alias>` in the\n  final SELECT even when the same count appears in HAVING. For an AGGREGATE distinct-date count\n  threshold, include `COUNT(DISTINCT TRA_DATE) AS <evidence_alias>` in the final SELECT even\n  when that same count appears in HAVING. Keep the alias descriptive and project no other\n  measures unless the intent separately requests them.\n- Follow `temporal_contract` exactly. ROLLING uses\n  `TRA_DATE >= SYSDATE - :cs_bN AND TRA_DATE < SYSDATE`. CALENDAR uses\n  `TRA_DATE >= TRUNC(SYSDATE, 'MM') AND TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)`;\n  calendar boundaries are expressions, not date binds.\n  COMPARISON returns the current `[SYSDATE-current_duration, SYSDATE)` and immediately\n  preceding `[SYSDATE-(current_duration+baseline_duration), SYSDATE-current_offset)` measures;\n  the two windows must be complete, half-open, and non-overlapping. Use a distinct bind token for\n  every temporal placeholder occurrence. For the baseline lower boundary, bind the current and\n  baseline durations separately so their sum equals the required start offset; bind the exclusive\n  baseline upper boundary to the current offset.\n- Do not add HAVING predicates or customer restrictions unless they are explicit in thresholds\n  or semantic conditions. A comparison request asks for the comparison measures; it does not\n  imply that the current measure must exceed the baseline.\n"
+        },
+        {
+          "role": "user",
+          "content": "{\"intent\": {\"scenario_name\": \"At least five qualifying transactions\", \"scenario_type\": \"CUSTOMER\", \"transaction_type\": null, \"transaction_types\": null, \"explanation_codes\": null, \"explanation_codes_by_type\": null, \"filters\": [], \"resolved_filters\": [], \"detection_logic\": \"Customers with at least five transactions.\", \"thresholds\": [{\"field\": \"COUNT(*)\", \"operator\": \">=\", \"value_from\": 5.0, \"value_to\": null, \"provenance\": \"stated\", \"target_scope\": \"AGGREGATE\", \"transaction_type\": null, \"explanation_codes\": null}], \"time_window\": null, \"baseline_window\": null, \"customer_segments\": null, \"exclusions\": null, \"mapped_keywords\": null, \"clarification_needed\": false, \"clarification_questions\": [], \"aggregation\": {\"metric\": \"Transaction count\", \"function\": \"COUNT\", \"grain\": \"Per Customer\", \"provenance\": \"stated\"}, \"semantic_conditions\": [], \"clarifications\": [], \"applied_defaults\": [], \"field_provenance\": {}, \"ready_for_handoff\": true, \"expected_alert_range_min\": null, \"expected_alert_range_max\": null, \"anchor_date\": null}, \"confirmed_filters\": [], \"experience\": [], \"tables\": [{\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\"}], \"columns\": [{\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"CUS_NUM\", \"data_type\": \"VARCHAR2\"}, {\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"TRA_DATE\", \"data_type\": \"DATE\"}, {\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"EXPL_CODE\", \"data_type\": \"VARCHAR2\"}, {\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"TRA_AMT\", \"data_type\": \"NUMBER\"}]}\nREPAIR FEEDBACK: "
+        }
+      ],
+      "service_a_payload_sha256": "f8cda7774303ae44e7071032fab5bb3770f499e90894a5e2e468afd448daf1c0",
+      "service_a_provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+      "service_b_model_messages": [
+        {
+          "role": "system",
+          "content": "Generate one Oracle SELECT statement for the validated AML scenario in the user message.\n\nUse only the pinned approved schema context included below. Project CUS_NUM. Apply every confirmed filter exactly. Preserve transaction-code semantics, threshold scopes, and all temporal windows. Use opaque cs_bN bind names for values supplied by the validated intent. Do not invent tables, columns, values, joins, or restrictions. Return SQL only.\n\nThis request is generation-only. Do not request or invoke tools. Do not execute or explain SQL, retrieve customer data or values, critique a candidate, export results, deploy, persist, or perform any database operation. If the pinned schema or intent is insufficient, return no SQL and state that generation is unavailable.\n\n### Result and temporal contract\n- Bind every confirmed filter, numeric threshold, and temporal offset with an opaque `:cs_bN` bind; never encode these values as SQL literals.\n- For CUSTOMER results, project `CUS_NUM` and exactly the explicitly requested, aliased measures; group by `CUS_NUM` only. Never project transaction-level columns or add a COUNT/SUM merely because it appears in a filter. Filter-only customer intents return `CUS_NUM` only.\n- Follow the typed `temporal_contract` supplied with the intent. For a current CALENDAR month, use exactly `TRA_DATE >= TRUNC(SYSDATE, 'MM') AND TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)`; do not substitute opaque date binds. A ROLLING window is half-open `[SYSDATE-duration, SYSDATE)`; a COMPARISON returns separate current and baseline measures over the exact stated half-open boundaries and relationship.\n- A comparison asks for both measures; do not add a `HAVING` predicate or imply that one measure must exceed the other unless the intent explicitly requires it.\n- For transaction-count comparisons, return exactly the two requested measures using conditional `SUM(CASE WHEN date_predicate THEN 1 ELSE 0 END)` or `COUNT(CASE WHEN date_predicate THEN 1 END)`. The date predicates must independently implement the typed temporal boundaries. Use a distinct opaque bind token at each temporal occurrence: current duration, baseline duration, and baseline exclusive offset each retain their own contract value. The baseline lower expression must sum the current and baseline durations; do not infer a comparison filter.\n\n\nPINNED APPROVED SCHEMA METADATA:\n{\"kind\":\"approved_schema_context\",\"objects\":[{\"object\":\"BI_DWH.PIO_TRANSACTIONS\",\"columns\":[{\"name\":\"CUS_NUM\",\"type\":\"VARCHAR2\"},{\"name\":\"TRA_DATE\",\"type\":\"DATE\"},{\"name\":\"EXPL_CODE\",\"type\":\"VARCHAR2\"},{\"name\":\"TRA_AMT\",\"type\":\"NUMBER\"}]}],\"relationships\":[]}"
+        },
+        {
+          "role": "user",
+          "content": "{\"request_type\":\"AML_SCENARIO_GENERATION\",\"intent\":{\"scenario_type\":\"CUSTOMER\",\"thresholds\":[{\"field\":\"COUNT(*)\",\"operator\":\">=\",\"target_scope\":\"AGGREGATE\",\"value_from\":5.0}],\"explanation_codes\":null,\"time_window\":null,\"baseline_window\":null,\"temporal_contract\":{\"kind\":\"NONE\",\"current_lower_boundary\":\"NONE\",\"current_upper_boundary\":\"NONE\",\"baseline_lower_boundary\":\"NONE\",\"baseline_upper_boundary\":\"NONE\",\"baseline_relationship\":\"NONE\"},\"ready_for_handoff\":true,\"resolved_filters\":[],\"aggregation\":{\"metric\":\"Transaction count\",\"function\":\"COUNT\",\"grain\":\"Per Customer\"}}}"
+        }
+      ],
+      "service_b_payload_sha256": "4913a7ea618d39807d7e9063c5334fa9b2bd9e020cc017819972693dcbe30882",
+      "service_b_provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1"
+    },
+    {
+      "case_id": "b9-05",
+      "scenario": "At least three distinct transaction dates",
+      "intent_text": "Customers with at least three distinct transaction dates.",
+      "typed_intent": {
+        "scenario_name": "At least three distinct transaction dates",
+        "scenario_type": "CUSTOMER",
+        "transaction_type": null,
+        "transaction_types": null,
+        "explanation_codes": null,
+        "explanation_codes_by_type": null,
+        "filters": [],
+        "resolved_filters": [],
+        "detection_logic": "Customers with at least three distinct transaction dates.",
+        "thresholds": [
+          {
+            "field": "COUNT(DISTINCT TRA_DATE)",
+            "operator": ">=",
+            "value_from": 3.0,
+            "value_to": null,
+            "provenance": "stated",
+            "target_scope": "AGGREGATE",
+            "transaction_type": null,
+            "explanation_codes": null
+          }
+        ],
+        "time_window": null,
+        "baseline_window": null,
+        "customer_segments": null,
+        "exclusions": null,
+        "mapped_keywords": null,
+        "clarification_needed": false,
+        "clarification_questions": [],
+        "aggregation": {
+          "metric": "Distinct transaction dates",
+          "function": "COUNT DISTINCT",
+          "grain": "Per Customer",
+          "provenance": "stated"
+        },
+        "semantic_conditions": [],
+        "clarifications": [],
+        "applied_defaults": [],
+        "field_provenance": {},
+        "ready_for_handoff": true,
+        "expected_alert_range_min": null,
+        "expected_alert_range_max": null,
+        "anchor_date": null
+      },
+      "confirmed_filters": [],
+      "service_b_wire_user_content": "{\n  \"request_type\": \"AML_SCENARIO_GENERATION\",\n  \"intent\": {\n    \"scenario_name\": \"At least three distinct transaction dates\",\n    \"scenario_type\": \"CUSTOMER\",\n    \"transaction_type\": null,\n    \"transaction_types\": null,\n    \"explanation_codes\": null,\n    \"explanation_codes_by_type\": null,\n    \"resolved_filters\": [],\n    \"detection_logic\": \"Customers with at least three distinct transaction dates.\",\n    \"thresholds\": [\n      {\n        \"field\": \"COUNT(DISTINCT TRA_DATE)\",\n        \"operator\": \">=\",\n        \"value_from\": 3.0,\n        \"value_to\": null,\n        \"provenance\": \"stated\",\n        \"target_scope\": \"AGGREGATE\",\n        \"transaction_type\": null,\n        \"explanation_codes\": null\n      }\n    ],\n    \"time_window\": null,\n    \"baseline_window\": null,\n    \"customer_segments\": null,\n    \"exclusions\": null,\n    \"mapped_keywords\": null,\n    \"clarification_needed\": false,\n    \"clarification_questions\": [],\n    \"aggregation\": {\n      \"metric\": \"Distinct transaction dates\",\n      \"function\": \"COUNT DISTINCT\",\n      \"grain\": \"Per Customer\",\n      \"provenance\": \"stated\"\n    },\n    \"semantic_conditions\": [],\n    \"clarifications\": [],\n    \"applied_defaults\": [],\n    \"field_provenance\": {},\n    \"ready_for_handoff\": true,\n    \"expected_alert_range_min\": null,\n    \"expected_alert_range_max\": null,\n    \"anchor_date\": null,\n    \"temporal_contract\": {\n      \"kind\": \"NONE\",\n      \"current_lower_boundary\": \"NONE\",\n      \"current_upper_boundary\": \"NONE\",\n      \"baseline_lower_boundary\": \"NONE\",\n      \"baseline_upper_boundary\": \"NONE\",\n      \"baseline_relationship\": \"NONE\"\n    },\n    \"filter_instructions\": \"\"\n  }\n}",
+      "service_a_messages": [
+        {
+          "role": "system",
+          "content": "Generate one Oracle SELECT query implementing the supplied AML scenario. Use only retrieved\nschema metadata and project CUS_NUM. Honor all confirmed filter values exactly. Preserve\ntransaction-code semantics, rolling windows, and non-overlapping baseline windows. Do not\ninvent tables, columns, values, or restrictions. Return SQL only; deterministic code enforces\nsafety and completeness.\n\n### SQL result contract\n- Put every confirmed filter and numeric threshold in an approved `:cs_bN` bind; do not write\n  filter or threshold values as SQL literals. Use distinct bind names for distinct values.\n- A CUSTOMER result must contain one row per CUS_NUM. Do not project transaction-level columns\n  such as TRA_DATE, EXPL_CODE, or TRA_AMT. For aggregate thresholds or per-customer measures,\n  include each required aggregate as an explicit aliased SELECT measure alongside CUS_NUM and\n  group at CUS_NUM only. Project exactly the measures requested by the intent; a threshold\n  predicate does not authorize an extra COUNT, SUM, or other evidence column. A filter-only\n  customer intent returns CUS_NUM only.\n- For an AGGREGATE threshold on SUM(TRA_AMT), include `SUM(TRA_AMT) AS <evidence_alias>` in\n  the final SELECT even when that same SUM appears in HAVING. For a DETAIL threshold, put the\n  row-level predicate in WHERE and do not add an aggregate projection unless separately requested.\n- For an AGGREGATE transaction-count threshold, include `COUNT(*) AS <evidence_alias>` in the\n  final SELECT even when the same count appears in HAVING. For an AGGREGATE distinct-date count\n  threshold, include `COUNT(DISTINCT TRA_DATE) AS <evidence_alias>` in the final SELECT even\n  when that same count appears in HAVING. Keep the alias descriptive and project no other\n  measures unless the intent separately requests them.\n- Follow `temporal_contract` exactly. ROLLING uses\n  `TRA_DATE >= SYSDATE - :cs_bN AND TRA_DATE < SYSDATE`. CALENDAR uses\n  `TRA_DATE >= TRUNC(SYSDATE, 'MM') AND TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)`;\n  calendar boundaries are expressions, not date binds.\n  COMPARISON returns the current `[SYSDATE-current_duration, SYSDATE)` and immediately\n  preceding `[SYSDATE-(current_duration+baseline_duration), SYSDATE-current_offset)` measures;\n  the two windows must be complete, half-open, and non-overlapping. Use a distinct bind token for\n  every temporal placeholder occurrence. For the baseline lower boundary, bind the current and\n  baseline durations separately so their sum equals the required start offset; bind the exclusive\n  baseline upper boundary to the current offset.\n- Do not add HAVING predicates or customer restrictions unless they are explicit in thresholds\n  or semantic conditions. A comparison request asks for the comparison measures; it does not\n  imply that the current measure must exceed the baseline.\n"
+        },
+        {
+          "role": "user",
+          "content": "{\"intent\": {\"scenario_name\": \"At least three distinct transaction dates\", \"scenario_type\": \"CUSTOMER\", \"transaction_type\": null, \"transaction_types\": null, \"explanation_codes\": null, \"explanation_codes_by_type\": null, \"filters\": [], \"resolved_filters\": [], \"detection_logic\": \"Customers with at least three distinct transaction dates.\", \"thresholds\": [{\"field\": \"COUNT(DISTINCT TRA_DATE)\", \"operator\": \">=\", \"value_from\": 3.0, \"value_to\": null, \"provenance\": \"stated\", \"target_scope\": \"AGGREGATE\", \"transaction_type\": null, \"explanation_codes\": null}], \"time_window\": null, \"baseline_window\": null, \"customer_segments\": null, \"exclusions\": null, \"mapped_keywords\": null, \"clarification_needed\": false, \"clarification_questions\": [], \"aggregation\": {\"metric\": \"Distinct transaction dates\", \"function\": \"COUNT DISTINCT\", \"grain\": \"Per Customer\", \"provenance\": \"stated\"}, \"semantic_conditions\": [], \"clarifications\": [], \"applied_defaults\": [], \"field_provenance\": {}, \"ready_for_handoff\": true, \"expected_alert_range_min\": null, \"expected_alert_range_max\": null, \"anchor_date\": null}, \"confirmed_filters\": [], \"experience\": [], \"tables\": [{\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\"}], \"columns\": [{\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"CUS_NUM\", \"data_type\": \"VARCHAR2\"}, {\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"TRA_DATE\", \"data_type\": \"DATE\"}, {\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"EXPL_CODE\", \"data_type\": \"VARCHAR2\"}, {\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"TRA_AMT\", \"data_type\": \"NUMBER\"}]}\nREPAIR FEEDBACK: "
+        }
+      ],
+      "service_a_payload_sha256": "adf2b718e6325f728ca6a66a7b0f97d06f82a5b9c01217e1a0105edc6f79e3d9",
+      "service_a_provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+      "service_b_model_messages": [
+        {
+          "role": "system",
+          "content": "Generate one Oracle SELECT statement for the validated AML scenario in the user message.\n\nUse only the pinned approved schema context included below. Project CUS_NUM. Apply every confirmed filter exactly. Preserve transaction-code semantics, threshold scopes, and all temporal windows. Use opaque cs_bN bind names for values supplied by the validated intent. Do not invent tables, columns, values, joins, or restrictions. Return SQL only.\n\nThis request is generation-only. Do not request or invoke tools. Do not execute or explain SQL, retrieve customer data or values, critique a candidate, export results, deploy, persist, or perform any database operation. If the pinned schema or intent is insufficient, return no SQL and state that generation is unavailable.\n\n### Result and temporal contract\n- Bind every confirmed filter, numeric threshold, and temporal offset with an opaque `:cs_bN` bind; never encode these values as SQL literals.\n- For CUSTOMER results, project `CUS_NUM` and exactly the explicitly requested, aliased measures; group by `CUS_NUM` only. Never project transaction-level columns or add a COUNT/SUM merely because it appears in a filter. Filter-only customer intents return `CUS_NUM` only.\n- Follow the typed `temporal_contract` supplied with the intent. For a current CALENDAR month, use exactly `TRA_DATE >= TRUNC(SYSDATE, 'MM') AND TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)`; do not substitute opaque date binds. A ROLLING window is half-open `[SYSDATE-duration, SYSDATE)`; a COMPARISON returns separate current and baseline measures over the exact stated half-open boundaries and relationship.\n- A comparison asks for both measures; do not add a `HAVING` predicate or imply that one measure must exceed the other unless the intent explicitly requires it.\n- For transaction-count comparisons, return exactly the two requested measures using conditional `SUM(CASE WHEN date_predicate THEN 1 ELSE 0 END)` or `COUNT(CASE WHEN date_predicate THEN 1 END)`. The date predicates must independently implement the typed temporal boundaries. Use a distinct opaque bind token at each temporal occurrence: current duration, baseline duration, and baseline exclusive offset each retain their own contract value. The baseline lower expression must sum the current and baseline durations; do not infer a comparison filter.\n\n\nPINNED APPROVED SCHEMA METADATA:\n{\"kind\":\"approved_schema_context\",\"objects\":[{\"object\":\"BI_DWH.PIO_TRANSACTIONS\",\"columns\":[{\"name\":\"CUS_NUM\",\"type\":\"VARCHAR2\"},{\"name\":\"TRA_DATE\",\"type\":\"DATE\"},{\"name\":\"EXPL_CODE\",\"type\":\"VARCHAR2\"},{\"name\":\"TRA_AMT\",\"type\":\"NUMBER\"}]}],\"relationships\":[]}"
+        },
+        {
+          "role": "user",
+          "content": "{\"request_type\":\"AML_SCENARIO_GENERATION\",\"intent\":{\"scenario_type\":\"CUSTOMER\",\"thresholds\":[{\"field\":\"COUNT(DISTINCT TRA_DATE)\",\"operator\":\">=\",\"target_scope\":\"AGGREGATE\",\"value_from\":3.0}],\"explanation_codes\":null,\"time_window\":null,\"baseline_window\":null,\"temporal_contract\":{\"kind\":\"NONE\",\"current_lower_boundary\":\"NONE\",\"current_upper_boundary\":\"NONE\",\"baseline_lower_boundary\":\"NONE\",\"baseline_upper_boundary\":\"NONE\",\"baseline_relationship\":\"NONE\"},\"ready_for_handoff\":true,\"resolved_filters\":[],\"aggregation\":{\"metric\":\"Distinct transaction dates\",\"function\":\"COUNT DISTINCT\",\"grain\":\"Per Customer\"}}}"
+        }
+      ],
+      "service_b_payload_sha256": "2bef308d55b63a343e098ecb6ec1f5a320a8abc7643fe7585b85c23038d157da",
+      "service_b_provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1"
+    },
+    {
+      "case_id": "b9-06",
+      "scenario": "Rolling 30 day transaction window",
+      "intent_text": "Customers with transactions in the rolling 30-day window.",
+      "typed_intent": {
+        "scenario_name": "Rolling 30 day transaction window",
+        "scenario_type": "CUSTOMER",
+        "transaction_type": null,
+        "transaction_types": null,
+        "explanation_codes": null,
+        "explanation_codes_by_type": null,
+        "filters": [],
+        "resolved_filters": [],
+        "detection_logic": "Customers with transactions in the rolling 30-day window.",
+        "thresholds": [],
+        "time_window": {
+          "unit": "DAYS",
+          "value": 30,
+          "is_rolling": true,
+          "provenance": "stated"
+        },
+        "baseline_window": null,
+        "customer_segments": null,
+        "exclusions": null,
+        "mapped_keywords": null,
+        "clarification_needed": false,
+        "clarification_questions": [],
+        "aggregation": null,
+        "semantic_conditions": [],
+        "clarifications": [],
+        "applied_defaults": [],
+        "field_provenance": {},
+        "ready_for_handoff": true,
+        "expected_alert_range_min": null,
+        "expected_alert_range_max": null,
+        "anchor_date": null
+      },
+      "confirmed_filters": [],
+      "service_b_wire_user_content": "{\n  \"request_type\": \"AML_SCENARIO_GENERATION\",\n  \"intent\": {\n    \"scenario_name\": \"Rolling 30 day transaction window\",\n    \"scenario_type\": \"CUSTOMER\",\n    \"transaction_type\": null,\n    \"transaction_types\": null,\n    \"explanation_codes\": null,\n    \"explanation_codes_by_type\": null,\n    \"resolved_filters\": [],\n    \"detection_logic\": \"Customers with transactions in the rolling 30-day window.\",\n    \"thresholds\": [],\n    \"time_window\": {\n      \"unit\": \"DAYS\",\n      \"value\": 30,\n      \"is_rolling\": true,\n      \"provenance\": \"stated\"\n    },\n    \"baseline_window\": null,\n    \"customer_segments\": null,\n    \"exclusions\": null,\n    \"mapped_keywords\": null,\n    \"clarification_needed\": false,\n    \"clarification_questions\": [],\n    \"aggregation\": null,\n    \"semantic_conditions\": [],\n    \"clarifications\": [],\n    \"applied_defaults\": [],\n    \"field_provenance\": {},\n    \"ready_for_handoff\": true,\n    \"expected_alert_range_min\": null,\n    \"expected_alert_range_max\": null,\n    \"anchor_date\": null,\n    \"temporal_contract\": {\n      \"kind\": \"ROLLING\",\n      \"current_lower_boundary\": \"SYSDATE_MINUS_DURATION\",\n      \"current_upper_boundary\": \"SYSDATE_EXCLUSIVE\",\n      \"baseline_lower_boundary\": \"NONE\",\n      \"baseline_upper_boundary\": \"NONE\",\n      \"baseline_relationship\": \"NONE\"\n    },\n    \"filter_instructions\": \"\"\n  }\n}",
+      "service_a_messages": [
+        {
+          "role": "system",
+          "content": "Generate one Oracle SELECT query implementing the supplied AML scenario. Use only retrieved\nschema metadata and project CUS_NUM. Honor all confirmed filter values exactly. Preserve\ntransaction-code semantics, rolling windows, and non-overlapping baseline windows. Do not\ninvent tables, columns, values, or restrictions. Return SQL only; deterministic code enforces\nsafety and completeness.\n\n### SQL result contract\n- Put every confirmed filter and numeric threshold in an approved `:cs_bN` bind; do not write\n  filter or threshold values as SQL literals. Use distinct bind names for distinct values.\n- A CUSTOMER result must contain one row per CUS_NUM. Do not project transaction-level columns\n  such as TRA_DATE, EXPL_CODE, or TRA_AMT. For aggregate thresholds or per-customer measures,\n  include each required aggregate as an explicit aliased SELECT measure alongside CUS_NUM and\n  group at CUS_NUM only. Project exactly the measures requested by the intent; a threshold\n  predicate does not authorize an extra COUNT, SUM, or other evidence column. A filter-only\n  customer intent returns CUS_NUM only.\n- For an AGGREGATE threshold on SUM(TRA_AMT), include `SUM(TRA_AMT) AS <evidence_alias>` in\n  the final SELECT even when that same SUM appears in HAVING. For a DETAIL threshold, put the\n  row-level predicate in WHERE and do not add an aggregate projection unless separately requested.\n- For an AGGREGATE transaction-count threshold, include `COUNT(*) AS <evidence_alias>` in the\n  final SELECT even when the same count appears in HAVING. For an AGGREGATE distinct-date count\n  threshold, include `COUNT(DISTINCT TRA_DATE) AS <evidence_alias>` in the final SELECT even\n  when that same count appears in HAVING. Keep the alias descriptive and project no other\n  measures unless the intent separately requests them.\n- Follow `temporal_contract` exactly. ROLLING uses\n  `TRA_DATE >= SYSDATE - :cs_bN AND TRA_DATE < SYSDATE`. CALENDAR uses\n  `TRA_DATE >= TRUNC(SYSDATE, 'MM') AND TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)`;\n  calendar boundaries are expressions, not date binds.\n  COMPARISON returns the current `[SYSDATE-current_duration, SYSDATE)` and immediately\n  preceding `[SYSDATE-(current_duration+baseline_duration), SYSDATE-current_offset)` measures;\n  the two windows must be complete, half-open, and non-overlapping. Use a distinct bind token for\n  every temporal placeholder occurrence. For the baseline lower boundary, bind the current and\n  baseline durations separately so their sum equals the required start offset; bind the exclusive\n  baseline upper boundary to the current offset.\n- Do not add HAVING predicates or customer restrictions unless they are explicit in thresholds\n  or semantic conditions. A comparison request asks for the comparison measures; it does not\n  imply that the current measure must exceed the baseline.\n"
+        },
+        {
+          "role": "user",
+          "content": "{\"intent\": {\"scenario_name\": \"Rolling 30 day transaction window\", \"scenario_type\": \"CUSTOMER\", \"transaction_type\": null, \"transaction_types\": null, \"explanation_codes\": null, \"explanation_codes_by_type\": null, \"filters\": [], \"resolved_filters\": [], \"detection_logic\": \"Customers with transactions in the rolling 30-day window.\", \"thresholds\": [], \"time_window\": {\"unit\": \"DAYS\", \"value\": 30, \"is_rolling\": true, \"provenance\": \"stated\"}, \"baseline_window\": null, \"customer_segments\": null, \"exclusions\": null, \"mapped_keywords\": null, \"clarification_needed\": false, \"clarification_questions\": [], \"aggregation\": null, \"semantic_conditions\": [], \"clarifications\": [], \"applied_defaults\": [], \"field_provenance\": {}, \"ready_for_handoff\": true, \"expected_alert_range_min\": null, \"expected_alert_range_max\": null, \"anchor_date\": null}, \"confirmed_filters\": [], \"experience\": [], \"tables\": [{\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\"}], \"columns\": [{\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"CUS_NUM\", \"data_type\": \"VARCHAR2\"}, {\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"TRA_DATE\", \"data_type\": \"DATE\"}, {\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"EXPL_CODE\", \"data_type\": \"VARCHAR2\"}, {\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"TRA_AMT\", \"data_type\": \"NUMBER\"}]}\nREPAIR FEEDBACK: "
+        }
+      ],
+      "service_a_payload_sha256": "92ef3382447a2a9fb7f9d1dfc7d136625c4b2e2e4319ff161eafe523e8928fb9",
+      "service_a_provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+      "service_b_model_messages": [
+        {
+          "role": "system",
+          "content": "Generate one Oracle SELECT statement for the validated AML scenario in the user message.\n\nUse only the pinned approved schema context included below. Project CUS_NUM. Apply every confirmed filter exactly. Preserve transaction-code semantics, threshold scopes, and all temporal windows. Use opaque cs_bN bind names for values supplied by the validated intent. Do not invent tables, columns, values, joins, or restrictions. Return SQL only.\n\nThis request is generation-only. Do not request or invoke tools. Do not execute or explain SQL, retrieve customer data or values, critique a candidate, export results, deploy, persist, or perform any database operation. If the pinned schema or intent is insufficient, return no SQL and state that generation is unavailable.\n\n### Result and temporal contract\n- Bind every confirmed filter, numeric threshold, and temporal offset with an opaque `:cs_bN` bind; never encode these values as SQL literals.\n- For CUSTOMER results, project `CUS_NUM` and exactly the explicitly requested, aliased measures; group by `CUS_NUM` only. Never project transaction-level columns or add a COUNT/SUM merely because it appears in a filter. Filter-only customer intents return `CUS_NUM` only.\n- Follow the typed `temporal_contract` supplied with the intent. For a current CALENDAR month, use exactly `TRA_DATE >= TRUNC(SYSDATE, 'MM') AND TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)`; do not substitute opaque date binds. A ROLLING window is half-open `[SYSDATE-duration, SYSDATE)`; a COMPARISON returns separate current and baseline measures over the exact stated half-open boundaries and relationship.\n- A comparison asks for both measures; do not add a `HAVING` predicate or imply that one measure must exceed the other unless the intent explicitly requires it.\n- For transaction-count comparisons, return exactly the two requested measures using conditional `SUM(CASE WHEN date_predicate THEN 1 ELSE 0 END)` or `COUNT(CASE WHEN date_predicate THEN 1 END)`. The date predicates must independently implement the typed temporal boundaries. Use a distinct opaque bind token at each temporal occurrence: current duration, baseline duration, and baseline exclusive offset each retain their own contract value. The baseline lower expression must sum the current and baseline durations; do not infer a comparison filter.\n\n\nPINNED APPROVED SCHEMA METADATA:\n{\"kind\":\"approved_schema_context\",\"objects\":[{\"object\":\"BI_DWH.PIO_TRANSACTIONS\",\"columns\":[{\"name\":\"CUS_NUM\",\"type\":\"VARCHAR2\"},{\"name\":\"TRA_DATE\",\"type\":\"DATE\"},{\"name\":\"EXPL_CODE\",\"type\":\"VARCHAR2\"},{\"name\":\"TRA_AMT\",\"type\":\"NUMBER\"}]}],\"relationships\":[]}"
+        },
+        {
+          "role": "user",
+          "content": "{\"request_type\":\"AML_SCENARIO_GENERATION\",\"intent\":{\"scenario_type\":\"CUSTOMER\",\"thresholds\":[],\"explanation_codes\":null,\"time_window\":{\"unit\":\"DAYS\",\"value\":30,\"is_rolling\":true},\"baseline_window\":null,\"temporal_contract\":{\"kind\":\"ROLLING\",\"current_lower_boundary\":\"SYSDATE_MINUS_DURATION\",\"current_upper_boundary\":\"SYSDATE_EXCLUSIVE\",\"baseline_lower_boundary\":\"NONE\",\"baseline_upper_boundary\":\"NONE\",\"baseline_relationship\":\"NONE\"},\"ready_for_handoff\":true,\"resolved_filters\":[],\"aggregation\":null}}"
+        }
+      ],
+      "service_b_payload_sha256": "280d845dd48cd078fbd949a40b4ebbfbf89fb63a2afc4b06871084181fa5da8e",
+      "service_b_provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1"
+    },
+    {
+      "case_id": "b9-07",
+      "scenario": "Current calendar month activity",
+      "intent_text": "Customers with transactions in the current calendar month.",
+      "typed_intent": {
+        "scenario_name": "Current calendar month activity",
+        "scenario_type": "CUSTOMER",
+        "transaction_type": null,
+        "transaction_types": null,
+        "explanation_codes": null,
+        "explanation_codes_by_type": null,
+        "filters": [],
+        "resolved_filters": [],
+        "detection_logic": "Customers with transactions in the current calendar month.",
+        "thresholds": [],
+        "time_window": {
+          "unit": "MONTHS",
+          "value": 1,
+          "is_rolling": false,
+          "provenance": "stated"
+        },
+        "baseline_window": null,
+        "customer_segments": null,
+        "exclusions": null,
+        "mapped_keywords": null,
+        "clarification_needed": false,
+        "clarification_questions": [],
+        "aggregation": null,
+        "semantic_conditions": [],
+        "clarifications": [],
+        "applied_defaults": [],
+        "field_provenance": {},
+        "ready_for_handoff": true,
+        "expected_alert_range_min": null,
+        "expected_alert_range_max": null,
+        "anchor_date": null
+      },
+      "confirmed_filters": [],
+      "service_b_wire_user_content": "{\n  \"request_type\": \"AML_SCENARIO_GENERATION\",\n  \"intent\": {\n    \"scenario_name\": \"Current calendar month activity\",\n    \"scenario_type\": \"CUSTOMER\",\n    \"transaction_type\": null,\n    \"transaction_types\": null,\n    \"explanation_codes\": null,\n    \"explanation_codes_by_type\": null,\n    \"resolved_filters\": [],\n    \"detection_logic\": \"Customers with transactions in the current calendar month.\",\n    \"thresholds\": [],\n    \"time_window\": {\n      \"unit\": \"MONTHS\",\n      \"value\": 1,\n      \"is_rolling\": false,\n      \"provenance\": \"stated\"\n    },\n    \"baseline_window\": null,\n    \"customer_segments\": null,\n    \"exclusions\": null,\n    \"mapped_keywords\": null,\n    \"clarification_needed\": false,\n    \"clarification_questions\": [],\n    \"aggregation\": null,\n    \"semantic_conditions\": [],\n    \"clarifications\": [],\n    \"applied_defaults\": [],\n    \"field_provenance\": {},\n    \"ready_for_handoff\": true,\n    \"expected_alert_range_min\": null,\n    \"expected_alert_range_max\": null,\n    \"anchor_date\": null,\n    \"temporal_contract\": {\n      \"kind\": \"CALENDAR\",\n      \"current_lower_boundary\": \"CALENDAR_MONTH_START\",\n      \"current_upper_boundary\": \"NEXT_CALENDAR_MONTH_START\",\n      \"baseline_lower_boundary\": \"NONE\",\n      \"baseline_upper_boundary\": \"NONE\",\n      \"baseline_relationship\": \"NONE\"\n    },\n    \"filter_instructions\": \"\"\n  }\n}",
+      "service_a_messages": [
+        {
+          "role": "system",
+          "content": "Generate one Oracle SELECT query implementing the supplied AML scenario. Use only retrieved\nschema metadata and project CUS_NUM. Honor all confirmed filter values exactly. Preserve\ntransaction-code semantics, rolling windows, and non-overlapping baseline windows. Do not\ninvent tables, columns, values, or restrictions. Return SQL only; deterministic code enforces\nsafety and completeness.\n\n### SQL result contract\n- Put every confirmed filter and numeric threshold in an approved `:cs_bN` bind; do not write\n  filter or threshold values as SQL literals. Use distinct bind names for distinct values.\n- A CUSTOMER result must contain one row per CUS_NUM. Do not project transaction-level columns\n  such as TRA_DATE, EXPL_CODE, or TRA_AMT. For aggregate thresholds or per-customer measures,\n  include each required aggregate as an explicit aliased SELECT measure alongside CUS_NUM and\n  group at CUS_NUM only. Project exactly the measures requested by the intent; a threshold\n  predicate does not authorize an extra COUNT, SUM, or other evidence column. A filter-only\n  customer intent returns CUS_NUM only.\n- For an AGGREGATE threshold on SUM(TRA_AMT), include `SUM(TRA_AMT) AS <evidence_alias>` in\n  the final SELECT even when that same SUM appears in HAVING. For a DETAIL threshold, put the\n  row-level predicate in WHERE and do not add an aggregate projection unless separately requested.\n- For an AGGREGATE transaction-count threshold, include `COUNT(*) AS <evidence_alias>` in the\n  final SELECT even when the same count appears in HAVING. For an AGGREGATE distinct-date count\n  threshold, include `COUNT(DISTINCT TRA_DATE) AS <evidence_alias>` in the final SELECT even\n  when that same count appears in HAVING. Keep the alias descriptive and project no other\n  measures unless the intent separately requests them.\n- Follow `temporal_contract` exactly. ROLLING uses\n  `TRA_DATE >= SYSDATE - :cs_bN AND TRA_DATE < SYSDATE`. CALENDAR uses\n  `TRA_DATE >= TRUNC(SYSDATE, 'MM') AND TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)`;\n  calendar boundaries are expressions, not date binds.\n  COMPARISON returns the current `[SYSDATE-current_duration, SYSDATE)` and immediately\n  preceding `[SYSDATE-(current_duration+baseline_duration), SYSDATE-current_offset)` measures;\n  the two windows must be complete, half-open, and non-overlapping. Use a distinct bind token for\n  every temporal placeholder occurrence. For the baseline lower boundary, bind the current and\n  baseline durations separately so their sum equals the required start offset; bind the exclusive\n  baseline upper boundary to the current offset.\n- Do not add HAVING predicates or customer restrictions unless they are explicit in thresholds\n  or semantic conditions. A comparison request asks for the comparison measures; it does not\n  imply that the current measure must exceed the baseline.\n"
+        },
+        {
+          "role": "user",
+          "content": "{\"intent\": {\"scenario_name\": \"Current calendar month activity\", \"scenario_type\": \"CUSTOMER\", \"transaction_type\": null, \"transaction_types\": null, \"explanation_codes\": null, \"explanation_codes_by_type\": null, \"filters\": [], \"resolved_filters\": [], \"detection_logic\": \"Customers with transactions in the current calendar month.\", \"thresholds\": [], \"time_window\": {\"unit\": \"MONTHS\", \"value\": 1, \"is_rolling\": false, \"provenance\": \"stated\"}, \"baseline_window\": null, \"customer_segments\": null, \"exclusions\": null, \"mapped_keywords\": null, \"clarification_needed\": false, \"clarification_questions\": [], \"aggregation\": null, \"semantic_conditions\": [], \"clarifications\": [], \"applied_defaults\": [], \"field_provenance\": {}, \"ready_for_handoff\": true, \"expected_alert_range_min\": null, \"expected_alert_range_max\": null, \"anchor_date\": null}, \"confirmed_filters\": [], \"experience\": [], \"tables\": [{\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\"}], \"columns\": [{\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"CUS_NUM\", \"data_type\": \"VARCHAR2\"}, {\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"TRA_DATE\", \"data_type\": \"DATE\"}, {\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"EXPL_CODE\", \"data_type\": \"VARCHAR2\"}, {\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"TRA_AMT\", \"data_type\": \"NUMBER\"}]}\nREPAIR FEEDBACK: "
+        }
+      ],
+      "service_a_payload_sha256": "6e2b781d5c38b7ec2cea0f00e9ef3cf31d0053a740509fa4495fa687b8df7dc1",
+      "service_a_provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+      "service_b_model_messages": [
+        {
+          "role": "system",
+          "content": "Generate one Oracle SELECT statement for the validated AML scenario in the user message.\n\nUse only the pinned approved schema context included below. Project CUS_NUM. Apply every confirmed filter exactly. Preserve transaction-code semantics, threshold scopes, and all temporal windows. Use opaque cs_bN bind names for values supplied by the validated intent. Do not invent tables, columns, values, joins, or restrictions. Return SQL only.\n\nThis request is generation-only. Do not request or invoke tools. Do not execute or explain SQL, retrieve customer data or values, critique a candidate, export results, deploy, persist, or perform any database operation. If the pinned schema or intent is insufficient, return no SQL and state that generation is unavailable.\n\n### Result and temporal contract\n- Bind every confirmed filter, numeric threshold, and temporal offset with an opaque `:cs_bN` bind; never encode these values as SQL literals.\n- For CUSTOMER results, project `CUS_NUM` and exactly the explicitly requested, aliased measures; group by `CUS_NUM` only. Never project transaction-level columns or add a COUNT/SUM merely because it appears in a filter. Filter-only customer intents return `CUS_NUM` only.\n- Follow the typed `temporal_contract` supplied with the intent. For a current CALENDAR month, use exactly `TRA_DATE >= TRUNC(SYSDATE, 'MM') AND TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)`; do not substitute opaque date binds. A ROLLING window is half-open `[SYSDATE-duration, SYSDATE)`; a COMPARISON returns separate current and baseline measures over the exact stated half-open boundaries and relationship.\n- A comparison asks for both measures; do not add a `HAVING` predicate or imply that one measure must exceed the other unless the intent explicitly requires it.\n- For transaction-count comparisons, return exactly the two requested measures using conditional `SUM(CASE WHEN date_predicate THEN 1 ELSE 0 END)` or `COUNT(CASE WHEN date_predicate THEN 1 END)`. The date predicates must independently implement the typed temporal boundaries. Use a distinct opaque bind token at each temporal occurrence: current duration, baseline duration, and baseline exclusive offset each retain their own contract value. The baseline lower expression must sum the current and baseline durations; do not infer a comparison filter.\n\n\nPINNED APPROVED SCHEMA METADATA:\n{\"kind\":\"approved_schema_context\",\"objects\":[{\"object\":\"BI_DWH.PIO_TRANSACTIONS\",\"columns\":[{\"name\":\"CUS_NUM\",\"type\":\"VARCHAR2\"},{\"name\":\"TRA_DATE\",\"type\":\"DATE\"},{\"name\":\"EXPL_CODE\",\"type\":\"VARCHAR2\"},{\"name\":\"TRA_AMT\",\"type\":\"NUMBER\"}]}],\"relationships\":[]}"
+        },
+        {
+          "role": "user",
+          "content": "{\"request_type\":\"AML_SCENARIO_GENERATION\",\"intent\":{\"scenario_type\":\"CUSTOMER\",\"thresholds\":[],\"explanation_codes\":null,\"time_window\":{\"unit\":\"MONTHS\",\"value\":1,\"is_rolling\":false},\"baseline_window\":null,\"temporal_contract\":{\"kind\":\"CALENDAR\",\"current_lower_boundary\":\"CALENDAR_MONTH_START\",\"current_upper_boundary\":\"NEXT_CALENDAR_MONTH_START\",\"baseline_lower_boundary\":\"NONE\",\"baseline_upper_boundary\":\"NONE\",\"baseline_relationship\":\"NONE\"},\"ready_for_handoff\":true,\"resolved_filters\":[],\"aggregation\":null}}"
+        }
+      ],
+      "service_b_payload_sha256": "78299f82d755eb23a590ae4cd5d1ccadbded52ae6a1d22c88a9998ab0f2108da",
+      "service_b_provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1"
+    },
+    {
+      "case_id": "b9-08",
+      "scenario": "Compare recent and preceding 30 day counts",
+      "intent_text": "Compare each customer transaction count in the recent 30-day period with the immediately prior 30-day period.",
+      "typed_intent": {
+        "scenario_name": "Compare recent and preceding 30 day counts",
+        "scenario_type": "CUSTOMER",
+        "transaction_type": null,
+        "transaction_types": null,
+        "explanation_codes": null,
+        "explanation_codes_by_type": null,
+        "filters": [],
+        "resolved_filters": [],
+        "detection_logic": "Compare each customer transaction count in the recent 30-day period with the immediately prior 30-day period.",
+        "thresholds": [],
+        "time_window": {
+          "unit": "DAYS",
+          "value": 30,
+          "is_rolling": true,
+          "provenance": "stated"
+        },
+        "baseline_window": {
+          "unit": "DAYS",
+          "duration": 30,
+          "provenance": "stated",
+          "exclude_current_window": true,
+          "offset_days": 30,
+          "sql_date_formula": null,
+          "description": null
+        },
+        "customer_segments": null,
+        "exclusions": null,
+        "mapped_keywords": null,
+        "clarification_needed": false,
+        "clarification_questions": [],
+        "aggregation": {
+          "metric": "Transaction count comparison",
+          "function": "COUNT",
+          "grain": "Per Customer",
+          "provenance": "stated"
+        },
+        "semantic_conditions": [],
+        "clarifications": [],
+        "applied_defaults": [],
+        "field_provenance": {},
+        "ready_for_handoff": true,
+        "expected_alert_range_min": null,
+        "expected_alert_range_max": null,
+        "anchor_date": null
+      },
+      "confirmed_filters": [],
+      "service_b_wire_user_content": "{\n  \"request_type\": \"AML_SCENARIO_GENERATION\",\n  \"intent\": {\n    \"scenario_name\": \"Compare recent and preceding 30 day counts\",\n    \"scenario_type\": \"CUSTOMER\",\n    \"transaction_type\": null,\n    \"transaction_types\": null,\n    \"explanation_codes\": null,\n    \"explanation_codes_by_type\": null,\n    \"resolved_filters\": [],\n    \"detection_logic\": \"Compare each customer transaction count in the recent 30-day period with the immediately prior 30-day period.\",\n    \"thresholds\": [],\n    \"time_window\": {\n      \"unit\": \"DAYS\",\n      \"value\": 30,\n      \"is_rolling\": true,\n      \"provenance\": \"stated\"\n    },\n    \"baseline_window\": {\n      \"unit\": \"DAYS\",\n      \"duration\": 30,\n      \"provenance\": \"stated\",\n      \"exclude_current_window\": true,\n      \"offset_days\": 30,\n      \"sql_date_formula\": null,\n      \"description\": null\n    },\n    \"customer_segments\": null,\n    \"exclusions\": null,\n    \"mapped_keywords\": null,\n    \"clarification_needed\": false,\n    \"clarification_questions\": [],\n    \"aggregation\": {\n      \"metric\": \"Transaction count comparison\",\n      \"function\": \"COUNT\",\n      \"grain\": \"Per Customer\",\n      \"provenance\": \"stated\"\n    },\n    \"semantic_conditions\": [],\n    \"clarifications\": [],\n    \"applied_defaults\": [],\n    \"field_provenance\": {},\n    \"ready_for_handoff\": true,\n    \"expected_alert_range_min\": null,\n    \"expected_alert_range_max\": null,\n    \"anchor_date\": null,\n    \"temporal_contract\": {\n      \"kind\": \"COMPARISON\",\n      \"current_lower_boundary\": \"SYSDATE_MINUS_CURRENT_DURATION\",\n      \"current_upper_boundary\": \"SYSDATE_EXCLUSIVE\",\n      \"baseline_lower_boundary\": \"SYSDATE_MINUS_CURRENT_AND_BASELINE_DURATIONS\",\n      \"baseline_upper_boundary\": \"SYSDATE_MINUS_CURRENT_OFFSET\",\n      \"baseline_relationship\": \"IMMEDIATELY_PRECEDING_NON_OVERLAPPING\"\n    },\n    \"filter_instructions\": \"\"\n  }\n}",
+      "service_a_messages": [
+        {
+          "role": "system",
+          "content": "Generate one Oracle SELECT query implementing the supplied AML scenario. Use only retrieved\nschema metadata and project CUS_NUM. Honor all confirmed filter values exactly. Preserve\ntransaction-code semantics, rolling windows, and non-overlapping baseline windows. Do not\ninvent tables, columns, values, or restrictions. Return SQL only; deterministic code enforces\nsafety and completeness.\n\n### SQL result contract\n- Put every confirmed filter and numeric threshold in an approved `:cs_bN` bind; do not write\n  filter or threshold values as SQL literals. Use distinct bind names for distinct values.\n- A CUSTOMER result must contain one row per CUS_NUM. Do not project transaction-level columns\n  such as TRA_DATE, EXPL_CODE, or TRA_AMT. For aggregate thresholds or per-customer measures,\n  include each required aggregate as an explicit aliased SELECT measure alongside CUS_NUM and\n  group at CUS_NUM only. Project exactly the measures requested by the intent; a threshold\n  predicate does not authorize an extra COUNT, SUM, or other evidence column. A filter-only\n  customer intent returns CUS_NUM only.\n- For an AGGREGATE threshold on SUM(TRA_AMT), include `SUM(TRA_AMT) AS <evidence_alias>` in\n  the final SELECT even when that same SUM appears in HAVING. For a DETAIL threshold, put the\n  row-level predicate in WHERE and do not add an aggregate projection unless separately requested.\n- For an AGGREGATE transaction-count threshold, include `COUNT(*) AS <evidence_alias>` in the\n  final SELECT even when the same count appears in HAVING. For an AGGREGATE distinct-date count\n  threshold, include `COUNT(DISTINCT TRA_DATE) AS <evidence_alias>` in the final SELECT even\n  when that same count appears in HAVING. Keep the alias descriptive and project no other\n  measures unless the intent separately requests them.\n- Follow `temporal_contract` exactly. ROLLING uses\n  `TRA_DATE >= SYSDATE - :cs_bN AND TRA_DATE < SYSDATE`. CALENDAR uses\n  `TRA_DATE >= TRUNC(SYSDATE, 'MM') AND TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)`;\n  calendar boundaries are expressions, not date binds.\n  COMPARISON returns the current `[SYSDATE-current_duration, SYSDATE)` and immediately\n  preceding `[SYSDATE-(current_duration+baseline_duration), SYSDATE-current_offset)` measures;\n  the two windows must be complete, half-open, and non-overlapping. Use a distinct bind token for\n  every temporal placeholder occurrence. For the baseline lower boundary, bind the current and\n  baseline durations separately so their sum equals the required start offset; bind the exclusive\n  baseline upper boundary to the current offset.\n- Do not add HAVING predicates or customer restrictions unless they are explicit in thresholds\n  or semantic conditions. A comparison request asks for the comparison measures; it does not\n  imply that the current measure must exceed the baseline.\n"
+        },
+        {
+          "role": "user",
+          "content": "{\"intent\": {\"scenario_name\": \"Compare recent and preceding 30 day counts\", \"scenario_type\": \"CUSTOMER\", \"transaction_type\": null, \"transaction_types\": null, \"explanation_codes\": null, \"explanation_codes_by_type\": null, \"filters\": [], \"resolved_filters\": [], \"detection_logic\": \"Compare each customer transaction count in the recent 30-day period with the immediately prior 30-day period.\", \"thresholds\": [], \"time_window\": {\"unit\": \"DAYS\", \"value\": 30, \"is_rolling\": true, \"provenance\": \"stated\"}, \"baseline_window\": {\"unit\": \"DAYS\", \"duration\": 30, \"provenance\": \"stated\", \"exclude_current_window\": true, \"offset_days\": 30, \"sql_date_formula\": null, \"description\": null}, \"customer_segments\": null, \"exclusions\": null, \"mapped_keywords\": null, \"clarification_needed\": false, \"clarification_questions\": [], \"aggregation\": {\"metric\": \"Transaction count comparison\", \"function\": \"COUNT\", \"grain\": \"Per Customer\", \"provenance\": \"stated\"}, \"semantic_conditions\": [], \"clarifications\": [], \"applied_defaults\": [], \"field_provenance\": {}, \"ready_for_handoff\": true, \"expected_alert_range_min\": null, \"expected_alert_range_max\": null, \"anchor_date\": null}, \"confirmed_filters\": [], \"experience\": [], \"tables\": [{\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\"}], \"columns\": [{\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"CUS_NUM\", \"data_type\": \"VARCHAR2\"}, {\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"TRA_DATE\", \"data_type\": \"DATE\"}, {\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"EXPL_CODE\", \"data_type\": \"VARCHAR2\"}, {\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"TRA_AMT\", \"data_type\": \"NUMBER\"}]}\nREPAIR FEEDBACK: "
+        }
+      ],
+      "service_a_payload_sha256": "0dd11753f2ac74e93f9ce0a528a5234414dc21d5fb0be3e8e1c2170f8cb861b3",
+      "service_a_provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+      "service_b_model_messages": [
+        {
+          "role": "system",
+          "content": "Generate one Oracle SELECT statement for the validated AML scenario in the user message.\n\nUse only the pinned approved schema context included below. Project CUS_NUM. Apply every confirmed filter exactly. Preserve transaction-code semantics, threshold scopes, and all temporal windows. Use opaque cs_bN bind names for values supplied by the validated intent. Do not invent tables, columns, values, joins, or restrictions. Return SQL only.\n\nThis request is generation-only. Do not request or invoke tools. Do not execute or explain SQL, retrieve customer data or values, critique a candidate, export results, deploy, persist, or perform any database operation. If the pinned schema or intent is insufficient, return no SQL and state that generation is unavailable.\n\n### Result and temporal contract\n- Bind every confirmed filter, numeric threshold, and temporal offset with an opaque `:cs_bN` bind; never encode these values as SQL literals.\n- For CUSTOMER results, project `CUS_NUM` and exactly the explicitly requested, aliased measures; group by `CUS_NUM` only. Never project transaction-level columns or add a COUNT/SUM merely because it appears in a filter. Filter-only customer intents return `CUS_NUM` only.\n- Follow the typed `temporal_contract` supplied with the intent. For a current CALENDAR month, use exactly `TRA_DATE >= TRUNC(SYSDATE, 'MM') AND TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)`; do not substitute opaque date binds. A ROLLING window is half-open `[SYSDATE-duration, SYSDATE)`; a COMPARISON returns separate current and baseline measures over the exact stated half-open boundaries and relationship.\n- A comparison asks for both measures; do not add a `HAVING` predicate or imply that one measure must exceed the other unless the intent explicitly requires it.\n- For transaction-count comparisons, return exactly the two requested measures using conditional `SUM(CASE WHEN date_predicate THEN 1 ELSE 0 END)` or `COUNT(CASE WHEN date_predicate THEN 1 END)`. The date predicates must independently implement the typed temporal boundaries. Use a distinct opaque bind token at each temporal occurrence: current duration, baseline duration, and baseline exclusive offset each retain their own contract value. The baseline lower expression must sum the current and baseline durations; do not infer a comparison filter.\n\n\nPINNED APPROVED SCHEMA METADATA:\n{\"kind\":\"approved_schema_context\",\"objects\":[{\"object\":\"BI_DWH.PIO_TRANSACTIONS\",\"columns\":[{\"name\":\"CUS_NUM\",\"type\":\"VARCHAR2\"},{\"name\":\"TRA_DATE\",\"type\":\"DATE\"},{\"name\":\"EXPL_CODE\",\"type\":\"VARCHAR2\"},{\"name\":\"TRA_AMT\",\"type\":\"NUMBER\"}]}],\"relationships\":[]}"
+        },
+        {
+          "role": "user",
+          "content": "{\"request_type\":\"AML_SCENARIO_GENERATION\",\"intent\":{\"scenario_type\":\"CUSTOMER\",\"thresholds\":[],\"explanation_codes\":null,\"time_window\":{\"unit\":\"DAYS\",\"value\":30,\"is_rolling\":true},\"baseline_window\":{\"unit\":\"DAYS\",\"duration\":30,\"exclude_current_window\":true,\"offset_days\":30},\"temporal_contract\":{\"kind\":\"COMPARISON\",\"current_lower_boundary\":\"SYSDATE_MINUS_CURRENT_DURATION\",\"current_upper_boundary\":\"SYSDATE_EXCLUSIVE\",\"baseline_lower_boundary\":\"SYSDATE_MINUS_CURRENT_AND_BASELINE_DURATIONS\",\"baseline_upper_boundary\":\"SYSDATE_MINUS_CURRENT_OFFSET\",\"baseline_relationship\":\"IMMEDIATELY_PRECEDING_NON_OVERLAPPING\"},\"ready_for_handoff\":true,\"resolved_filters\":[],\"aggregation\":{\"metric\":\"Transaction count comparison\",\"function\":\"COUNT\",\"grain\":\"Per Customer\"}}}"
+        }
+      ],
+      "service_b_payload_sha256": "22c6fd290641cc690fd582432f6fe04a3ce148dd960147cf8a1d597ab370719d",
+      "service_b_provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1"
+    },
+    {
+      "case_id": "b9-09",
+      "scenario": "Customer-level repeated amount aggregation",
+      "intent_text": "Customers whose total transaction amount is greater than 25000.",
+      "typed_intent": {
+        "scenario_name": "Customer-level repeated amount aggregation",
+        "scenario_type": "CUSTOMER",
+        "transaction_type": null,
+        "transaction_types": null,
+        "explanation_codes": null,
+        "explanation_codes_by_type": null,
+        "filters": [],
+        "resolved_filters": [],
+        "detection_logic": "Customers whose total transaction amount is greater than 25000.",
+        "thresholds": [
+          {
+            "field": "TRA_AMT",
+            "operator": ">",
+            "value_from": 25000.0,
+            "value_to": null,
+            "provenance": "stated",
+            "target_scope": "AGGREGATE",
+            "transaction_type": null,
+            "explanation_codes": null
+          }
+        ],
+        "time_window": null,
+        "baseline_window": null,
+        "customer_segments": null,
+        "exclusions": null,
+        "mapped_keywords": null,
+        "clarification_needed": false,
+        "clarification_questions": [],
+        "aggregation": {
+          "metric": "Transaction amount",
+          "function": "SUM",
+          "grain": "Per Customer",
+          "provenance": "stated"
+        },
+        "semantic_conditions": [],
+        "clarifications": [],
+        "applied_defaults": [],
+        "field_provenance": {},
+        "ready_for_handoff": true,
+        "expected_alert_range_min": null,
+        "expected_alert_range_max": null,
+        "anchor_date": null
+      },
+      "confirmed_filters": [],
+      "service_b_wire_user_content": "{\n  \"request_type\": \"AML_SCENARIO_GENERATION\",\n  \"intent\": {\n    \"scenario_name\": \"Customer-level repeated amount aggregation\",\n    \"scenario_type\": \"CUSTOMER\",\n    \"transaction_type\": null,\n    \"transaction_types\": null,\n    \"explanation_codes\": null,\n    \"explanation_codes_by_type\": null,\n    \"resolved_filters\": [],\n    \"detection_logic\": \"Customers whose total transaction amount is greater than 25000.\",\n    \"thresholds\": [\n      {\n        \"field\": \"TRA_AMT\",\n        \"operator\": \">\",\n        \"value_from\": 25000.0,\n        \"value_to\": null,\n        \"provenance\": \"stated\",\n        \"target_scope\": \"AGGREGATE\",\n        \"transaction_type\": null,\n        \"explanation_codes\": null\n      }\n    ],\n    \"time_window\": null,\n    \"baseline_window\": null,\n    \"customer_segments\": null,\n    \"exclusions\": null,\n    \"mapped_keywords\": null,\n    \"clarification_needed\": false,\n    \"clarification_questions\": [],\n    \"aggregation\": {\n      \"metric\": \"Transaction amount\",\n      \"function\": \"SUM\",\n      \"grain\": \"Per Customer\",\n      \"provenance\": \"stated\"\n    },\n    \"semantic_conditions\": [],\n    \"clarifications\": [],\n    \"applied_defaults\": [],\n    \"field_provenance\": {},\n    \"ready_for_handoff\": true,\n    \"expected_alert_range_min\": null,\n    \"expected_alert_range_max\": null,\n    \"anchor_date\": null,\n    \"temporal_contract\": {\n      \"kind\": \"NONE\",\n      \"current_lower_boundary\": \"NONE\",\n      \"current_upper_boundary\": \"NONE\",\n      \"baseline_lower_boundary\": \"NONE\",\n      \"baseline_upper_boundary\": \"NONE\",\n      \"baseline_relationship\": \"NONE\"\n    },\n    \"filter_instructions\": \"\"\n  }\n}",
+      "service_a_messages": [
+        {
+          "role": "system",
+          "content": "Generate one Oracle SELECT query implementing the supplied AML scenario. Use only retrieved\nschema metadata and project CUS_NUM. Honor all confirmed filter values exactly. Preserve\ntransaction-code semantics, rolling windows, and non-overlapping baseline windows. Do not\ninvent tables, columns, values, or restrictions. Return SQL only; deterministic code enforces\nsafety and completeness.\n\n### SQL result contract\n- Put every confirmed filter and numeric threshold in an approved `:cs_bN` bind; do not write\n  filter or threshold values as SQL literals. Use distinct bind names for distinct values.\n- A CUSTOMER result must contain one row per CUS_NUM. Do not project transaction-level columns\n  such as TRA_DATE, EXPL_CODE, or TRA_AMT. For aggregate thresholds or per-customer measures,\n  include each required aggregate as an explicit aliased SELECT measure alongside CUS_NUM and\n  group at CUS_NUM only. Project exactly the measures requested by the intent; a threshold\n  predicate does not authorize an extra COUNT, SUM, or other evidence column. A filter-only\n  customer intent returns CUS_NUM only.\n- For an AGGREGATE threshold on SUM(TRA_AMT), include `SUM(TRA_AMT) AS <evidence_alias>` in\n  the final SELECT even when that same SUM appears in HAVING. For a DETAIL threshold, put the\n  row-level predicate in WHERE and do not add an aggregate projection unless separately requested.\n- For an AGGREGATE transaction-count threshold, include `COUNT(*) AS <evidence_alias>` in the\n  final SELECT even when the same count appears in HAVING. For an AGGREGATE distinct-date count\n  threshold, include `COUNT(DISTINCT TRA_DATE) AS <evidence_alias>` in the final SELECT even\n  when that same count appears in HAVING. Keep the alias descriptive and project no other\n  measures unless the intent separately requests them.\n- Follow `temporal_contract` exactly. ROLLING uses\n  `TRA_DATE >= SYSDATE - :cs_bN AND TRA_DATE < SYSDATE`. CALENDAR uses\n  `TRA_DATE >= TRUNC(SYSDATE, 'MM') AND TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)`;\n  calendar boundaries are expressions, not date binds.\n  COMPARISON returns the current `[SYSDATE-current_duration, SYSDATE)` and immediately\n  preceding `[SYSDATE-(current_duration+baseline_duration), SYSDATE-current_offset)` measures;\n  the two windows must be complete, half-open, and non-overlapping. Use a distinct bind token for\n  every temporal placeholder occurrence. For the baseline lower boundary, bind the current and\n  baseline durations separately so their sum equals the required start offset; bind the exclusive\n  baseline upper boundary to the current offset.\n- Do not add HAVING predicates or customer restrictions unless they are explicit in thresholds\n  or semantic conditions. A comparison request asks for the comparison measures; it does not\n  imply that the current measure must exceed the baseline.\n"
+        },
+        {
+          "role": "user",
+          "content": "{\"intent\": {\"scenario_name\": \"Customer-level repeated amount aggregation\", \"scenario_type\": \"CUSTOMER\", \"transaction_type\": null, \"transaction_types\": null, \"explanation_codes\": null, \"explanation_codes_by_type\": null, \"filters\": [], \"resolved_filters\": [], \"detection_logic\": \"Customers whose total transaction amount is greater than 25000.\", \"thresholds\": [{\"field\": \"TRA_AMT\", \"operator\": \">\", \"value_from\": 25000.0, \"value_to\": null, \"provenance\": \"stated\", \"target_scope\": \"AGGREGATE\", \"transaction_type\": null, \"explanation_codes\": null}], \"time_window\": null, \"baseline_window\": null, \"customer_segments\": null, \"exclusions\": null, \"mapped_keywords\": null, \"clarification_needed\": false, \"clarification_questions\": [], \"aggregation\": {\"metric\": \"Transaction amount\", \"function\": \"SUM\", \"grain\": \"Per Customer\", \"provenance\": \"stated\"}, \"semantic_conditions\": [], \"clarifications\": [], \"applied_defaults\": [], \"field_provenance\": {}, \"ready_for_handoff\": true, \"expected_alert_range_min\": null, \"expected_alert_range_max\": null, \"anchor_date\": null}, \"confirmed_filters\": [], \"experience\": [], \"tables\": [{\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\"}], \"columns\": [{\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"CUS_NUM\", \"data_type\": \"VARCHAR2\"}, {\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"TRA_DATE\", \"data_type\": \"DATE\"}, {\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"EXPL_CODE\", \"data_type\": \"VARCHAR2\"}, {\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"TRA_AMT\", \"data_type\": \"NUMBER\"}]}\nREPAIR FEEDBACK: "
+        }
+      ],
+      "service_a_payload_sha256": "fe91060f4512ada5385ba6914274b59fdd8304f5fa730e2410d44b6be3fc1bf2",
+      "service_a_provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+      "service_b_model_messages": [
+        {
+          "role": "system",
+          "content": "Generate one Oracle SELECT statement for the validated AML scenario in the user message.\n\nUse only the pinned approved schema context included below. Project CUS_NUM. Apply every confirmed filter exactly. Preserve transaction-code semantics, threshold scopes, and all temporal windows. Use opaque cs_bN bind names for values supplied by the validated intent. Do not invent tables, columns, values, joins, or restrictions. Return SQL only.\n\nThis request is generation-only. Do not request or invoke tools. Do not execute or explain SQL, retrieve customer data or values, critique a candidate, export results, deploy, persist, or perform any database operation. If the pinned schema or intent is insufficient, return no SQL and state that generation is unavailable.\n\n### Result and temporal contract\n- Bind every confirmed filter, numeric threshold, and temporal offset with an opaque `:cs_bN` bind; never encode these values as SQL literals.\n- For CUSTOMER results, project `CUS_NUM` and exactly the explicitly requested, aliased measures; group by `CUS_NUM` only. Never project transaction-level columns or add a COUNT/SUM merely because it appears in a filter. Filter-only customer intents return `CUS_NUM` only.\n- Follow the typed `temporal_contract` supplied with the intent. For a current CALENDAR month, use exactly `TRA_DATE >= TRUNC(SYSDATE, 'MM') AND TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)`; do not substitute opaque date binds. A ROLLING window is half-open `[SYSDATE-duration, SYSDATE)`; a COMPARISON returns separate current and baseline measures over the exact stated half-open boundaries and relationship.\n- A comparison asks for both measures; do not add a `HAVING` predicate or imply that one measure must exceed the other unless the intent explicitly requires it.\n- For transaction-count comparisons, return exactly the two requested measures using conditional `SUM(CASE WHEN date_predicate THEN 1 ELSE 0 END)` or `COUNT(CASE WHEN date_predicate THEN 1 END)`. The date predicates must independently implement the typed temporal boundaries. Use a distinct opaque bind token at each temporal occurrence: current duration, baseline duration, and baseline exclusive offset each retain their own contract value. The baseline lower expression must sum the current and baseline durations; do not infer a comparison filter.\n\n\nPINNED APPROVED SCHEMA METADATA:\n{\"kind\":\"approved_schema_context\",\"objects\":[{\"object\":\"BI_DWH.PIO_TRANSACTIONS\",\"columns\":[{\"name\":\"CUS_NUM\",\"type\":\"VARCHAR2\"},{\"name\":\"TRA_DATE\",\"type\":\"DATE\"},{\"name\":\"EXPL_CODE\",\"type\":\"VARCHAR2\"},{\"name\":\"TRA_AMT\",\"type\":\"NUMBER\"}]}],\"relationships\":[]}"
+        },
+        {
+          "role": "user",
+          "content": "{\"request_type\":\"AML_SCENARIO_GENERATION\",\"intent\":{\"scenario_type\":\"CUSTOMER\",\"thresholds\":[{\"field\":\"TRA_AMT\",\"operator\":\">\",\"target_scope\":\"AGGREGATE\",\"value_from\":25000.0}],\"explanation_codes\":null,\"time_window\":null,\"baseline_window\":null,\"temporal_contract\":{\"kind\":\"NONE\",\"current_lower_boundary\":\"NONE\",\"current_upper_boundary\":\"NONE\",\"baseline_lower_boundary\":\"NONE\",\"baseline_upper_boundary\":\"NONE\",\"baseline_relationship\":\"NONE\"},\"ready_for_handoff\":true,\"resolved_filters\":[],\"aggregation\":{\"metric\":\"Transaction amount\",\"function\":\"SUM\",\"grain\":\"Per Customer\"}}}"
+        }
+      ],
+      "service_b_payload_sha256": "8da7c6943a9f77a33cb9257c3828a8409543d9413b51408274aec69c274bb0ac",
+      "service_b_provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1"
+    },
+    {
+      "case_id": "b9-10",
+      "scenario": "Confirmed code and amount filters",
+      "intent_text": "Customers with confirmed explanation code 4 or 7 and transaction amount greater than 5000.",
+      "typed_intent": {
+        "scenario_name": "Confirmed code and amount filters",
+        "scenario_type": "CUSTOMER",
+        "transaction_type": null,
+        "transaction_types": null,
+        "explanation_codes": [
+          "4",
+          "7"
+        ],
+        "explanation_codes_by_type": null,
+        "filters": [],
+        "resolved_filters": [],
+        "detection_logic": "Customers with confirmed explanation code 4 or 7 and transaction amount greater than 5000.",
+        "thresholds": [
+          {
+            "field": "TRA_AMT",
+            "operator": ">",
+            "value_from": 5000.0,
+            "value_to": null,
+            "provenance": "stated",
+            "target_scope": "DETAIL",
+            "transaction_type": null,
+            "explanation_codes": null
+          }
+        ],
+        "time_window": null,
+        "baseline_window": null,
+        "customer_segments": null,
+        "exclusions": null,
+        "mapped_keywords": null,
+        "clarification_needed": false,
+        "clarification_questions": [],
+        "aggregation": null,
+        "semantic_conditions": [],
+        "clarifications": [],
+        "applied_defaults": [],
+        "field_provenance": {},
+        "ready_for_handoff": true,
+        "expected_alert_range_min": null,
+        "expected_alert_range_max": null,
+        "anchor_date": null
+      },
+      "confirmed_filters": [
+        {
+          "dimension": "explanation_code",
+          "raw_mention": "confirmed explanation codes 4 or 7",
+          "polarity": "positive",
+          "level": "transaction",
+          "status": "resolved",
+          "options": [],
+          "values": [
+            "4",
+            "7"
+          ],
+          "confidence": null,
+          "provenance": "catalog_resolver",
+          "audit_choice": null,
+          "acknowledged_without_filter": null,
+          "target": {
+            "table": "PIO_TRANSACTIONS",
+            "column": "EXPL_CODE"
+          },
+          "match": "any_of",
+          "polarity_allowed": false
+        }
+      ],
+      "service_b_wire_user_content": "{\n  \"request_type\": \"AML_SCENARIO_GENERATION\",\n  \"intent\": {\n    \"scenario_name\": \"Confirmed code and amount filters\",\n    \"scenario_type\": \"CUSTOMER\",\n    \"transaction_type\": null,\n    \"transaction_types\": null,\n    \"explanation_codes\": [\n      \"4\",\n      \"7\"\n    ],\n    \"explanation_codes_by_type\": null,\n    \"resolved_filters\": [\n      {\n        \"dimension\": \"explanation_code\",\n        \"raw_mention\": \"confirmed explanation codes 4 or 7\",\n        \"polarity\": \"positive\",\n        \"level\": \"transaction\",\n        \"status\": \"resolved\",\n        \"values\": [\n          \"4\",\n          \"7\"\n        ],\n        \"provenance\": \"catalog_resolver\",\n        \"target\": {\n          \"table\": \"PIO_TRANSACTIONS\",\n          \"column\": \"EXPL_CODE\"\n        },\n        \"match\": \"any_of\",\n        \"polarity_allowed\": false\n      }\n    ],\n    \"detection_logic\": \"Customers with confirmed explanation code 4 or 7 and transaction amount greater than 5000.\",\n    \"thresholds\": [\n      {\n        \"field\": \"TRA_AMT\",\n        \"operator\": \">\",\n        \"value_from\": 5000.0,\n        \"value_to\": null,\n        \"provenance\": \"stated\",\n        \"target_scope\": \"DETAIL\",\n        \"transaction_type\": null,\n        \"explanation_codes\": null\n      }\n    ],\n    \"time_window\": null,\n    \"baseline_window\": null,\n    \"customer_segments\": null,\n    \"exclusions\": null,\n    \"mapped_keywords\": null,\n    \"clarification_needed\": false,\n    \"clarification_questions\": [],\n    \"aggregation\": null,\n    \"semantic_conditions\": [],\n    \"clarifications\": [],\n    \"applied_defaults\": [],\n    \"field_provenance\": {},\n    \"ready_for_handoff\": true,\n    \"expected_alert_range_min\": null,\n    \"expected_alert_range_max\": null,\n    \"anchor_date\": null,\n    \"temporal_contract\": {\n      \"kind\": \"NONE\",\n      \"current_lower_boundary\": \"NONE\",\n      \"current_upper_boundary\": \"NONE\",\n      \"baseline_lower_boundary\": \"NONE\",\n      \"baseline_upper_boundary\": \"NONE\",\n      \"baseline_relationship\": \"NONE\"\n    },\n    \"filter_instructions\": \"\"\n  }\n}",
+      "service_a_messages": [
+        {
+          "role": "system",
+          "content": "Generate one Oracle SELECT query implementing the supplied AML scenario. Use only retrieved\nschema metadata and project CUS_NUM. Honor all confirmed filter values exactly. Preserve\ntransaction-code semantics, rolling windows, and non-overlapping baseline windows. Do not\ninvent tables, columns, values, or restrictions. Return SQL only; deterministic code enforces\nsafety and completeness.\n\n### SQL result contract\n- Put every confirmed filter and numeric threshold in an approved `:cs_bN` bind; do not write\n  filter or threshold values as SQL literals. Use distinct bind names for distinct values.\n- A CUSTOMER result must contain one row per CUS_NUM. Do not project transaction-level columns\n  such as TRA_DATE, EXPL_CODE, or TRA_AMT. For aggregate thresholds or per-customer measures,\n  include each required aggregate as an explicit aliased SELECT measure alongside CUS_NUM and\n  group at CUS_NUM only. Project exactly the measures requested by the intent; a threshold\n  predicate does not authorize an extra COUNT, SUM, or other evidence column. A filter-only\n  customer intent returns CUS_NUM only.\n- For an AGGREGATE threshold on SUM(TRA_AMT), include `SUM(TRA_AMT) AS <evidence_alias>` in\n  the final SELECT even when that same SUM appears in HAVING. For a DETAIL threshold, put the\n  row-level predicate in WHERE and do not add an aggregate projection unless separately requested.\n- For an AGGREGATE transaction-count threshold, include `COUNT(*) AS <evidence_alias>` in the\n  final SELECT even when the same count appears in HAVING. For an AGGREGATE distinct-date count\n  threshold, include `COUNT(DISTINCT TRA_DATE) AS <evidence_alias>` in the final SELECT even\n  when that same count appears in HAVING. Keep the alias descriptive and project no other\n  measures unless the intent separately requests them.\n- Follow `temporal_contract` exactly. ROLLING uses\n  `TRA_DATE >= SYSDATE - :cs_bN AND TRA_DATE < SYSDATE`. CALENDAR uses\n  `TRA_DATE >= TRUNC(SYSDATE, 'MM') AND TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)`;\n  calendar boundaries are expressions, not date binds.\n  COMPARISON returns the current `[SYSDATE-current_duration, SYSDATE)` and immediately\n  preceding `[SYSDATE-(current_duration+baseline_duration), SYSDATE-current_offset)` measures;\n  the two windows must be complete, half-open, and non-overlapping. Use a distinct bind token for\n  every temporal placeholder occurrence. For the baseline lower boundary, bind the current and\n  baseline durations separately so their sum equals the required start offset; bind the exclusive\n  baseline upper boundary to the current offset.\n- Do not add HAVING predicates or customer restrictions unless they are explicit in thresholds\n  or semantic conditions. A comparison request asks for the comparison measures; it does not\n  imply that the current measure must exceed the baseline.\n"
+        },
+        {
+          "role": "user",
+          "content": "{\"intent\": {\"scenario_name\": \"Confirmed code and amount filters\", \"scenario_type\": \"CUSTOMER\", \"transaction_type\": null, \"transaction_types\": null, \"explanation_codes\": [\"4\", \"7\"], \"explanation_codes_by_type\": null, \"filters\": [], \"resolved_filters\": [], \"detection_logic\": \"Customers with confirmed explanation code 4 or 7 and transaction amount greater than 5000.\", \"thresholds\": [{\"field\": \"TRA_AMT\", \"operator\": \">\", \"value_from\": 5000.0, \"value_to\": null, \"provenance\": \"stated\", \"target_scope\": \"DETAIL\", \"transaction_type\": null, \"explanation_codes\": null}], \"time_window\": null, \"baseline_window\": null, \"customer_segments\": null, \"exclusions\": null, \"mapped_keywords\": null, \"clarification_needed\": false, \"clarification_questions\": [], \"aggregation\": null, \"semantic_conditions\": [], \"clarifications\": [], \"applied_defaults\": [], \"field_provenance\": {}, \"ready_for_handoff\": true, \"expected_alert_range_min\": null, \"expected_alert_range_max\": null, \"anchor_date\": null}, \"confirmed_filters\": [{\"dimension\": \"explanation_code\", \"raw_mention\": \"confirmed explanation codes 4 or 7\", \"polarity\": \"positive\", \"level\": \"transaction\", \"status\": \"resolved\", \"options\": [], \"values\": [\"4\", \"7\"], \"confidence\": null, \"provenance\": \"catalog_resolver\", \"audit_choice\": null, \"acknowledged_without_filter\": null, \"target\": {\"table\": \"PIO_TRANSACTIONS\", \"column\": \"EXPL_CODE\"}, \"match\": \"any_of\", \"polarity_allowed\": false}], \"experience\": [], \"tables\": [{\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\"}], \"columns\": [{\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"CUS_NUM\", \"data_type\": \"VARCHAR2\"}, {\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"TRA_DATE\", \"data_type\": \"DATE\"}, {\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"EXPL_CODE\", \"data_type\": \"VARCHAR2\"}, {\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"TRA_AMT\", \"data_type\": \"NUMBER\"}]}\nREPAIR FEEDBACK: "
+        }
+      ],
+      "service_a_payload_sha256": "e17d0d1d92ed7515a0d84d8f1c02493d97a6a40bb902f7dbd2cb24634c385d3a",
+      "service_a_provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+      "service_b_model_messages": [
+        {
+          "role": "system",
+          "content": "Generate one Oracle SELECT statement for the validated AML scenario in the user message.\n\nUse only the pinned approved schema context included below. Project CUS_NUM. Apply every confirmed filter exactly. Preserve transaction-code semantics, threshold scopes, and all temporal windows. Use opaque cs_bN bind names for values supplied by the validated intent. Do not invent tables, columns, values, joins, or restrictions. Return SQL only.\n\nThis request is generation-only. Do not request or invoke tools. Do not execute or explain SQL, retrieve customer data or values, critique a candidate, export results, deploy, persist, or perform any database operation. If the pinned schema or intent is insufficient, return no SQL and state that generation is unavailable.\n\n### Result and temporal contract\n- Bind every confirmed filter, numeric threshold, and temporal offset with an opaque `:cs_bN` bind; never encode these values as SQL literals.\n- For CUSTOMER results, project `CUS_NUM` and exactly the explicitly requested, aliased measures; group by `CUS_NUM` only. Never project transaction-level columns or add a COUNT/SUM merely because it appears in a filter. Filter-only customer intents return `CUS_NUM` only.\n- Follow the typed `temporal_contract` supplied with the intent. For a current CALENDAR month, use exactly `TRA_DATE >= TRUNC(SYSDATE, 'MM') AND TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)`; do not substitute opaque date binds. A ROLLING window is half-open `[SYSDATE-duration, SYSDATE)`; a COMPARISON returns separate current and baseline measures over the exact stated half-open boundaries and relationship.\n- A comparison asks for both measures; do not add a `HAVING` predicate or imply that one measure must exceed the other unless the intent explicitly requires it.\n- For transaction-count comparisons, return exactly the two requested measures using conditional `SUM(CASE WHEN date_predicate THEN 1 ELSE 0 END)` or `COUNT(CASE WHEN date_predicate THEN 1 END)`. The date predicates must independently implement the typed temporal boundaries. Use a distinct opaque bind token at each temporal occurrence: current duration, baseline duration, and baseline exclusive offset each retain their own contract value. The baseline lower expression must sum the current and baseline durations; do not infer a comparison filter.\n\n\nPINNED APPROVED SCHEMA METADATA:\n{\"kind\":\"approved_schema_context\",\"objects\":[{\"object\":\"BI_DWH.PIO_TRANSACTIONS\",\"columns\":[{\"name\":\"CUS_NUM\",\"type\":\"VARCHAR2\"},{\"name\":\"TRA_DATE\",\"type\":\"DATE\"},{\"name\":\"EXPL_CODE\",\"type\":\"VARCHAR2\"},{\"name\":\"TRA_AMT\",\"type\":\"NUMBER\"}]}],\"relationships\":[]}"
+        },
+        {
+          "role": "user",
+          "content": "{\"request_type\":\"AML_SCENARIO_GENERATION\",\"intent\":{\"scenario_type\":\"CUSTOMER\",\"thresholds\":[{\"field\":\"TRA_AMT\",\"operator\":\">\",\"target_scope\":\"DETAIL\",\"value_from\":5000.0}],\"explanation_codes\":[\"4\",\"7\"],\"time_window\":null,\"baseline_window\":null,\"temporal_contract\":{\"kind\":\"NONE\",\"current_lower_boundary\":\"NONE\",\"current_upper_boundary\":\"NONE\",\"baseline_lower_boundary\":\"NONE\",\"baseline_upper_boundary\":\"NONE\",\"baseline_relationship\":\"NONE\"},\"ready_for_handoff\":true,\"resolved_filters\":[{\"dimension\":\"explanation_code\",\"polarity\":\"positive\",\"level\":\"transaction\",\"status\":\"resolved\",\"values\":[\"4\",\"7\"],\"target\":{\"table\":\"PIO_TRANSACTIONS\",\"column\":\"EXPL_CODE\"},\"match\":\"any_of\",\"polarity_allowed\":false}],\"aggregation\":null}}"
+        }
+      ],
+      "service_b_payload_sha256": "4300aaf7a520f9ed5aa450a4064abc0899949730bcf4eb9898295cf173ae998d",
+      "service_b_provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1"
+    },
+    {
+      "case_id": "b9-11",
+      "scenario": "Zero activity customer set remains empty",
+      "intent_text": "Customers with activity in the rolling seven-day window; an empty result is valid.",
+      "typed_intent": {
+        "scenario_name": "Zero activity customer set remains empty",
+        "scenario_type": "CUSTOMER",
+        "transaction_type": null,
+        "transaction_types": null,
+        "explanation_codes": null,
+        "explanation_codes_by_type": null,
+        "filters": [],
+        "resolved_filters": [],
+        "detection_logic": "Customers with activity in the rolling seven-day window; an empty result is valid.",
+        "thresholds": [],
+        "time_window": {
+          "unit": "DAYS",
+          "value": 7,
+          "is_rolling": true,
+          "provenance": "stated"
+        },
+        "baseline_window": null,
+        "customer_segments": null,
+        "exclusions": null,
+        "mapped_keywords": null,
+        "clarification_needed": false,
+        "clarification_questions": [],
+        "aggregation": null,
+        "semantic_conditions": [],
+        "clarifications": [],
+        "applied_defaults": [],
+        "field_provenance": {},
+        "ready_for_handoff": true,
+        "expected_alert_range_min": null,
+        "expected_alert_range_max": null,
+        "anchor_date": null
+      },
+      "confirmed_filters": [],
+      "service_b_wire_user_content": "{\n  \"request_type\": \"AML_SCENARIO_GENERATION\",\n  \"intent\": {\n    \"scenario_name\": \"Zero activity customer set remains empty\",\n    \"scenario_type\": \"CUSTOMER\",\n    \"transaction_type\": null,\n    \"transaction_types\": null,\n    \"explanation_codes\": null,\n    \"explanation_codes_by_type\": null,\n    \"resolved_filters\": [],\n    \"detection_logic\": \"Customers with activity in the rolling seven-day window; an empty result is valid.\",\n    \"thresholds\": [],\n    \"time_window\": {\n      \"unit\": \"DAYS\",\n      \"value\": 7,\n      \"is_rolling\": true,\n      \"provenance\": \"stated\"\n    },\n    \"baseline_window\": null,\n    \"customer_segments\": null,\n    \"exclusions\": null,\n    \"mapped_keywords\": null,\n    \"clarification_needed\": false,\n    \"clarification_questions\": [],\n    \"aggregation\": null,\n    \"semantic_conditions\": [],\n    \"clarifications\": [],\n    \"applied_defaults\": [],\n    \"field_provenance\": {},\n    \"ready_for_handoff\": true,\n    \"expected_alert_range_min\": null,\n    \"expected_alert_range_max\": null,\n    \"anchor_date\": null,\n    \"temporal_contract\": {\n      \"kind\": \"ROLLING\",\n      \"current_lower_boundary\": \"SYSDATE_MINUS_DURATION\",\n      \"current_upper_boundary\": \"SYSDATE_EXCLUSIVE\",\n      \"baseline_lower_boundary\": \"NONE\",\n      \"baseline_upper_boundary\": \"NONE\",\n      \"baseline_relationship\": \"NONE\"\n    },\n    \"filter_instructions\": \"\"\n  }\n}",
+      "service_a_messages": [
+        {
+          "role": "system",
+          "content": "Generate one Oracle SELECT query implementing the supplied AML scenario. Use only retrieved\nschema metadata and project CUS_NUM. Honor all confirmed filter values exactly. Preserve\ntransaction-code semantics, rolling windows, and non-overlapping baseline windows. Do not\ninvent tables, columns, values, or restrictions. Return SQL only; deterministic code enforces\nsafety and completeness.\n\n### SQL result contract\n- Put every confirmed filter and numeric threshold in an approved `:cs_bN` bind; do not write\n  filter or threshold values as SQL literals. Use distinct bind names for distinct values.\n- A CUSTOMER result must contain one row per CUS_NUM. Do not project transaction-level columns\n  such as TRA_DATE, EXPL_CODE, or TRA_AMT. For aggregate thresholds or per-customer measures,\n  include each required aggregate as an explicit aliased SELECT measure alongside CUS_NUM and\n  group at CUS_NUM only. Project exactly the measures requested by the intent; a threshold\n  predicate does not authorize an extra COUNT, SUM, or other evidence column. A filter-only\n  customer intent returns CUS_NUM only.\n- For an AGGREGATE threshold on SUM(TRA_AMT), include `SUM(TRA_AMT) AS <evidence_alias>` in\n  the final SELECT even when that same SUM appears in HAVING. For a DETAIL threshold, put the\n  row-level predicate in WHERE and do not add an aggregate projection unless separately requested.\n- For an AGGREGATE transaction-count threshold, include `COUNT(*) AS <evidence_alias>` in the\n  final SELECT even when the same count appears in HAVING. For an AGGREGATE distinct-date count\n  threshold, include `COUNT(DISTINCT TRA_DATE) AS <evidence_alias>` in the final SELECT even\n  when that same count appears in HAVING. Keep the alias descriptive and project no other\n  measures unless the intent separately requests them.\n- Follow `temporal_contract` exactly. ROLLING uses\n  `TRA_DATE >= SYSDATE - :cs_bN AND TRA_DATE < SYSDATE`. CALENDAR uses\n  `TRA_DATE >= TRUNC(SYSDATE, 'MM') AND TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)`;\n  calendar boundaries are expressions, not date binds.\n  COMPARISON returns the current `[SYSDATE-current_duration, SYSDATE)` and immediately\n  preceding `[SYSDATE-(current_duration+baseline_duration), SYSDATE-current_offset)` measures;\n  the two windows must be complete, half-open, and non-overlapping. Use a distinct bind token for\n  every temporal placeholder occurrence. For the baseline lower boundary, bind the current and\n  baseline durations separately so their sum equals the required start offset; bind the exclusive\n  baseline upper boundary to the current offset.\n- Do not add HAVING predicates or customer restrictions unless they are explicit in thresholds\n  or semantic conditions. A comparison request asks for the comparison measures; it does not\n  imply that the current measure must exceed the baseline.\n"
+        },
+        {
+          "role": "user",
+          "content": "{\"intent\": {\"scenario_name\": \"Zero activity customer set remains empty\", \"scenario_type\": \"CUSTOMER\", \"transaction_type\": null, \"transaction_types\": null, \"explanation_codes\": null, \"explanation_codes_by_type\": null, \"filters\": [], \"resolved_filters\": [], \"detection_logic\": \"Customers with activity in the rolling seven-day window; an empty result is valid.\", \"thresholds\": [], \"time_window\": {\"unit\": \"DAYS\", \"value\": 7, \"is_rolling\": true, \"provenance\": \"stated\"}, \"baseline_window\": null, \"customer_segments\": null, \"exclusions\": null, \"mapped_keywords\": null, \"clarification_needed\": false, \"clarification_questions\": [], \"aggregation\": null, \"semantic_conditions\": [], \"clarifications\": [], \"applied_defaults\": [], \"field_provenance\": {}, \"ready_for_handoff\": true, \"expected_alert_range_min\": null, \"expected_alert_range_max\": null, \"anchor_date\": null}, \"confirmed_filters\": [], \"experience\": [], \"tables\": [{\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\"}], \"columns\": [{\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"CUS_NUM\", \"data_type\": \"VARCHAR2\"}, {\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"TRA_DATE\", \"data_type\": \"DATE\"}, {\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"EXPL_CODE\", \"data_type\": \"VARCHAR2\"}, {\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"TRA_AMT\", \"data_type\": \"NUMBER\"}]}\nREPAIR FEEDBACK: "
+        }
+      ],
+      "service_a_payload_sha256": "be39d88788e57ed745b411b60cfb67a0ac3f6867086fa23fdf0ed24cf317b684",
+      "service_a_provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+      "service_b_model_messages": [
+        {
+          "role": "system",
+          "content": "Generate one Oracle SELECT statement for the validated AML scenario in the user message.\n\nUse only the pinned approved schema context included below. Project CUS_NUM. Apply every confirmed filter exactly. Preserve transaction-code semantics, threshold scopes, and all temporal windows. Use opaque cs_bN bind names for values supplied by the validated intent. Do not invent tables, columns, values, joins, or restrictions. Return SQL only.\n\nThis request is generation-only. Do not request or invoke tools. Do not execute or explain SQL, retrieve customer data or values, critique a candidate, export results, deploy, persist, or perform any database operation. If the pinned schema or intent is insufficient, return no SQL and state that generation is unavailable.\n\n### Result and temporal contract\n- Bind every confirmed filter, numeric threshold, and temporal offset with an opaque `:cs_bN` bind; never encode these values as SQL literals.\n- For CUSTOMER results, project `CUS_NUM` and exactly the explicitly requested, aliased measures; group by `CUS_NUM` only. Never project transaction-level columns or add a COUNT/SUM merely because it appears in a filter. Filter-only customer intents return `CUS_NUM` only.\n- Follow the typed `temporal_contract` supplied with the intent. For a current CALENDAR month, use exactly `TRA_DATE >= TRUNC(SYSDATE, 'MM') AND TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)`; do not substitute opaque date binds. A ROLLING window is half-open `[SYSDATE-duration, SYSDATE)`; a COMPARISON returns separate current and baseline measures over the exact stated half-open boundaries and relationship.\n- A comparison asks for both measures; do not add a `HAVING` predicate or imply that one measure must exceed the other unless the intent explicitly requires it.\n- For transaction-count comparisons, return exactly the two requested measures using conditional `SUM(CASE WHEN date_predicate THEN 1 ELSE 0 END)` or `COUNT(CASE WHEN date_predicate THEN 1 END)`. The date predicates must independently implement the typed temporal boundaries. Use a distinct opaque bind token at each temporal occurrence: current duration, baseline duration, and baseline exclusive offset each retain their own contract value. The baseline lower expression must sum the current and baseline durations; do not infer a comparison filter.\n\n\nPINNED APPROVED SCHEMA METADATA:\n{\"kind\":\"approved_schema_context\",\"objects\":[{\"object\":\"BI_DWH.PIO_TRANSACTIONS\",\"columns\":[{\"name\":\"CUS_NUM\",\"type\":\"VARCHAR2\"},{\"name\":\"TRA_DATE\",\"type\":\"DATE\"},{\"name\":\"EXPL_CODE\",\"type\":\"VARCHAR2\"},{\"name\":\"TRA_AMT\",\"type\":\"NUMBER\"}]}],\"relationships\":[]}"
+        },
+        {
+          "role": "user",
+          "content": "{\"request_type\":\"AML_SCENARIO_GENERATION\",\"intent\":{\"scenario_type\":\"CUSTOMER\",\"thresholds\":[],\"explanation_codes\":null,\"time_window\":{\"unit\":\"DAYS\",\"value\":7,\"is_rolling\":true},\"baseline_window\":null,\"temporal_contract\":{\"kind\":\"ROLLING\",\"current_lower_boundary\":\"SYSDATE_MINUS_DURATION\",\"current_upper_boundary\":\"SYSDATE_EXCLUSIVE\",\"baseline_lower_boundary\":\"NONE\",\"baseline_upper_boundary\":\"NONE\",\"baseline_relationship\":\"NONE\"},\"ready_for_handoff\":true,\"resolved_filters\":[],\"aggregation\":null}}"
+        }
+      ],
+      "service_b_payload_sha256": "b0fad4e913d01fb4de079e5f32b87c9a0c1756d30c37bf44a14e51e13ac04777",
+      "service_b_provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1"
+    },
+    {
+      "case_id": "b9-12",
+      "scenario": "Customer average transaction amount",
+      "intent_text": "Calculate the average transaction amount for each customer.",
+      "typed_intent": {
+        "scenario_name": "Customer average transaction amount",
+        "scenario_type": "CUSTOMER",
+        "transaction_type": null,
+        "transaction_types": null,
+        "explanation_codes": null,
+        "explanation_codes_by_type": null,
+        "filters": [],
+        "resolved_filters": [],
+        "detection_logic": "Calculate the average transaction amount for each customer.",
+        "thresholds": [],
+        "time_window": null,
+        "baseline_window": null,
+        "customer_segments": null,
+        "exclusions": null,
+        "mapped_keywords": null,
+        "clarification_needed": false,
+        "clarification_questions": [],
+        "aggregation": {
+          "metric": "Transaction amount",
+          "function": "AVG",
+          "grain": "Per Customer",
+          "provenance": "stated"
+        },
+        "semantic_conditions": [],
+        "clarifications": [],
+        "applied_defaults": [],
+        "field_provenance": {},
+        "ready_for_handoff": true,
+        "expected_alert_range_min": null,
+        "expected_alert_range_max": null,
+        "anchor_date": null
+      },
+      "confirmed_filters": [],
+      "service_b_wire_user_content": "{\n  \"request_type\": \"AML_SCENARIO_GENERATION\",\n  \"intent\": {\n    \"scenario_name\": \"Customer average transaction amount\",\n    \"scenario_type\": \"CUSTOMER\",\n    \"transaction_type\": null,\n    \"transaction_types\": null,\n    \"explanation_codes\": null,\n    \"explanation_codes_by_type\": null,\n    \"resolved_filters\": [],\n    \"detection_logic\": \"Calculate the average transaction amount for each customer.\",\n    \"thresholds\": [],\n    \"time_window\": null,\n    \"baseline_window\": null,\n    \"customer_segments\": null,\n    \"exclusions\": null,\n    \"mapped_keywords\": null,\n    \"clarification_needed\": false,\n    \"clarification_questions\": [],\n    \"aggregation\": {\n      \"metric\": \"Transaction amount\",\n      \"function\": \"AVG\",\n      \"grain\": \"Per Customer\",\n      \"provenance\": \"stated\"\n    },\n    \"semantic_conditions\": [],\n    \"clarifications\": [],\n    \"applied_defaults\": [],\n    \"field_provenance\": {},\n    \"ready_for_handoff\": true,\n    \"expected_alert_range_min\": null,\n    \"expected_alert_range_max\": null,\n    \"anchor_date\": null,\n    \"temporal_contract\": {\n      \"kind\": \"NONE\",\n      \"current_lower_boundary\": \"NONE\",\n      \"current_upper_boundary\": \"NONE\",\n      \"baseline_lower_boundary\": \"NONE\",\n      \"baseline_upper_boundary\": \"NONE\",\n      \"baseline_relationship\": \"NONE\"\n    },\n    \"filter_instructions\": \"\"\n  }\n}",
+      "service_a_messages": [
+        {
+          "role": "system",
+          "content": "Generate one Oracle SELECT query implementing the supplied AML scenario. Use only retrieved\nschema metadata and project CUS_NUM. Honor all confirmed filter values exactly. Preserve\ntransaction-code semantics, rolling windows, and non-overlapping baseline windows. Do not\ninvent tables, columns, values, or restrictions. Return SQL only; deterministic code enforces\nsafety and completeness.\n\n### SQL result contract\n- Put every confirmed filter and numeric threshold in an approved `:cs_bN` bind; do not write\n  filter or threshold values as SQL literals. Use distinct bind names for distinct values.\n- A CUSTOMER result must contain one row per CUS_NUM. Do not project transaction-level columns\n  such as TRA_DATE, EXPL_CODE, or TRA_AMT. For aggregate thresholds or per-customer measures,\n  include each required aggregate as an explicit aliased SELECT measure alongside CUS_NUM and\n  group at CUS_NUM only. Project exactly the measures requested by the intent; a threshold\n  predicate does not authorize an extra COUNT, SUM, or other evidence column. A filter-only\n  customer intent returns CUS_NUM only.\n- For an AGGREGATE threshold on SUM(TRA_AMT), include `SUM(TRA_AMT) AS <evidence_alias>` in\n  the final SELECT even when that same SUM appears in HAVING. For a DETAIL threshold, put the\n  row-level predicate in WHERE and do not add an aggregate projection unless separately requested.\n- For an AGGREGATE transaction-count threshold, include `COUNT(*) AS <evidence_alias>` in the\n  final SELECT even when the same count appears in HAVING. For an AGGREGATE distinct-date count\n  threshold, include `COUNT(DISTINCT TRA_DATE) AS <evidence_alias>` in the final SELECT even\n  when that same count appears in HAVING. Keep the alias descriptive and project no other\n  measures unless the intent separately requests them.\n- Follow `temporal_contract` exactly. ROLLING uses\n  `TRA_DATE >= SYSDATE - :cs_bN AND TRA_DATE < SYSDATE`. CALENDAR uses\n  `TRA_DATE >= TRUNC(SYSDATE, 'MM') AND TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)`;\n  calendar boundaries are expressions, not date binds.\n  COMPARISON returns the current `[SYSDATE-current_duration, SYSDATE)` and immediately\n  preceding `[SYSDATE-(current_duration+baseline_duration), SYSDATE-current_offset)` measures;\n  the two windows must be complete, half-open, and non-overlapping. Use a distinct bind token for\n  every temporal placeholder occurrence. For the baseline lower boundary, bind the current and\n  baseline durations separately so their sum equals the required start offset; bind the exclusive\n  baseline upper boundary to the current offset.\n- Do not add HAVING predicates or customer restrictions unless they are explicit in thresholds\n  or semantic conditions. A comparison request asks for the comparison measures; it does not\n  imply that the current measure must exceed the baseline.\n"
+        },
+        {
+          "role": "user",
+          "content": "{\"intent\": {\"scenario_name\": \"Customer average transaction amount\", \"scenario_type\": \"CUSTOMER\", \"transaction_type\": null, \"transaction_types\": null, \"explanation_codes\": null, \"explanation_codes_by_type\": null, \"filters\": [], \"resolved_filters\": [], \"detection_logic\": \"Calculate the average transaction amount for each customer.\", \"thresholds\": [], \"time_window\": null, \"baseline_window\": null, \"customer_segments\": null, \"exclusions\": null, \"mapped_keywords\": null, \"clarification_needed\": false, \"clarification_questions\": [], \"aggregation\": {\"metric\": \"Transaction amount\", \"function\": \"AVG\", \"grain\": \"Per Customer\", \"provenance\": \"stated\"}, \"semantic_conditions\": [], \"clarifications\": [], \"applied_defaults\": [], \"field_provenance\": {}, \"ready_for_handoff\": true, \"expected_alert_range_min\": null, \"expected_alert_range_max\": null, \"anchor_date\": null}, \"confirmed_filters\": [], \"experience\": [], \"tables\": [{\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\"}], \"columns\": [{\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"CUS_NUM\", \"data_type\": \"VARCHAR2\"}, {\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"TRA_DATE\", \"data_type\": \"DATE\"}, {\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"EXPL_CODE\", \"data_type\": \"VARCHAR2\"}, {\"schema\": \"BI_DWH\", \"table\": \"PIO_TRANSACTIONS\", \"column\": \"TRA_AMT\", \"data_type\": \"NUMBER\"}]}\nREPAIR FEEDBACK: "
+        }
+      ],
+      "service_a_payload_sha256": "08bbd8d304c6cbe93aae4a70bf3858ba1434094f1c63148a2e0a6bed2d432a4c",
+      "service_a_provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+      "service_b_model_messages": [
+        {
+          "role": "system",
+          "content": "Generate one Oracle SELECT statement for the validated AML scenario in the user message.\n\nUse only the pinned approved schema context included below. Project CUS_NUM. Apply every confirmed filter exactly. Preserve transaction-code semantics, threshold scopes, and all temporal windows. Use opaque cs_bN bind names for values supplied by the validated intent. Do not invent tables, columns, values, joins, or restrictions. Return SQL only.\n\nThis request is generation-only. Do not request or invoke tools. Do not execute or explain SQL, retrieve customer data or values, critique a candidate, export results, deploy, persist, or perform any database operation. If the pinned schema or intent is insufficient, return no SQL and state that generation is unavailable.\n\n### Result and temporal contract\n- Bind every confirmed filter, numeric threshold, and temporal offset with an opaque `:cs_bN` bind; never encode these values as SQL literals.\n- For CUSTOMER results, project `CUS_NUM` and exactly the explicitly requested, aliased measures; group by `CUS_NUM` only. Never project transaction-level columns or add a COUNT/SUM merely because it appears in a filter. Filter-only customer intents return `CUS_NUM` only.\n- Follow the typed `temporal_contract` supplied with the intent. For a current CALENDAR month, use exactly `TRA_DATE >= TRUNC(SYSDATE, 'MM') AND TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)`; do not substitute opaque date binds. A ROLLING window is half-open `[SYSDATE-duration, SYSDATE)`; a COMPARISON returns separate current and baseline measures over the exact stated half-open boundaries and relationship.\n- A comparison asks for both measures; do not add a `HAVING` predicate or imply that one measure must exceed the other unless the intent explicitly requires it.\n- For transaction-count comparisons, return exactly the two requested measures using conditional `SUM(CASE WHEN date_predicate THEN 1 ELSE 0 END)` or `COUNT(CASE WHEN date_predicate THEN 1 END)`. The date predicates must independently implement the typed temporal boundaries. Use a distinct opaque bind token at each temporal occurrence: current duration, baseline duration, and baseline exclusive offset each retain their own contract value. The baseline lower expression must sum the current and baseline durations; do not infer a comparison filter.\n\n\nPINNED APPROVED SCHEMA METADATA:\n{\"kind\":\"approved_schema_context\",\"objects\":[{\"object\":\"BI_DWH.PIO_TRANSACTIONS\",\"columns\":[{\"name\":\"CUS_NUM\",\"type\":\"VARCHAR2\"},{\"name\":\"TRA_DATE\",\"type\":\"DATE\"},{\"name\":\"EXPL_CODE\",\"type\":\"VARCHAR2\"},{\"name\":\"TRA_AMT\",\"type\":\"NUMBER\"}]}],\"relationships\":[]}"
+        },
+        {
+          "role": "user",
+          "content": "{\"request_type\":\"AML_SCENARIO_GENERATION\",\"intent\":{\"scenario_type\":\"CUSTOMER\",\"thresholds\":[],\"explanation_codes\":null,\"time_window\":null,\"baseline_window\":null,\"temporal_contract\":{\"kind\":\"NONE\",\"current_lower_boundary\":\"NONE\",\"current_upper_boundary\":\"NONE\",\"baseline_lower_boundary\":\"NONE\",\"baseline_upper_boundary\":\"NONE\",\"baseline_relationship\":\"NONE\"},\"ready_for_handoff\":true,\"resolved_filters\":[],\"aggregation\":{\"metric\":\"Transaction amount\",\"function\":\"AVG\",\"grain\":\"Per Customer\"}}}"
+        }
+      ],
+      "service_b_payload_sha256": "2691c14c9077d639529dc5c07e08c299754b238a8101c58ff38b7a2b8bd1080d",
+      "service_b_provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1"
+    }
+  ]
+}

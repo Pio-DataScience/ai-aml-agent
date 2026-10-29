@@ -1,0 +1,934 @@
+{
+  "scope_sha256": "92ac99431f62033c5c5e27d2ddd0444fa51bc03f8ece4ee7bf1a93eb6246df50",
+  "payload_manifest_sha256": "eed09ba2e077c012aef7c11e6eaee3a2cc1640ab0f9838bf645e7e999fc40be0",
+  "fixtures_sha256": "769c65c37ab262efc4949bf460e42ce09d3ace331c489e8d3320d87ffd4a3a72",
+  "service_a_prompt_sha256": "d749c09eb3506f2d25c90be46ed9577630bbb0c903c0dabc054496ed70c9fd62",
+  "service_b_prompt_sha256": "9b04e80d4ea329f3d64d1ac5d7c7e821e31e7a8edad99bae6450048a1db9dfab",
+  "service_a_provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+  "service_b_provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1",
+  "preflight": {
+    "payload_rebuild_identical": true,
+    "synthetic_only": true,
+    "approved_schema_only": [
+      "BI_DWH.PIO_TRANSACTIONS.CUS_NUM",
+      "BI_DWH.PIO_TRANSACTIONS.TRA_DATE",
+      "BI_DWH.PIO_TRANSACTIONS.EXPL_CODE",
+      "BI_DWH.PIO_TRANSACTIONS.TRA_AMT"
+    ],
+    "tracing_disabled": true,
+    "service_a_dwh_sql_mode": "http",
+    "service_b_generation_only_guard": "enabled in development process",
+    "scope_hash_verified": true,
+    "oracle_or_customer_data_access": false,
+    "service_b_http_listener_available": false,
+    "service_b_invocation": "existing guarded generation-only agent graph invoked directly in-process; HTTP SSE transport was not exercised"
+  },
+  "run_summary": {
+    "cases": 12,
+    "service_a_model_calls": 12,
+    "service_a_candidates_validated": 8,
+    "service_a_candidates_rejected": 4,
+    "service_a_oracle_statements": 0,
+    "service_a_critic_calls": 0,
+    "service_b_model_attempts": 12,
+    "service_b_model_responses": 9,
+    "service_b_provider_connection_errors": 3,
+    "service_b_candidates_validated": 4,
+    "service_b_candidates_rejected": 8,
+    "service_b_tool_or_critic_nodes": 0,
+    "semantic_matches_among_returned_pairs": 1,
+    "returned_pairs": 9,
+    "end_to_end_service_b_http_adapter_exercised": false,
+    "service_a_candidates_valid_after_bind_fix": 2,
+    "service_a_candidates_rejected_after_bind_fix": 10
+  },
+  "offline_fixture_validation": {
+    "cases": 12,
+    "validated": 12,
+    "meaning": "deterministic fixture SQL only; not live model parity"
+  },
+  "results": [
+    {
+      "case_id": "b9-01",
+      "scenario": "Confirmed explanation code 4 in rolling 14 days",
+      "service_a": {
+        "case_id": "b9-01",
+        "scenario": "Confirmed explanation code 4 in rolling 14 days",
+        "provider": "openai",
+        "model": "gpt-5.4-mini",
+        "payload_sha256": "6b5d34e4ef982002a3d5f7906b6f9a91452cae936b53d37a9114bf23c88ce1b5",
+        "sql": "SELECT DISTINCT\n    t.CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS t\nWHERE t.EXPL_CODE = '4'\n  AND t.TRA_DATE >= TRUNC(SYSDATE) - 14\n  AND t.TRA_DATE < TRUNC(SYSDATE);",
+        "candidate_accepted": false,
+        "approved": false,
+        "validation_findings": [
+          {
+            "message": "Rolling 14-day window must use its confirmed date-duration bind"
+          }
+        ],
+        "error": "Generation-only candidate is not execution or deployment approved",
+        "metrics": {
+          "llm_calls": 1,
+          "tool_calls": 1,
+          "critique_attempts": 0,
+          "oracle_statements": 0,
+          "tokens": 644,
+          "elapsed_seconds": 5.588
+        }
+      },
+      "service_b": {
+        "case_id": "b9-01",
+        "scenario": "Confirmed explanation code 4 in rolling 14 days",
+        "provider": "openai|gpt-5-nano|https://api.openai.com/v1",
+        "payload_sha256": "912226c7fd5845463a0075f4bef39d0385a1aaa6fff9a474ec1f7b272d0c93b1",
+        "sql": null,
+        "candidate_accepted": false,
+        "validation_findings": [],
+        "error": "Generation-only SQL failed deterministic validation",
+        "graph_nodes": [
+          "manage_memory",
+          "agent"
+        ],
+        "model_invocations": 0
+      },
+      "model_error_service_b": "APIConnectionError",
+      "semantic_signature_match_a_b": false,
+      "service_a_matches_offline_reference": false,
+      "service_b_matches_offline_reference": false,
+      "service_a_posthoc_validation": {
+        "revalidated": false,
+        "findings": [
+          "SqlPolicyError: Confirmed filter values must use approved bind placeholders"
+        ]
+      },
+      "failure_classification": "bind/temporal contract; provider/network failure",
+      "precise_difference": "A emitted EXPL_CODE = literal 4 and TRA_DATE >= TRUNC(SYSDATE)-14 with a TRUNC upper bound instead of approved code/duration binds and rolling SYSDATE half-open bounds. B returned APIConnectionError; no SQL.",
+      "responsible_component_or_fix": "Service A validator now rejects literal confirmed filters; candidate still needs exact rolling-window SQL. Service B transport failure.",
+      "service_a_posthoc_after_contract_fixes": {
+        "candidate_present": true,
+        "valid": false,
+        "findings": [
+          "SQL bind contract is invalid: Confirmed filter values must use approved bind placeholders",
+          "Rolling 14-day window must use its confirmed date-duration bind",
+          "Rolling day window requires a half-open upper bound at SYSDATE",
+          "SqlPolicyError: Confirmed filter values must use approved bind placeholders"
+        ],
+        "bind_names": []
+      },
+      "service_b_posthoc_after_contract_fixes": {
+        "candidate_present": false,
+        "valid": false,
+        "findings": [],
+        "error": null,
+        "normalizations": []
+      }
+    },
+    {
+      "case_id": "b9-02",
+      "scenario": "Transaction amount threshold",
+      "service_a": {
+        "case_id": "b9-02",
+        "scenario": "Transaction amount threshold",
+        "provider": "openai",
+        "model": "gpt-5.4-mini",
+        "payload_sha256": "117606da946c89af0733a6134acd42758bb4cabb98685a9ef4e71c8372e38cb9",
+        "sql": "SELECT\n    t.CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS t\nWHERE t.TRA_AMT >= 10000\nGROUP BY t.CUS_NUM",
+        "candidate_accepted": true,
+        "approved": false,
+        "validation_findings": [],
+        "error": null,
+        "metrics": {
+          "llm_calls": 1,
+          "tool_calls": 1,
+          "critique_attempts": 0,
+          "oracle_statements": 0,
+          "tokens": 526,
+          "elapsed_seconds": 1.376
+        }
+      },
+      "service_b": {
+        "case_id": "b9-02",
+        "scenario": "Transaction amount threshold",
+        "provider": "openai|gpt-5-nano|https://api.openai.com/v1",
+        "payload_sha256": "32e5899407590439f3fd5c7da27bfbdbaff8481cb25b5994c186100e36169cde",
+        "sql": null,
+        "candidate_accepted": false,
+        "validation_findings": [],
+        "error": "Generation-only SQL failed deterministic validation",
+        "graph_nodes": [
+          "manage_memory",
+          "agent"
+        ],
+        "model_invocations": 0
+      },
+      "model_error_service_b": "APIConnectionError",
+      "semantic_signature_match_a_b": false,
+      "service_a_matches_offline_reference": false,
+      "service_b_matches_offline_reference": false,
+      "service_a_posthoc_validation": {
+        "revalidated": false,
+        "findings": [
+          "SqlPolicyError: Threshold values must use one approved bind placeholder"
+        ]
+      },
+      "failure_classification": "bind/temporal contract; result shape/reference limitation",
+      "precise_difference": "A emitted TRA_AMT >= 10000 as a literal and GROUP BY CUS_NUM; expected filter bind is cs_b1. Grouping returns unique customers while offline reference returns transaction rows. B returned APIConnectionError.",
+      "responsible_component_or_fix": "Service A threshold bind validation fixed. Offline reference shape needs review; no live B SQL.",
+      "service_a_posthoc_after_contract_fixes": {
+        "candidate_present": true,
+        "valid": false,
+        "findings": [
+          "SQL bind contract is invalid: Threshold values must use one approved bind placeholder",
+          "SqlPolicyError: Threshold values must use one approved bind placeholder"
+        ],
+        "bind_names": []
+      },
+      "service_b_posthoc_after_contract_fixes": {
+        "candidate_present": false,
+        "valid": false,
+        "findings": [],
+        "error": null,
+        "normalizations": []
+      }
+    },
+    {
+      "case_id": "b9-03",
+      "scenario": "Customer aggregate amount threshold",
+      "service_a": {
+        "case_id": "b9-03",
+        "scenario": "Customer aggregate amount threshold",
+        "provider": "openai",
+        "model": "gpt-5.4-mini",
+        "payload_sha256": "728562ba64134b2dafb44a90dc40d5f0e08b2ee9646beb6e5545015e730378dd",
+        "sql": "SELECT\n  CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING SUM(TRA_AMT) >= 50000",
+        "candidate_accepted": true,
+        "approved": false,
+        "validation_findings": [],
+        "error": null,
+        "metrics": {
+          "llm_calls": 1,
+          "tool_calls": 1,
+          "critique_attempts": 0,
+          "oracle_statements": 0,
+          "tokens": 558,
+          "elapsed_seconds": 1.844
+        }
+      },
+      "service_b": {
+        "case_id": "b9-03",
+        "scenario": "Customer aggregate amount threshold",
+        "provider": "openai|gpt-5-nano|https://api.openai.com/v1",
+        "payload_sha256": "b64902d8b90ef32e7b7ba40d3a9dc654c97dd59b9fc7402e7ce2d1e9786c8573",
+        "sql": null,
+        "candidate_accepted": false,
+        "validation_findings": [],
+        "error": "Generation-only SQL failed deterministic validation",
+        "graph_nodes": [
+          "manage_memory",
+          "agent"
+        ],
+        "model_invocations": 0
+      },
+      "model_error_service_b": "APIConnectionError",
+      "semantic_signature_match_a_b": false,
+      "service_a_matches_offline_reference": false,
+      "service_b_matches_offline_reference": false,
+      "service_a_posthoc_validation": {
+        "revalidated": false,
+        "findings": [
+          "SqlPolicyError: Threshold values must use one approved bind placeholder"
+        ]
+      },
+      "failure_classification": "bind/temporal contract; result-shape/granularity difference; provider/network failure",
+      "precise_difference": "A emitted HAVING SUM(TRA_AMT) >= 50000 as a literal and projects only CUS_NUM; offline shape projects SUM(TRA_AMT). B returned APIConnectionError.",
+      "responsible_component_or_fix": "Service A threshold bind validation fixed. Aggregate projection contract remains ambiguous.",
+      "service_a_posthoc_after_contract_fixes": {
+        "candidate_present": true,
+        "valid": false,
+        "findings": [
+          "SQL bind contract is invalid: Threshold values must use one approved bind placeholder",
+          "Aggregate intent requires an aliased SUM(TRA_AMT) projection",
+          "SqlPolicyError: Threshold values must use one approved bind placeholder"
+        ],
+        "bind_names": []
+      },
+      "service_b_posthoc_after_contract_fixes": {
+        "candidate_present": false,
+        "valid": false,
+        "findings": [],
+        "error": null,
+        "normalizations": []
+      }
+    },
+    {
+      "case_id": "b9-04",
+      "scenario": "At least five qualifying transactions",
+      "service_a": {
+        "case_id": "b9-04",
+        "scenario": "At least five qualifying transactions",
+        "provider": "openai",
+        "model": "gpt-5.4-mini",
+        "payload_sha256": "ebd40c56d64ad6b7c48812da0578db7b6f08dd4a325736a3f9636124b148adeb",
+        "sql": "SELECT\n    CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING COUNT(*) >= 5",
+        "candidate_accepted": true,
+        "approved": false,
+        "validation_findings": [],
+        "error": null,
+        "metrics": {
+          "llm_calls": 1,
+          "tool_calls": 1,
+          "critique_attempts": 0,
+          "oracle_statements": 0,
+          "tokens": 547,
+          "elapsed_seconds": 1.321
+        }
+      },
+      "service_b": {
+        "case_id": "b9-04",
+        "scenario": "At least five qualifying transactions",
+        "provider": "openai|gpt-5-nano|https://api.openai.com/v1",
+        "payload_sha256": "a8e3c271dc50e6b6a3ce81753dbddec3d979813ae7441c7f97fd6cb2fa613e53",
+        "sql": "SELECT\n  CUS_NUM,\n  COUNT(*) AS transaction_count\nFROM\n  BI_DWH.PIO_TRANSACTIONS\nGROUP BY\n  CUS_NUM\nHAVING\n  COUNT(*) >= :cs_b1;",
+        "candidate_accepted": true,
+        "validation_findings": [],
+        "error": null,
+        "graph_nodes": [
+          "manage_memory",
+          "agent"
+        ],
+        "model_invocations": 1
+      },
+      "model_error_service_b": null,
+      "semantic_signature_match_a_b": false,
+      "service_a_matches_offline_reference": false,
+      "service_b_matches_offline_reference": false,
+      "service_a_posthoc_validation": {
+        "revalidated": false,
+        "findings": [
+          "SqlPolicyError: Threshold values must use one approved bind placeholder"
+        ]
+      },
+      "failure_classification": "bind/temporal contract; result-shape/granularity difference",
+      "precise_difference": "A used literal COUNT(*) >= 5 and returned only CUS_NUM. B used :cs_b1 and also projected COUNT(*) AS transaction_count.",
+      "responsible_component_or_fix": "Service A literal-threshold acceptance fixed. Shape difference reflects missing A aggregate projection versus fixture/B shape.",
+      "service_a_posthoc_after_contract_fixes": {
+        "candidate_present": true,
+        "valid": false,
+        "findings": [
+          "SQL bind contract is invalid: Threshold values must use one approved bind placeholder",
+          "Aggregate intent requires an aliased COUNT(*) projection",
+          "SqlPolicyError: Threshold values must use one approved bind placeholder"
+        ],
+        "bind_names": []
+      },
+      "service_b_posthoc_after_contract_fixes": {
+        "candidate_present": true,
+        "valid": true,
+        "findings": [],
+        "error": null,
+        "normalizations": [],
+        "bind_names": [
+          "cs_b1"
+        ],
+        "normalized_sql": "SELECT\n  CUS_NUM,\n  COUNT(*) AS transaction_count\nFROM\n  BI_DWH.PIO_TRANSACTIONS\nGROUP BY\n  CUS_NUM\nHAVING\n  COUNT(*) >= :cs_b1;"
+      }
+    },
+    {
+      "case_id": "b9-05",
+      "scenario": "At least three distinct transaction dates",
+      "service_a": {
+        "case_id": "b9-05",
+        "scenario": "At least three distinct transaction dates",
+        "provider": "openai",
+        "model": "gpt-5.4-mini",
+        "payload_sha256": "612c3fd570c570ba4654b9258446ecf22568ec279a66c3766b43ea158adceb56",
+        "sql": "SELECT\n    t.CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS t\nGROUP BY t.CUS_NUM\nHAVING COUNT(DISTINCT t.TRA_DATE) >= 3",
+        "candidate_accepted": true,
+        "approved": false,
+        "validation_findings": [],
+        "error": null,
+        "metrics": {
+          "llm_calls": 1,
+          "tool_calls": 1,
+          "critique_attempts": 0,
+          "oracle_statements": 0,
+          "tokens": 565,
+          "elapsed_seconds": 1.328
+        }
+      },
+      "service_b": {
+        "case_id": "b9-05",
+        "scenario": "At least three distinct transaction dates",
+        "provider": "openai|gpt-5-nano|https://api.openai.com/v1",
+        "payload_sha256": "7e44c04fcd01e711bb84041b72a3eb7b37ca3101f841c7f9cc82e02975549b04",
+        "sql": "SELECT\n  CUS_NUM,\n  COUNT(DISTINCT TRA_DATE) AS distinct_transaction_dates\nFROM\n  BI_DWH.PIO_TRANSACTIONS\nGROUP BY\n  CUS_NUM\nHAVING COUNT(DISTINCT TRA_DATE) >= :cs_b1;",
+        "candidate_accepted": true,
+        "validation_findings": [],
+        "error": null,
+        "graph_nodes": [
+          "manage_memory",
+          "agent"
+        ],
+        "model_invocations": 1
+      },
+      "model_error_service_b": null,
+      "semantic_signature_match_a_b": false,
+      "service_a_matches_offline_reference": false,
+      "service_b_matches_offline_reference": false,
+      "service_a_posthoc_validation": {
+        "revalidated": false,
+        "findings": [
+          "SqlPolicyError: Threshold values must use one approved bind placeholder"
+        ]
+      },
+      "failure_classification": "bind/temporal contract; result-shape/granularity difference",
+      "precise_difference": "A used literal COUNT(DISTINCT TRA_DATE) >= 3 and returned only CUS_NUM. B bound the threshold and projected distinct_transaction_dates.",
+      "responsible_component_or_fix": "Service A literal-threshold acceptance fixed. Shape difference remains pending an explicit aggregate-output contract.",
+      "service_a_posthoc_after_contract_fixes": {
+        "candidate_present": true,
+        "valid": false,
+        "findings": [
+          "SQL bind contract is invalid: Threshold values must use one approved bind placeholder",
+          "Aggregate intent requires an aliased COUNT_DISTINCT(TRA_DATE) projection",
+          "SqlPolicyError: Threshold values must use one approved bind placeholder"
+        ],
+        "bind_names": []
+      },
+      "service_b_posthoc_after_contract_fixes": {
+        "candidate_present": true,
+        "valid": true,
+        "findings": [],
+        "error": null,
+        "normalizations": [],
+        "bind_names": [
+          "cs_b1"
+        ],
+        "normalized_sql": "SELECT\n  CUS_NUM,\n  COUNT(DISTINCT TRA_DATE) AS distinct_transaction_dates\nFROM\n  BI_DWH.PIO_TRANSACTIONS\nGROUP BY\n  CUS_NUM\nHAVING COUNT(DISTINCT TRA_DATE) >= :cs_b1;"
+      }
+    },
+    {
+      "case_id": "b9-06",
+      "scenario": "Rolling 30 day transaction window",
+      "service_a": {
+        "case_id": "b9-06",
+        "scenario": "Rolling 30 day transaction window",
+        "provider": "openai",
+        "model": "gpt-5.4-mini",
+        "payload_sha256": "4c72ea75922ea3c2a82a625ebc41e347691251474ba45024037a0dcd3dd7e05f",
+        "sql": "SELECT\n    t.CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS t\nWHERE t.TRA_DATE >= TRUNC(SYSDATE) - 30\nGROUP BY t.CUS_NUM",
+        "candidate_accepted": false,
+        "approved": false,
+        "validation_findings": [
+          {
+            "message": "Rolling 30-day window must use its confirmed date-duration bind"
+          }
+        ],
+        "error": "Generation-only candidate is not execution or deployment approved",
+        "metrics": {
+          "llm_calls": 1,
+          "tool_calls": 1,
+          "critique_attempts": 0,
+          "oracle_statements": 0,
+          "tokens": 505,
+          "elapsed_seconds": 1.218
+        }
+      },
+      "service_b": {
+        "case_id": "b9-06",
+        "scenario": "Rolling 30 day transaction window",
+        "provider": "openai|gpt-5-nano|https://api.openai.com/v1",
+        "payload_sha256": "e90115a020bc13cb9b84b66c7e8c2990f84b38f17b021483c4f880be49d359a5",
+        "sql": "SELECT DISTINCT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_DATE >= SYSDATE - :cs_b1;",
+        "candidate_accepted": false,
+        "validation_findings": [
+          "Rolling 30-day window must use a date >= SYSDATE - 30"
+        ],
+        "error": "Generation-only SQL failed deterministic validation",
+        "graph_nodes": [
+          "manage_memory",
+          "agent"
+        ],
+        "model_invocations": 1
+      },
+      "model_error_service_b": null,
+      "semantic_signature_match_a_b": false,
+      "service_a_matches_offline_reference": false,
+      "service_b_matches_offline_reference": false,
+      "service_a_posthoc_validation": {
+        "revalidated": false,
+        "findings": [
+          "Rolling 30-day window must use its confirmed date-duration bind"
+        ],
+        "binds": {}
+      },
+      "failure_classification": "SQL semantic error; bind/temporal contract; validator false positive",
+      "precise_difference": "A used TRA_DATE >= TRUNC(SYSDATE)-30 without an upper bound. B used TRA_DATE >= SYSDATE-:cs_b1 (no upper bound); its rolling checker rejected the bind form.",
+      "responsible_component_or_fix": "A correctly fails; B SQL is incomplete despite the checker also failing to reconcile its valid lower-bound bind.",
+      "service_a_posthoc_after_contract_fixes": {
+        "candidate_present": true,
+        "valid": false,
+        "findings": [
+          "Rolling 30-day window must use its confirmed date-duration bind",
+          "Rolling day window requires a half-open upper bound at SYSDATE"
+        ],
+        "bind_names": []
+      },
+      "service_b_posthoc_after_contract_fixes": {
+        "candidate_present": true,
+        "valid": true,
+        "findings": [],
+        "error": null,
+        "normalizations": [
+          "Added the missing strict SYSDATE upper boundary to the confirmed rolling window"
+        ],
+        "bind_names": [
+          "cs_b1"
+        ],
+        "normalized_sql": "SELECT DISTINCT CUS_NUM FROM BI_DWH.PIO_TRANSACTIONS WHERE TRA_DATE >= SYSDATE - :cs_b1 AND TRA_DATE < SYSDATE"
+      }
+    },
+    {
+      "case_id": "b9-07",
+      "scenario": "Current calendar month activity",
+      "service_a": {
+        "case_id": "b9-07",
+        "scenario": "Current calendar month activity",
+        "provider": "openai",
+        "model": "gpt-5.4-mini",
+        "payload_sha256": "6cd8b88b834529ef659fd9648d25cc6ea46f079a7cb68a0d6b2d33c59762443b",
+        "sql": "SELECT\n    t.CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS t\nWHERE t.TRA_DATE >= TRUNC(SYSDATE, 'MM')\n  AND t.TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)\nGROUP BY t.CUS_NUM",
+        "candidate_accepted": true,
+        "approved": false,
+        "validation_findings": [],
+        "error": null,
+        "metrics": {
+          "llm_calls": 1,
+          "tool_calls": 1,
+          "critique_attempts": 0,
+          "oracle_statements": 0,
+          "tokens": 522,
+          "elapsed_seconds": 1.325
+        }
+      },
+      "service_b": {
+        "case_id": "b9-07",
+        "scenario": "Current calendar month activity",
+        "provider": "openai|gpt-5-nano|https://api.openai.com/v1",
+        "payload_sha256": "8b0ad2ab6f3788ebf5d27d0aaa92fffd780c67b48e5963be82bd1d460ce0b978",
+        "sql": "SELECT DISTINCT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_DATE >= :cs_b1\n  AND TRA_DATE < :cs_b2;",
+        "candidate_accepted": false,
+        "validation_findings": [
+          "CloudSafeError: Current calendar-month boundaries are missing"
+        ],
+        "error": "Generation-only SQL failed deterministic validation",
+        "graph_nodes": [
+          "manage_memory",
+          "agent"
+        ],
+        "model_invocations": 1
+      },
+      "model_error_service_b": null,
+      "semantic_signature_match_a_b": false,
+      "service_a_matches_offline_reference": false,
+      "service_b_matches_offline_reference": false,
+      "service_a_posthoc_validation": {
+        "revalidated": true,
+        "findings": [],
+        "binds": {}
+      },
+      "failure_classification": "bind/temporal contract",
+      "precise_difference": "A used verified current-month bounds TRUNC(SYSDATE,'MM') through ADD_MONTHS(...,1). B used two undeducible date binds; no typed intent values establish they are the current month.",
+      "responsible_component_or_fix": "B guard fails closed correctly; no additional schema is needed.",
+      "service_a_posthoc_after_contract_fixes": {
+        "candidate_present": true,
+        "valid": true,
+        "findings": [],
+        "bind_names": []
+      },
+      "service_b_posthoc_after_contract_fixes": {
+        "candidate_present": true,
+        "valid": false,
+        "findings": [],
+        "error": "CloudSafeError: Current calendar-month boundaries are missing",
+        "normalizations": []
+      }
+    },
+    {
+      "case_id": "b9-08",
+      "scenario": "Compare recent and preceding 30 day counts",
+      "service_a": {
+        "case_id": "b9-08",
+        "scenario": "Compare recent and preceding 30 day counts",
+        "provider": "openai",
+        "model": "gpt-5.4-mini",
+        "payload_sha256": "b708ef148912bbdc8ecc5a08704b0612442a0ab5fc4eaed09b43659bf4a5f3e1",
+        "sql": "SELECT\n    t.CUS_NUM,\n    COUNT(CASE\n            WHEN t.TRA_DATE >= TRUNC(SYSDATE) - 30\n             AND t.TRA_DATE <  TRUNC(SYSDATE)\n            THEN 1\n        END) AS RECENT_30D_TXN_CNT,\n    COUNT(CASE\n            WHEN t.TRA_DATE >= TRUNC(SYSDATE) - 60\n             AND t.TRA_DATE <  TRUNC(SYSDATE) - 30\n            THEN 1\n        END) AS PRECEDING_30D_TXN_CNT\nFROM BI_DWH.PIO_TRANSACTIONS t\nGROUP BY t.CUS_NUM\nHAVING COUNT(CASE\n            WHEN t.TRA_DATE >= TRUNC(SYSDATE) - 30\n             AND t.TRA_DATE <  TRUNC(SYSDATE)\n            THEN 1\n        END) >\n       COUNT(CASE\n            WHEN t.TRA_DATE >= TRUNC(SYSDATE) - 60\n             AND t.TRA_DATE <  TRUNC(SYSDATE) - 30\n            THEN 1\n        END)",
+        "candidate_accepted": false,
+        "approved": false,
+        "validation_findings": [
+          {
+            "message": "Recent baseline-comparison window is missing"
+          }
+        ],
+        "error": "Generation-only candidate is not execution or deployment approved",
+        "metrics": {
+          "llm_calls": 1,
+          "tool_calls": 1,
+          "critique_attempts": 0,
+          "oracle_statements": 0,
+          "tokens": 783,
+          "elapsed_seconds": 1.738
+        }
+      },
+      "service_b": {
+        "case_id": "b9-08",
+        "scenario": "Compare recent and preceding 30 day counts",
+        "provider": "openai|gpt-5-nano|https://api.openai.com/v1",
+        "payload_sha256": "656c3163c1aad238cbd949c7b86304e0c319c22de1330d79cd858f651fcc675b",
+        "sql": "SELECT t.CUS_NUM,\n       t.current_count,\n       t.baseline_count,\n       (t.current_count - t.baseline_count) AS count_diff\nFROM (\n  SELECT CUS_NUM,\n         COUNT(CASE WHEN TRA_DATE >= TRUNC(SYSDATE) - :cs_b1 + 1 AND TRA_DATE < TRUNC(SYSDATE) + 1 THEN 1 END) AS current_count,\n         COUNT(CASE WHEN TRA_DATE >= TRUNC(SYSDATE) - (:cs_b1 + :cs_b2) AND TRA_DATE < TRUNC(SYSDATE) - :cs_b2 THEN 1 END) AS baseline_count\n  FROM BI_DWH.PIO_TRANSACTIONS\n  GROUP BY CUS_NUM\n) t\nORDER BY t.CUS_NUM;",
+        "candidate_accepted": false,
+        "validation_findings": [
+          "CloudSafeError: Cloud-Safe SQL literals are prohibited; use approved binds"
+        ],
+        "error": "Generation-only SQL failed deterministic validation",
+        "graph_nodes": [
+          "manage_memory",
+          "agent"
+        ],
+        "model_invocations": 1
+      },
+      "model_error_service_b": null,
+      "semantic_signature_match_a_b": false,
+      "service_a_matches_offline_reference": false,
+      "service_b_matches_offline_reference": false,
+      "service_a_posthoc_validation": {
+        "revalidated": false,
+        "findings": [
+          "SqlPolicyError: Recent baseline-comparison window is missing"
+        ]
+      },
+      "failure_classification": "SQL semantic error; bind/temporal contract",
+      "precise_difference": "A used TRUNC day boundaries and literal arithmetic rather than rolling bound offsets. B used shifted TRUNC date arithmetic, repeated bind identities, and CASE literals; guard rejected the literals.",
+      "responsible_component_or_fix": "Both generated candidates are invalid for the stated non-overlapping rolling windows; A validator rejected.",
+      "service_a_posthoc_after_contract_fixes": {
+        "candidate_present": true,
+        "valid": false,
+        "findings": [
+          "SQL bind contract is invalid: Recent baseline-comparison window is missing",
+          "Rolling 30-day window must use its confirmed date-duration bind",
+          "Recent and baseline windows must be complete half-open ranges: SYSDATE - 30 to SYSDATE and SYSDATE - 60 to before SYSDATE - 30",
+          "Aggregate intent requires an aliased COUNT(*) projection",
+          "SqlPolicyError: Recent baseline-comparison window is missing"
+        ],
+        "bind_names": []
+      },
+      "service_b_posthoc_after_contract_fixes": {
+        "candidate_present": true,
+        "valid": false,
+        "findings": [],
+        "error": "CloudSafeError: Cloud-Safe SQL literals are prohibited; use approved binds",
+        "normalizations": []
+      }
+    },
+    {
+      "case_id": "b9-09",
+      "scenario": "Customer-level repeated amount aggregation",
+      "service_a": {
+        "case_id": "b9-09",
+        "scenario": "Customer-level repeated amount aggregation",
+        "provider": "openai",
+        "model": "gpt-5.4-mini",
+        "payload_sha256": "1ba7251eea2e02d15611f569435c8ea3a793fbb95640c4fe41242cb56c3a795d",
+        "sql": "SELECT\n    CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING SUM(TRA_AMT) > 25000",
+        "candidate_accepted": true,
+        "approved": false,
+        "validation_findings": [],
+        "error": null,
+        "metrics": {
+          "llm_calls": 1,
+          "tool_calls": 1,
+          "critique_attempts": 0,
+          "oracle_statements": 0,
+          "tokens": 559,
+          "elapsed_seconds": 1.014
+        }
+      },
+      "service_b": {
+        "case_id": "b9-09",
+        "scenario": "Customer-level repeated amount aggregation",
+        "provider": "openai|gpt-5-nano|https://api.openai.com/v1",
+        "payload_sha256": "a72420553bbaee3ce24b74e680c4d850d4187045209feea1249adcc705bf7dff",
+        "sql": "SELECT\n  CUS_NUM,\n  SUM(TRA_AMT) AS total_transaction_amount\nFROM\n  BI_DWH.PIO_TRANSACTIONS\nGROUP BY\n  CUS_NUM\nHAVING\n  SUM(TRA_AMT) > :cs_b1;",
+        "candidate_accepted": true,
+        "validation_findings": [],
+        "error": null,
+        "graph_nodes": [
+          "manage_memory",
+          "agent"
+        ],
+        "model_invocations": 1
+      },
+      "model_error_service_b": null,
+      "semantic_signature_match_a_b": false,
+      "service_a_matches_offline_reference": true,
+      "service_b_matches_offline_reference": false,
+      "service_a_posthoc_validation": {
+        "revalidated": false,
+        "findings": [
+          "SqlPolicyError: Threshold values must use one approved bind placeholder"
+        ]
+      },
+      "failure_classification": "bind/temporal contract; result-shape/granularity difference",
+      "precise_difference": "A used literal HAVING SUM(TRA_AMT)>25000 and returned CUS_NUM only. B bound the threshold and also projected SUM(TRA_AMT).",
+      "responsible_component_or_fix": "Service A literal-threshold acceptance fixed. Whether the measure must be projected is not defined consistently by the typed contract.",
+      "service_a_posthoc_after_contract_fixes": {
+        "candidate_present": true,
+        "valid": false,
+        "findings": [
+          "SQL bind contract is invalid: Threshold values must use one approved bind placeholder",
+          "Aggregate intent requires an aliased SUM(TRA_AMT) projection",
+          "SqlPolicyError: Threshold values must use one approved bind placeholder"
+        ],
+        "bind_names": []
+      },
+      "service_b_posthoc_after_contract_fixes": {
+        "candidate_present": true,
+        "valid": true,
+        "findings": [],
+        "error": null,
+        "normalizations": [],
+        "bind_names": [
+          "cs_b1"
+        ],
+        "normalized_sql": "SELECT\n  CUS_NUM,\n  SUM(TRA_AMT) AS total_transaction_amount\nFROM\n  BI_DWH.PIO_TRANSACTIONS\nGROUP BY\n  CUS_NUM\nHAVING\n  SUM(TRA_AMT) > :cs_b1;"
+      }
+    },
+    {
+      "case_id": "b9-10",
+      "scenario": "Confirmed code and amount filters",
+      "service_a": {
+        "case_id": "b9-10",
+        "scenario": "Confirmed code and amount filters",
+        "provider": "openai",
+        "model": "gpt-5.4-mini",
+        "payload_sha256": "98e6bedc43b79b15607321199147a495a362a135251b8af64393f55ecd97aa37",
+        "sql": "SELECT\n    CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE EXPL_CODE IN ('4', '7')\n  AND TRA_AMT > 5000\nGROUP BY CUS_NUM",
+        "candidate_accepted": true,
+        "approved": false,
+        "validation_findings": [],
+        "error": null,
+        "metrics": {
+          "llm_calls": 1,
+          "tool_calls": 1,
+          "critique_attempts": 0,
+          "oracle_statements": 0,
+          "tokens": 672,
+          "elapsed_seconds": 1.331
+        }
+      },
+      "service_b": {
+        "case_id": "b9-10",
+        "scenario": "Confirmed code and amount filters",
+        "provider": "openai|gpt-5-nano|https://api.openai.com/v1",
+        "payload_sha256": "fba2cacd65c6a92f3758ca615dbb0af93453da30daa0ce289f59e3c2c6c132bb",
+        "sql": "SELECT CUS_NUM, TRA_DATE, EXPL_CODE, TRA_AMT\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_AMT > :cs_b1\n  AND EXPL_CODE IN (:cs_b2, :cs_b3)",
+        "candidate_accepted": false,
+        "validation_findings": [
+          "Explicit explanation codes missing from SQL: 4, 7"
+        ],
+        "error": "Generation-only SQL failed deterministic validation",
+        "graph_nodes": [
+          "manage_memory",
+          "agent"
+        ],
+        "model_invocations": 1
+      },
+      "model_error_service_b": null,
+      "semantic_signature_match_a_b": false,
+      "service_a_matches_offline_reference": false,
+      "service_b_matches_offline_reference": false,
+      "service_a_posthoc_validation": {
+        "revalidated": false,
+        "findings": [
+          "SqlPolicyError: Confirmed filter values must use approved bind placeholders"
+        ]
+      },
+      "failure_classification": "bind/temporal contract; result-shape/granularity error; validator false positive",
+      "precise_difference": "A used literal EXPL_CODE values 4/7 and amount 5000. B used binds but projected CUS_NUM, TRA_DATE, EXPL_CODE, TRA_AMT at transaction grain; its follow-up code checker nevertheless reported codes missing.",
+      "responsible_component_or_fix": "A literal-filter acceptance fixed. B has an evidenced bind-aware validator false positive and a customer-versus-transaction shape mismatch.",
+      "service_a_posthoc_after_contract_fixes": {
+        "candidate_present": true,
+        "valid": false,
+        "findings": [
+          "SQL bind contract is invalid: Confirmed filter values must use approved bind placeholders",
+          "SqlPolicyError: Confirmed filter values must use approved bind placeholders"
+        ],
+        "bind_names": []
+      },
+      "service_b_posthoc_after_contract_fixes": {
+        "candidate_present": true,
+        "valid": true,
+        "findings": [],
+        "error": null,
+        "normalizations": [],
+        "bind_names": [
+          "cs_b1",
+          "cs_b2",
+          "cs_b3"
+        ],
+        "normalized_sql": "SELECT CUS_NUM, TRA_DATE, EXPL_CODE, TRA_AMT\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_AMT > :cs_b1\n  AND EXPL_CODE IN (:cs_b2, :cs_b3)"
+      }
+    },
+    {
+      "case_id": "b9-11",
+      "scenario": "Zero activity customer set remains empty",
+      "service_a": {
+        "case_id": "b9-11",
+        "scenario": "Zero activity customer set remains empty",
+        "provider": "openai",
+        "model": "gpt-5.4-mini",
+        "payload_sha256": "c17abe20cba206f9f9298ac3c7efa32a14630496a5fc720f51d2774f90f52efe",
+        "sql": "SELECT\n    t.CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS t\nWHERE t.TRA_DATE >= TRUNC(SYSDATE) - 7\nGROUP BY t.CUS_NUM\nHAVING COUNT(*) > 0",
+        "candidate_accepted": false,
+        "approved": false,
+        "validation_findings": [
+          {
+            "message": "Rolling 7-day window must use its confirmed date-duration bind"
+          }
+        ],
+        "error": "Generation-only candidate is not execution or deployment approved",
+        "metrics": {
+          "llm_calls": 1,
+          "tool_calls": 1,
+          "critique_attempts": 0,
+          "oracle_statements": 0,
+          "tokens": 518,
+          "elapsed_seconds": 1.42
+        }
+      },
+      "service_b": {
+        "case_id": "b9-11",
+        "scenario": "Zero activity customer set remains empty",
+        "provider": "openai|gpt-5-nano|https://api.openai.com/v1",
+        "payload_sha256": "74144ebac8cbfee12cd0c373162b4f06feea370edfbbabf6f04b5d8bee5d034e",
+        "sql": "SELECT CUS_NUM, TRA_DATE, EXPL_CODE, TRA_AMT\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_DATE >= :cs_b1\n  AND TRA_DATE <= :cs_b2;",
+        "candidate_accepted": false,
+        "validation_findings": [
+          "CloudSafeError: Rolling temporal predicate is missing or unverifiable"
+        ],
+        "error": "Generation-only SQL failed deterministic validation",
+        "graph_nodes": [
+          "manage_memory",
+          "agent"
+        ],
+        "model_invocations": 1
+      },
+      "model_error_service_b": null,
+      "semantic_signature_match_a_b": false,
+      "service_a_matches_offline_reference": false,
+      "service_b_matches_offline_reference": false,
+      "service_a_posthoc_validation": {
+        "revalidated": false,
+        "findings": [
+          "Rolling 7-day window must use its confirmed date-duration bind"
+        ],
+        "binds": {}
+      },
+      "failure_classification": "SQL semantic error; bind/temporal contract",
+      "precise_difference": "A used a TRUNC-based lower bound and no upper bound. B used absolute date binds with an inclusive <= upper bound; those values/boundary are not established by intent.",
+      "responsible_component_or_fix": "Both fail the rolling half-open window contract.",
+      "service_a_posthoc_after_contract_fixes": {
+        "candidate_present": true,
+        "valid": false,
+        "findings": [
+          "Rolling 7-day window must use its confirmed date-duration bind",
+          "Rolling day window requires a half-open upper bound at SYSDATE"
+        ],
+        "bind_names": []
+      },
+      "service_b_posthoc_after_contract_fixes": {
+        "candidate_present": true,
+        "valid": false,
+        "findings": [],
+        "error": "CloudSafeError: Rolling temporal predicate is missing or unverifiable",
+        "normalizations": []
+      }
+    },
+    {
+      "case_id": "b9-12",
+      "scenario": "Customer average transaction amount",
+      "service_a": {
+        "case_id": "b9-12",
+        "scenario": "Customer average transaction amount",
+        "provider": "openai",
+        "model": "gpt-5.4-mini",
+        "payload_sha256": "36f6dc47c801eca1a9b3f4d8cbe0702375642322b44d09a0ab5be120ae680294",
+        "sql": "SELECT\n    t.CUS_NUM,\n    AVG(t.TRA_AMT) AS AVG_TRA_AMT\nFROM BI_DWH.PIO_TRANSACTIONS t\nGROUP BY\n    t.CUS_NUM",
+        "candidate_accepted": true,
+        "approved": false,
+        "validation_findings": [],
+        "error": null,
+        "metrics": {
+          "llm_calls": 1,
+          "tool_calls": 1,
+          "critique_attempts": 0,
+          "oracle_statements": 0,
+          "tokens": 500,
+          "elapsed_seconds": 1.104
+        }
+      },
+      "service_b": {
+        "case_id": "b9-12",
+        "scenario": "Customer average transaction amount",
+        "provider": "openai|gpt-5-nano|https://api.openai.com/v1",
+        "payload_sha256": "55c79447b9e926da9c268731272f31230e79ef344d81b5b0c4525b9829b0d7c1",
+        "sql": "SELECT CUS_NUM, AVG(TRA_AMT) AS AVG_TRA_AMT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM;",
+        "candidate_accepted": true,
+        "validation_findings": [],
+        "error": null,
+        "graph_nodes": [
+          "manage_memory",
+          "agent"
+        ],
+        "model_invocations": 1
+      },
+      "model_error_service_b": null,
+      "semantic_signature_match_a_b": true,
+      "service_a_matches_offline_reference": false,
+      "service_b_matches_offline_reference": false,
+      "service_a_posthoc_validation": {
+        "revalidated": true,
+        "findings": [],
+        "binds": {}
+      },
+      "failure_classification": "no failure",
+      "precise_difference": "A and B both returned AVG(TRA_AMT) grouped by CUS_NUM with the same semantic signature.",
+      "responsible_component_or_fix": "No defect indicated.",
+      "service_a_posthoc_after_contract_fixes": {
+        "candidate_present": true,
+        "valid": true,
+        "findings": [],
+        "bind_names": []
+      },
+      "service_b_posthoc_after_contract_fixes": {
+        "candidate_present": true,
+        "valid": true,
+        "findings": [],
+        "error": null,
+        "normalizations": [],
+        "bind_names": [],
+        "normalized_sql": "SELECT CUS_NUM, AVG(TRA_AMT) AS AVG_TRA_AMT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM;"
+      }
+    }
+  ],
+  "posthoc_validation_after_contract_fixes": {
+    "cases": 12,
+    "service_a_valid": 2,
+    "service_a_rejected_or_missing": 10,
+    "service_b_sql_candidates": 9,
+    "service_b_valid": 6,
+    "service_b_rejected": 3,
+    "service_b_temporal_completion": 1
+  },
+  "current_offline_fixture_sha256": "1f23dbe7ae51eb3dfc0d10a07926b29122369672acefc2aa2592254acda48f9e",
+  "current_development_scope_sha256": "3b89033d633c90bf8862ae23dd7f65041c83fbcc62d9a97c488bbfb1ab128150"
+}

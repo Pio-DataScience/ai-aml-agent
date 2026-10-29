@@ -272,14 +272,20 @@ def test_contract_checks_projection_codes_and_rolling_baseline():
             }
         ],
     )
-    sql = "SELECT CUS_NUM FROM TX WHERE TX_DATE >= SYSDATE - 210 AND TX_DATE < SYSDATE - 30 AND EXPL_CODE IN ('110') AND TX_DATE >= SYSDATE - 30"
+    sql = (
+        "SELECT CUS_NUM, SUM(TRA_AMT) AS TOTAL_AMOUNT FROM TX "
+        "WHERE EXPL_CODE IN (:cs_b1) "
+        "AND TX_DATE >= SYSDATE - :cs_b2 AND TX_DATE < SYSDATE "
+        "AND TX_DATE >= SYSDATE - (:cs_b2 + :cs_b3) "
+        "AND TX_DATE < SYSDATE - :cs_b4 GROUP BY CUS_NUM"
+    )
 
     assert validate_generated_sql(request, sql) == []
     findings = validate_generated_sql(request, "SELECT CUSTOMER_ID FROM TX")
     assert any("CUS_NUM" in finding for finding in findings)
     assert any("EXPL_CODE" in finding for finding in findings)
     assert any("Rolling" in finding for finding in findings)
-    assert any("Baseline" in finding for finding in findings)
+    assert any("baseline" in finding.casefold() for finding in findings)
 
 
 def _approved_cash_window_request() -> ScenarioSqlRequest:
@@ -292,6 +298,7 @@ def _approved_cash_window_request() -> ScenarioSqlRequest:
         detection_logic="Cash over two weeks",
         time_window={"unit": "DAYS", "value": 14, "is_rolling": True},
         anchor_date="2026-10-28",
+        aggregation=None,
     )
     return ScenarioSqlRequest(
         intent=intent,
@@ -419,11 +426,15 @@ def test_all_transactions_rejects_invented_explanation_code_filter():
     request = ScenarioSqlRequest(intent=_intent(transaction_type="ALL TRANSACTIONS"))
 
     findings = validate_generated_sql(
-        request, "SELECT CUS_NUM FROM TX WHERE EXPL_CODE = '110'"
+        request,
+        "SELECT CUS_NUM, SUM(TRA_AMT) AS TOTAL_AMOUNT FROM TX "
+        "WHERE EXPL_CODE = '110' GROUP BY CUS_NUM",
     )
-    assert findings == [
-        "SQL invents an EXPL_CODE restriction for an all/no-type intent"
-    ]
+    assert "SQL invents an EXPL_CODE restriction for an all/no-type intent" in findings
+    assert all(
+        finding == "SQL invents an EXPL_CODE restriction for an all/no-type intent"
+        for finding in findings
+    )
 
 
 def test_result_contract_rejects_unknown_fields_and_models_evidence():
@@ -529,6 +540,52 @@ def test_http_adapter_keeps_content_sse_fallback_and_sql_identity(monkeypatch):
 
     assert result.sql == "SELECT CUS_NUM FROM TX"
     assert result.approved is False
+
+
+def test_http_adapter_generation_only_marks_exact_scope_and_pinned_schema(monkeypatch):
+    """The opt-in HTTP method marks only its request for Service B's hard guard."""
+    observed = _install_fake_service_b(
+        monkeypatch,
+        ['data: {"type":"generation_only_candidate","approved":false,"text":"SELECT CUS_NUM FROM TX"}'],
+    )
+    schema_records = [{"metadata": {
+        "tenant_id": "tenant-a", "institution_id": "tenant-a",
+        "source": "oracle_dictionary", "object_type": "TABLE",
+        "table_name": "BI_DWH.PIO_TRANSACTIONS", "column_name": "CUS_NUM",
+    }}]
+    request = ScenarioSqlRequest(intent=_intent())
+    result = asyncio.run(
+        http_adapter.HttpScenarioSqlGenerator().generate_only_for_approved_evaluation(
+            request,
+            scope_sha256="a" * 64,
+            schema_records=schema_records,
+            case_id="b9-01",
+            service_b_payload_sha256="b" * 64,
+        )
+    )
+    metadata = observed["payload"]["metadata"]
+    assert metadata["generation_only"] is True
+    assert metadata["generation_only_scope_sha256"] == "a" * 64
+    assert metadata["generation_only_schema_records"] == schema_records
+    assert metadata["generation_only_case_id"] == "b9-01"
+    assert metadata["generation_only_payload_sha256"] == "b" * 64
+    assert len(metadata["generation_only_schema_sha256"]) == 64
+    assert result.sql == "SELECT CUS_NUM FROM TX"
+    assert result.approved is False
+    assert result.error == "Generation-only candidate is not execution or deployment approved"
+
+
+def test_http_sse_candidate_extraction_requires_explicit_generation_only_guard():
+    event = {
+        "type": "generation_only_candidate",
+        "text": "SELECT CUS_NUM FROM TX",
+        "approved": False,
+    }
+    assert http_adapter._sql_text_from_sse_event(event, generation_only=False) is None
+    assert http_adapter._sql_text_from_sse_event(event, generation_only=True) == event["text"]
+    assert http_adapter._sql_text_from_sse_event(
+        {**event, "approved": True}, generation_only=True
+    ) is None
 
 
 def test_http_adapter_translates_http_error_to_existing_error_result(monkeypatch):

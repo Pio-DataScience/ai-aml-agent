@@ -1,0 +1,550 @@
+{
+  "scope_sha256": "d24ceb8538482a8e8b551a22890f704c78f07c4a135f3878be599e56569766a9",
+  "status": "completed_offline_mock_dry_run",
+  "synthetic_only": true,
+  "linux": true,
+  "mock_providers": true,
+  "mock_responses": 24,
+  "real_provider_dispatches": 0,
+  "oracle_execution": false,
+  "customer_data_access": false,
+  "critics": false,
+  "deployment": false,
+  "retries": false,
+  "cases": [
+    {
+      "case_id": "b9-01",
+      "scenario": "Confirmed explanation code 4 in rolling 14 days",
+      "service_a": {
+        "provider": "mock:Service A",
+        "payload_sha256": "bb6a62aab6d42b2f90039cf09732296eb73194a81f8d89532fc4774af7cc7fa8",
+        "candidate_sql": "SELECT CUS_NUM FROM BI_DWH.PIO_TRANSACTIONS WHERE EXPL_CODE = :cs_b1 AND TRA_DATE >= SYSDATE - :cs_b2",
+        "approved": false,
+        "validation_findings": [
+          {
+            "message": "Rolling day window requires a half-open upper bound at SYSDATE"
+          }
+        ],
+        "independent_oracle_policy_findings": [],
+        "independent_contract_findings": [
+          "Rolling day window requires a half-open upper bound at SYSDATE"
+        ],
+        "binds": {
+          "cs_b1": "4",
+          "cs_b2": 14
+        }
+      },
+      "service_b": {
+        "provider": "mock:Service B graph",
+        "payload_sha256": "b03d013ae6301527765ae8390723ff511a0a5f5bba7ff7c4a27a02dd29d9d66b",
+        "candidate_sql": "select t.cus_num from bi_dwh.pio_transactions t where t.tra_date >= sysdate - :cs_b2 and t.expl_code = :cs_b1",
+        "approved": false,
+        "provider_validation_findings": [],
+        "independent_oracle_policy_findings": [],
+        "independent_contract_findings": [
+          "Rolling day window requires a half-open upper bound at SYSDATE"
+        ],
+        "sse_events": [
+          {
+            "type": "generation_only_candidate",
+            "text": "select t.cus_num from bi_dwh.pio_transactions t where t.tra_date >= sysdate - :cs_b2 and t.expl_code = :cs_b1",
+            "approved": false
+          },
+          {
+            "type": "done"
+          }
+        ],
+        "binds": {
+          "cs_b1": "4",
+          "cs_b2": 14
+        }
+      },
+      "semantic_assessment": {
+        "service_a_matches_fixture": true,
+        "service_b_matches_fixture": true,
+        "service_a_service_b_match": true
+      }
+    },
+    {
+      "case_id": "b9-02",
+      "scenario": "Transaction amount threshold",
+      "service_a": {
+        "provider": "mock:Service A",
+        "payload_sha256": "8d4073b8361d48818b18139d0320018f28390a5e5ae74deec135d69faff5407f",
+        "candidate_sql": "SELECT CUS_NUM FROM BI_DWH.PIO_TRANSACTIONS WHERE TRA_AMT >= :cs_b1",
+        "approved": false,
+        "validation_findings": [],
+        "independent_oracle_policy_findings": [],
+        "independent_contract_findings": [],
+        "binds": {
+          "cs_b1": 10000.0
+        }
+      },
+      "service_b": {
+        "provider": "mock:Service B graph",
+        "payload_sha256": "57e87a69141564a7e2964f1aced7ee8d41a7d6b4649cbe35ebb62312c81262c2",
+        "candidate_sql": "SELECT t.CUS_NUM FROM BI_DWH.PIO_TRANSACTIONS t WHERE t.TRA_AMT >= :cs_b1",
+        "approved": false,
+        "provider_validation_findings": [],
+        "independent_oracle_policy_findings": [],
+        "independent_contract_findings": [],
+        "sse_events": [
+          {
+            "type": "generation_only_candidate",
+            "text": "SELECT t.CUS_NUM FROM BI_DWH.PIO_TRANSACTIONS t WHERE t.TRA_AMT >= :cs_b1",
+            "approved": false
+          },
+          {
+            "type": "done"
+          }
+        ],
+        "binds": {
+          "cs_b1": 10000.0
+        }
+      },
+      "semantic_assessment": {
+        "service_a_matches_fixture": true,
+        "service_b_matches_fixture": true,
+        "service_a_service_b_match": true
+      }
+    },
+    {
+      "case_id": "b9-03",
+      "scenario": "Customer aggregate amount threshold",
+      "service_a": {
+        "provider": "mock:Service A",
+        "payload_sha256": "1e4c005b27d39d61a3e917c5bae1430f2616e7fd5f5ce7e6a5b9f80569e5c266",
+        "candidate_sql": "SELECT CUS_NUM, SUM(TRA_AMT) AS TOTAL_AMOUNT FROM BI_DWH.PIO_TRANSACTIONS GROUP BY CUS_NUM HAVING SUM(TRA_AMT) >= :cs_b1",
+        "approved": false,
+        "validation_findings": [],
+        "independent_oracle_policy_findings": [],
+        "independent_contract_findings": [],
+        "binds": {
+          "cs_b1": 50000.0
+        }
+      },
+      "service_b": {
+        "provider": "mock:Service B graph",
+        "payload_sha256": "f18a233af3a3df6288ff19c2daebc5c7d544f55d4d0e0696ee25c368ceac8eac",
+        "candidate_sql": "SELECT t.CUS_NUM, SUM(t.TRA_AMT) TOTAL_AMOUNT FROM BI_DWH.PIO_TRANSACTIONS t GROUP BY t.CUS_NUM HAVING SUM(t.TRA_AMT) >= :cs_b1",
+        "approved": false,
+        "provider_validation_findings": [],
+        "independent_oracle_policy_findings": [],
+        "independent_contract_findings": [],
+        "sse_events": [
+          {
+            "type": "generation_only_candidate",
+            "text": "SELECT t.CUS_NUM, SUM(t.TRA_AMT) TOTAL_AMOUNT FROM BI_DWH.PIO_TRANSACTIONS t GROUP BY t.CUS_NUM HAVING SUM(t.TRA_AMT) >= :cs_b1",
+            "approved": false
+          },
+          {
+            "type": "done"
+          }
+        ],
+        "binds": {
+          "cs_b1": 50000.0
+        }
+      },
+      "semantic_assessment": {
+        "service_a_matches_fixture": true,
+        "service_b_matches_fixture": true,
+        "service_a_service_b_match": true
+      }
+    },
+    {
+      "case_id": "b9-04",
+      "scenario": "At least five qualifying transactions",
+      "service_a": {
+        "provider": "mock:Service A",
+        "payload_sha256": "f8cda7774303ae44e7071032fab5bb3770f499e90894a5e2e468afd448daf1c0",
+        "candidate_sql": "SELECT CUS_NUM, COUNT(*) AS TXN_COUNT FROM BI_DWH.PIO_TRANSACTIONS GROUP BY CUS_NUM HAVING COUNT(*) >= :cs_b1",
+        "approved": false,
+        "validation_findings": [],
+        "independent_oracle_policy_findings": [],
+        "independent_contract_findings": [],
+        "binds": {
+          "cs_b1": 5.0
+        }
+      },
+      "service_b": {
+        "provider": "mock:Service B graph",
+        "payload_sha256": "4913a7ea618d39807d7e9063c5334fa9b2bd9e020cc017819972693dcbe30882",
+        "candidate_sql": "SELECT t.CUS_NUM, COUNT(*) TXN_COUNT FROM BI_DWH.PIO_TRANSACTIONS t GROUP BY t.CUS_NUM HAVING COUNT(*) >= :cs_b1",
+        "approved": false,
+        "provider_validation_findings": [],
+        "independent_oracle_policy_findings": [],
+        "independent_contract_findings": [],
+        "sse_events": [
+          {
+            "type": "generation_only_candidate",
+            "text": "SELECT t.CUS_NUM, COUNT(*) TXN_COUNT FROM BI_DWH.PIO_TRANSACTIONS t GROUP BY t.CUS_NUM HAVING COUNT(*) >= :cs_b1",
+            "approved": false
+          },
+          {
+            "type": "done"
+          }
+        ],
+        "binds": {
+          "cs_b1": 5.0
+        }
+      },
+      "semantic_assessment": {
+        "service_a_matches_fixture": true,
+        "service_b_matches_fixture": true,
+        "service_a_service_b_match": true
+      }
+    },
+    {
+      "case_id": "b9-05",
+      "scenario": "At least three distinct transaction dates",
+      "service_a": {
+        "provider": "mock:Service A",
+        "payload_sha256": "adf2b718e6325f728ca6a66a7b0f97d06f82a5b9c01217e1a0105edc6f79e3d9",
+        "candidate_sql": "SELECT CUS_NUM, COUNT(DISTINCT TRA_DATE) AS ACTIVE_DAYS FROM BI_DWH.PIO_TRANSACTIONS GROUP BY CUS_NUM HAVING COUNT(DISTINCT TRA_DATE) >= :cs_b1",
+        "approved": false,
+        "validation_findings": [],
+        "independent_oracle_policy_findings": [],
+        "independent_contract_findings": [],
+        "binds": {
+          "cs_b1": 3.0
+        }
+      },
+      "service_b": {
+        "provider": "mock:Service B graph",
+        "payload_sha256": "2bef308d55b63a343e098ecb6ec1f5a320a8abc7643fe7585b85c23038d157da",
+        "candidate_sql": "SELECT t.CUS_NUM, COUNT(DISTINCT t.TRA_DATE) ACTIVE_DAYS FROM BI_DWH.PIO_TRANSACTIONS t GROUP BY t.CUS_NUM HAVING COUNT(DISTINCT t.TRA_DATE) >= :cs_b1",
+        "approved": false,
+        "provider_validation_findings": [],
+        "independent_oracle_policy_findings": [],
+        "independent_contract_findings": [],
+        "sse_events": [
+          {
+            "type": "generation_only_candidate",
+            "text": "SELECT t.CUS_NUM, COUNT(DISTINCT t.TRA_DATE) ACTIVE_DAYS FROM BI_DWH.PIO_TRANSACTIONS t GROUP BY t.CUS_NUM HAVING COUNT(DISTINCT t.TRA_DATE) >= :cs_b1",
+            "approved": false
+          },
+          {
+            "type": "done"
+          }
+        ],
+        "binds": {
+          "cs_b1": 3.0
+        }
+      },
+      "semantic_assessment": {
+        "service_a_matches_fixture": true,
+        "service_b_matches_fixture": true,
+        "service_a_service_b_match": true
+      }
+    },
+    {
+      "case_id": "b9-06",
+      "scenario": "Rolling 30 day transaction window",
+      "service_a": {
+        "provider": "mock:Service A",
+        "payload_sha256": "92ef3382447a2a9fb7f9d1dfc7d136625c4b2e2e4319ff161eafe523e8928fb9",
+        "candidate_sql": "SELECT CUS_NUM FROM BI_DWH.PIO_TRANSACTIONS WHERE TRA_DATE >= SYSDATE - :cs_b1 AND TRA_DATE < SYSDATE",
+        "approved": false,
+        "validation_findings": [],
+        "independent_oracle_policy_findings": [],
+        "independent_contract_findings": [],
+        "binds": {
+          "cs_b1": 30
+        }
+      },
+      "service_b": {
+        "provider": "mock:Service B graph",
+        "payload_sha256": "280d845dd48cd078fbd949a40b4ebbfbf89fb63a2afc4b06871084181fa5da8e",
+        "candidate_sql": "SELECT t.CUS_NUM FROM BI_DWH.PIO_TRANSACTIONS t WHERE t.TRA_DATE < SYSDATE AND t.TRA_DATE >= SYSDATE - :cs_b1",
+        "approved": false,
+        "provider_validation_findings": [],
+        "independent_oracle_policy_findings": [],
+        "independent_contract_findings": [],
+        "sse_events": [
+          {
+            "type": "generation_only_candidate",
+            "text": "SELECT t.CUS_NUM FROM BI_DWH.PIO_TRANSACTIONS t WHERE t.TRA_DATE < SYSDATE AND t.TRA_DATE >= SYSDATE - :cs_b1",
+            "approved": false
+          },
+          {
+            "type": "done"
+          }
+        ],
+        "binds": {
+          "cs_b1": 30
+        }
+      },
+      "semantic_assessment": {
+        "service_a_matches_fixture": true,
+        "service_b_matches_fixture": true,
+        "service_a_service_b_match": true
+      }
+    },
+    {
+      "case_id": "b9-07",
+      "scenario": "Current calendar month activity",
+      "service_a": {
+        "provider": "mock:Service A",
+        "payload_sha256": "6e2b781d5c38b7ec2cea0f00e9ef3cf31d0053a740509fa4495fa687b8df7dc1",
+        "candidate_sql": "SELECT CUS_NUM FROM BI_DWH.PIO_TRANSACTIONS WHERE TRA_DATE >= TRUNC(SYSDATE, 'MM') AND TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)",
+        "approved": false,
+        "validation_findings": [],
+        "independent_oracle_policy_findings": [],
+        "independent_contract_findings": [],
+        "binds": {}
+      },
+      "service_b": {
+        "provider": "mock:Service B graph",
+        "payload_sha256": "78299f82d755eb23a590ae4cd5d1ccadbded52ae6a1d22c88a9998ab0f2108da",
+        "candidate_sql": "SELECT t.CUS_NUM FROM BI_DWH.PIO_TRANSACTIONS t WHERE t.TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1) AND t.TRA_DATE >= TRUNC(SYSDATE, 'MM')",
+        "approved": false,
+        "provider_validation_findings": [],
+        "independent_oracle_policy_findings": [],
+        "independent_contract_findings": [],
+        "sse_events": [
+          {
+            "type": "generation_only_candidate",
+            "text": "SELECT t.CUS_NUM FROM BI_DWH.PIO_TRANSACTIONS t WHERE t.TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1) AND t.TRA_DATE >= TRUNC(SYSDATE, 'MM')",
+            "approved": false
+          },
+          {
+            "type": "done"
+          }
+        ],
+        "binds": {}
+      },
+      "semantic_assessment": {
+        "service_a_matches_fixture": true,
+        "service_b_matches_fixture": true,
+        "service_a_service_b_match": true
+      }
+    },
+    {
+      "case_id": "b9-08",
+      "scenario": "Compare recent and preceding 30 day counts",
+      "service_a": {
+        "provider": "mock:Service A",
+        "payload_sha256": "0dd11753f2ac74e93f9ce0a528a5234414dc21d5fb0be3e8e1c2170f8cb861b3",
+        "candidate_sql": "SELECT CUS_NUM, SUM(CASE WHEN TRA_DATE >= SYSDATE - :cs_b1 AND TRA_DATE < SYSDATE THEN 1 ELSE 0 END) AS RECENT_COUNT, SUM(CASE WHEN TRA_DATE >= SYSDATE - :cs_b2 AND TRA_DATE < SYSDATE - :cs_b3 THEN 1 ELSE 0 END) AS PRIOR_COUNT FROM BI_DWH.PIO_TRANSACTIONS GROUP BY CUS_NUM",
+        "approved": false,
+        "validation_findings": [],
+        "independent_oracle_policy_findings": [],
+        "independent_contract_findings": [],
+        "binds": {
+          "cs_b1": 30,
+          "cs_b2": 60,
+          "cs_b3": 30
+        }
+      },
+      "service_b": {
+        "provider": "mock:Service B graph",
+        "payload_sha256": "22c6fd290641cc690fd582432f6fe04a3ce148dd960147cf8a1d597ab370719d",
+        "candidate_sql": "SELECT t.CUS_NUM, SUM(CASE WHEN t.TRA_DATE >= SYSDATE - :cs_b1 AND t.TRA_DATE < SYSDATE THEN 1 ELSE 0 END) RECENT_COUNT, SUM(CASE WHEN t.TRA_DATE >= SYSDATE - :cs_b2 AND t.TRA_DATE < SYSDATE - :cs_b3 THEN 1 ELSE 0 END) PRIOR_COUNT FROM BI_DWH.PIO_TRANSACTIONS t GROUP BY t.CUS_NUM",
+        "approved": false,
+        "provider_validation_findings": [],
+        "independent_oracle_policy_findings": [],
+        "independent_contract_findings": [],
+        "sse_events": [
+          {
+            "type": "generation_only_candidate",
+            "text": "SELECT t.CUS_NUM, SUM(CASE WHEN t.TRA_DATE >= SYSDATE - :cs_b1 AND t.TRA_DATE < SYSDATE THEN 1 ELSE 0 END) RECENT_COUNT, SUM(CASE WHEN t.TRA_DATE >= SYSDATE - :cs_b2 AND t.TRA_DATE < SYSDATE - :cs_b3 THEN 1 ELSE 0 END) PRIOR_COUNT FROM BI_DWH.PIO_TRANSACTIONS t GROUP BY t.CUS_NUM",
+            "approved": false
+          },
+          {
+            "type": "done"
+          }
+        ],
+        "binds": {
+          "cs_b1": 30,
+          "cs_b2": 60,
+          "cs_b3": 30
+        }
+      },
+      "semantic_assessment": {
+        "service_a_matches_fixture": true,
+        "service_b_matches_fixture": true,
+        "service_a_service_b_match": true
+      }
+    },
+    {
+      "case_id": "b9-09",
+      "scenario": "Customer-level repeated amount aggregation",
+      "service_a": {
+        "provider": "mock:Service A",
+        "payload_sha256": "fe91060f4512ada5385ba6914274b59fdd8304f5fa730e2410d44b6be3fc1bf2",
+        "candidate_sql": "SELECT CUS_NUM, SUM(TRA_AMT) AS total_transaction_amount FROM BI_DWH.PIO_TRANSACTIONS GROUP BY CUS_NUM HAVING SUM(TRA_AMT) > :cs_b1",
+        "approved": false,
+        "validation_findings": [],
+        "independent_oracle_policy_findings": [],
+        "independent_contract_findings": [],
+        "binds": {
+          "cs_b1": 25000.0
+        }
+      },
+      "service_b": {
+        "provider": "mock:Service B graph",
+        "payload_sha256": "8da7c6943a9f77a33cb9257c3828a8409543d9413b51408274aec69c274bb0ac",
+        "candidate_sql": "SELECT t.CUS_NUM, SUM(t.TRA_AMT) AS total_transaction_amount FROM BI_DWH.PIO_TRANSACTIONS t GROUP BY t.CUS_NUM HAVING SUM(t.TRA_AMT) > :cs_b1",
+        "approved": false,
+        "provider_validation_findings": [],
+        "independent_oracle_policy_findings": [],
+        "independent_contract_findings": [],
+        "sse_events": [
+          {
+            "type": "generation_only_candidate",
+            "text": "SELECT t.CUS_NUM, SUM(t.TRA_AMT) AS total_transaction_amount FROM BI_DWH.PIO_TRANSACTIONS t GROUP BY t.CUS_NUM HAVING SUM(t.TRA_AMT) > :cs_b1",
+            "approved": false
+          },
+          {
+            "type": "done"
+          }
+        ],
+        "binds": {
+          "cs_b1": 25000.0
+        }
+      },
+      "semantic_assessment": {
+        "service_a_matches_fixture": true,
+        "service_b_matches_fixture": true,
+        "service_a_service_b_match": true
+      }
+    },
+    {
+      "case_id": "b9-10",
+      "scenario": "Confirmed code and amount filters",
+      "service_a": {
+        "provider": "mock:Service A",
+        "payload_sha256": "e17d0d1d92ed7515a0d84d8f1c02493d97a6a40bb902f7dbd2cb24634c385d3a",
+        "candidate_sql": "SELECT CUS_NUM FROM BI_DWH.PIO_TRANSACTIONS WHERE EXPL_CODE IN (:cs_b1, :cs_b2) AND TRA_AMT > :cs_b3",
+        "approved": false,
+        "validation_findings": [],
+        "independent_oracle_policy_findings": [],
+        "independent_contract_findings": [],
+        "binds": {
+          "cs_b1": "4",
+          "cs_b2": "7",
+          "cs_b3": 5000.0
+        }
+      },
+      "service_b": {
+        "provider": "mock:Service B graph",
+        "payload_sha256": "4300aaf7a520f9ed5aa450a4064abc0899949730bcf4eb9898295cf173ae998d",
+        "candidate_sql": "SELECT t.CUS_NUM FROM BI_DWH.PIO_TRANSACTIONS t WHERE t.TRA_AMT > :cs_b3 AND t.EXPL_CODE IN (:cs_b1, :cs_b2)",
+        "approved": false,
+        "provider_validation_findings": [],
+        "independent_oracle_policy_findings": [],
+        "independent_contract_findings": [],
+        "sse_events": [
+          {
+            "type": "generation_only_candidate",
+            "text": "SELECT t.CUS_NUM FROM BI_DWH.PIO_TRANSACTIONS t WHERE t.TRA_AMT > :cs_b3 AND t.EXPL_CODE IN (:cs_b1, :cs_b2)",
+            "approved": false
+          },
+          {
+            "type": "done"
+          }
+        ],
+        "binds": {
+          "cs_b1": "4",
+          "cs_b2": "7",
+          "cs_b3": 5000.0
+        }
+      },
+      "semantic_assessment": {
+        "service_a_matches_fixture": true,
+        "service_b_matches_fixture": true,
+        "service_a_service_b_match": true
+      }
+    },
+    {
+      "case_id": "b9-11",
+      "scenario": "Zero activity customer set remains empty",
+      "service_a": {
+        "provider": "mock:Service A",
+        "payload_sha256": "be39d88788e57ed745b411b60cfb67a0ac3f6867086fa23fdf0ed24cf317b684",
+        "candidate_sql": "SELECT CUS_NUM FROM BI_DWH.PIO_TRANSACTIONS WHERE TRA_DATE >= SYSDATE - :cs_b1 AND TRA_DATE < SYSDATE",
+        "approved": false,
+        "validation_findings": [],
+        "independent_oracle_policy_findings": [],
+        "independent_contract_findings": [],
+        "binds": {
+          "cs_b1": 7
+        }
+      },
+      "service_b": {
+        "provider": "mock:Service B graph",
+        "payload_sha256": "b0fad4e913d01fb4de079e5f32b87c9a0c1756d30c37bf44a14e51e13ac04777",
+        "candidate_sql": "SELECT t.CUS_NUM FROM BI_DWH.PIO_TRANSACTIONS t WHERE t.TRA_DATE < SYSDATE AND t.TRA_DATE >= SYSDATE - :cs_b1",
+        "approved": false,
+        "provider_validation_findings": [],
+        "independent_oracle_policy_findings": [],
+        "independent_contract_findings": [],
+        "sse_events": [
+          {
+            "type": "generation_only_candidate",
+            "text": "SELECT t.CUS_NUM FROM BI_DWH.PIO_TRANSACTIONS t WHERE t.TRA_DATE < SYSDATE AND t.TRA_DATE >= SYSDATE - :cs_b1",
+            "approved": false
+          },
+          {
+            "type": "done"
+          }
+        ],
+        "binds": {
+          "cs_b1": 7
+        }
+      },
+      "semantic_assessment": {
+        "service_a_matches_fixture": true,
+        "service_b_matches_fixture": true,
+        "service_a_service_b_match": true
+      }
+    },
+    {
+      "case_id": "b9-12",
+      "scenario": "Customer average transaction amount",
+      "service_a": {
+        "provider": "mock:Service A",
+        "payload_sha256": "08bbd8d304c6cbe93aae4a70bf3858ba1434094f1c63148a2e0a6bed2d432a4c",
+        "candidate_sql": "SELECT CUS_NUM, AVG(TRA_AMT) AS AVG_AMOUNT FROM BI_DWH.PIO_TRANSACTIONS GROUP BY CUS_NUM",
+        "approved": false,
+        "validation_findings": [],
+        "independent_oracle_policy_findings": [],
+        "independent_contract_findings": [],
+        "binds": {}
+      },
+      "service_b": {
+        "provider": "mock:Service B graph",
+        "payload_sha256": "2691c14c9077d639529dc5c07e08c299754b238a8101c58ff38b7a2b8bd1080d",
+        "candidate_sql": "SELECT t.CUS_NUM, AVG(t.TRA_AMT) AVG_AMOUNT FROM BI_DWH.PIO_TRANSACTIONS t GROUP BY t.CUS_NUM",
+        "approved": false,
+        "provider_validation_findings": [],
+        "independent_oracle_policy_findings": [],
+        "independent_contract_findings": [],
+        "sse_events": [
+          {
+            "type": "generation_only_candidate",
+            "text": "SELECT t.CUS_NUM, AVG(t.TRA_AMT) AVG_AMOUNT FROM BI_DWH.PIO_TRANSACTIONS t GROUP BY t.CUS_NUM",
+            "approved": false
+          },
+          {
+            "type": "done"
+          }
+        ],
+        "binds": {}
+      },
+      "semantic_assessment": {
+        "service_a_matches_fixture": true,
+        "service_b_matches_fixture": true,
+        "service_a_service_b_match": true
+      }
+    }
+  ],
+  "artifact_checks": {
+    "case_count": 12,
+    "all_sql_candidates_present": true,
+    "all_candidates_pass_strict_contract_validation": false,
+    "all_semantic_pairs_match": true,
+    "scope_payload_fixture_hashes_verified": true,
+    "service_b_sse_events_captured": true
+  }
+}

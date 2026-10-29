@@ -143,6 +143,13 @@ class ScenarioSqlResult(BaseModel):
     approved: bool = False
     execution: ExecutionEvidence = Field(default_factory=ExecutionEvidence)
     validation_findings: list[dict[str, Any]] = Field(default_factory=list)
+    generation_only_normalizations: list[str] = Field(default_factory=list)
+    generation_only_candidate_sql: str | None = None
+    generation_only_provider_request_id: str | None = None
+    generation_only_sse_events: list[dict[str, Any]] = Field(default_factory=list)
+    generation_only_provider_validation_findings: list[dict[str, Any]] = Field(
+        default_factory=list
+    )
     provider: str | None = None
     model: str | None = None
     trace_id: str | None = None

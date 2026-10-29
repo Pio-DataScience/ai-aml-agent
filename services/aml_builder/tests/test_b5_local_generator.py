@@ -5,11 +5,17 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+import asyncio
+import hashlib
 
 from services.aml_builder.web.domain.dwh_scenario.contracts import ScenarioSqlRequest
 from services.aml_builder.web.services.dwh_scenario.generator import (
+    GenerationOnlyApproval,
     LocalScenarioSqlGenerator,
+    _generation_payload_hash,
 )
+from services.aml_builder.web.services.dwh_scenario.context_assembly import assemble_context
+from services.aml_builder.web.services.dwh_scenario.prompt_loader import load_prompt
 from services.aml_builder.web.services.dwh_scenario.retrieval import (
     build_readiness_checks,
 )
@@ -78,6 +84,19 @@ class ScriptedModel:
         return self.responses.pop(0)
 
 
+class RoleCallRecorder:
+    """Record factory roles and return scripted role-specific models."""
+
+    def __init__(self, generator: ScriptedModel, critic: ScriptedModel) -> None:
+        self.generator = generator
+        self.critic = critic
+        self.roles: list[str] = []
+
+    def __call__(self, *, role: str) -> ScriptedModel:
+        self.roles.append(role)
+        return self.generator if role == "generator" else self.critic
+
+
 class ScriptedRepository:
     """Record candidate SQL and return bounded execution evidence."""
 
@@ -115,18 +134,169 @@ def make_generator(
     *,
     config: Settings | None = None,
     experience: ScriptedRetriever | None = None,
+    tables: ScriptedRetriever | None = None,
+    columns: ScriptedRetriever | None = None,
 ) -> LocalScenarioSqlGenerator:
     """Wire deterministic adapters into the injected implementation."""
     return LocalScenarioSqlGenerator(
         llm_factory=factory,
         repository=repository or ScriptedRepository(),
         experience_retriever=experience or ScriptedRetriever(),
-        table_retriever=ScriptedRetriever(),
-        column_retriever=ScriptedRetriever(),
+        table_retriever=tables or ScriptedRetriever(),
+        column_retriever=columns or ScriptedRetriever(),
         config=config or make_config(),
     )
 
 
+def generation_only_approval(request: ScenarioSqlRequest, config: Settings) -> GenerationOnlyApproval:
+    """Compute the exact pinned-schema model payload for a one-case approval."""
+    context_snapshot = {
+        "experience": [],
+        "tables": [{"schema": "BI_DWH", "table": "PIO_TRANSACTIONS"}],
+        "columns": [
+            {"schema": "BI_DWH", "table": "PIO_TRANSACTIONS", "column": "CUS_NUM", "data_type": "VARCHAR2"},
+            {"schema": "BI_DWH", "table": "PIO_TRANSACTIONS", "column": "TRA_DATE", "data_type": "DATE"},
+            {"schema": "BI_DWH", "table": "PIO_TRANSACTIONS", "column": "EXPL_CODE", "data_type": "VARCHAR2"},
+            {"schema": "BI_DWH", "table": "PIO_TRANSACTIONS", "column": "TRA_AMT", "data_type": "NUMBER"},
+        ],
+    }
+    context = assemble_context(
+        request, experience=context_snapshot["experience"], tables=context_snapshot["tables"],
+        columns=context_snapshot["columns"], budget=config.DWH_SQL_CONTEXT_BUDGET
+    )
+    messages = [
+        {"role": "system", "content": load_prompt("generator_v1.md")},
+        {"role": "user", "content": context + "\nREPAIR FEEDBACK: "},
+    ]
+    provider = config.DWH_SQL_GENERATOR_PROVIDER or config.LLM_PROVIDER
+    model = config.DWH_SQL_GENERATOR_MODEL or config.LLM_MODEL
+    endpoint = "https://api.openai.com/v1"
+    prompt = load_prompt("generator_v1.md")
+    prompt_sha256 = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+    config.DWH_SQL_GENERATION_ONLY_SCOPE_SHA256 = "a" * 64
+    config.DWH_SQL_GENERATION_ONLY_PROMPT_SHA256 = prompt_sha256
+    return GenerationOnlyApproval(
+        payload_sha256=_generation_payload_hash(provider, model, messages, endpoint),
+        scope_sha256="a" * 64,
+        prompt_sha256=prompt_sha256,
+        provider_identity=f"{provider}|{model}|{endpoint}",
+        approved_by="offline test owner",
+        provider_data_approval_ref="offline test fixture",
+        context_snapshot=context_snapshot,
+    )
+
+
+def run_inline(coroutine):
+    """Drive a coroutine whose external awaitables are deterministic fakes."""
+    try:
+        coroutine.send(None)
+    except StopIteration as completed:
+        return completed.value
+    raise AssertionError("Fake generation coroutine attempted to suspend")
+
+
+def test_generation_only_stops_before_repository_and_critic(monkeypatch) -> None:
+    """The approved path returns validated SQL without execution or critique."""
+    request = make_request()
+    async def inline_to_thread(function, *args, **kwargs):
+        return function(*args, **kwargs)
+    async def inline_wait_for(awaitable, timeout):
+        return await awaitable
+    monkeypatch.setattr(asyncio, "to_thread", inline_to_thread)
+    monkeypatch.setattr(asyncio, "wait_for", inline_wait_for)
+    config = make_config(DWH_SQL_GENERATION_ONLY_ENABLED=True, DWH_SQL_ENVIRONMENT="development")
+    approval = generation_only_approval(request, config)
+    generator_model, critic_model = ScriptedModel([SQL]), ScriptedModel([])
+    factory = RoleCallRecorder(generator_model, critic_model)
+    repository = ScriptedRepository()
+    experience, tables, columns = ScriptedRetriever(), ScriptedRetriever(), ScriptedRetriever()
+    result = run_inline(make_generator(
+        factory, repository, config=config, experience=experience, tables=tables, columns=columns
+    ).generate_only_for_approved_evaluation(
+        request, approval
+    ))
+    assert result.sql == SQL
+    assert result.approved is False
+    assert result.validation_findings == []
+    assert result.error == "Generation-only candidate is not execution or deployment approved"
+    assert result.metrics["oracle_statements"] == 0
+    assert result.metrics["critique_attempts"] == 0
+    assert factory.roles == ["generator"]
+    assert repository.sql == []
+    assert len(generator_model.inputs) == 1
+    assert critic_model.inputs == []
+    assert (experience.calls, tables.calls, columns.calls) == (0, 0, 0)
+
+
+def test_generation_only_is_disabled_unless_development_gate_and_hash_match(monkeypatch) -> None:
+    """Disabled, production and hash-mismatched calls make no model call."""
+    request = make_request()
+    async def inline_to_thread(function, *args, **kwargs):
+        return function(*args, **kwargs)
+    async def inline_wait_for(awaitable, timeout):
+        return await awaitable
+    monkeypatch.setattr(asyncio, "to_thread", inline_to_thread)
+    monkeypatch.setattr(asyncio, "wait_for", inline_wait_for)
+    for config in (
+        make_config(DWH_SQL_GENERATION_ONLY_ENABLED=False, DWH_SQL_ENVIRONMENT="development"),
+        make_config(DWH_SQL_GENERATION_ONLY_ENABLED=True, DWH_SQL_ENVIRONMENT="production"),
+        make_config(
+            DWH_SQL_GENERATION_ONLY_ENABLED=True,
+            DWH_SQL_ENVIRONMENT="development",
+            DWH_SQL_MODE="inprocess",
+        ),
+    ):
+        generator_model, critic_model = ScriptedModel([SQL]), ScriptedModel([])
+        factory = RoleCallRecorder(generator_model, critic_model)
+        result = run_inline(make_generator(factory, config=config).generate_only_for_approved_evaluation(
+            request, generation_only_approval(request, config)
+        ))
+        assert result.sql is None
+        assert factory.roles == []
+    config = make_config(DWH_SQL_GENERATION_ONLY_ENABLED=True, DWH_SQL_ENVIRONMENT="development")
+    generator_model, critic_model = ScriptedModel([SQL]), ScriptedModel([])
+    factory = RoleCallRecorder(generator_model, critic_model)
+    approval = generation_only_approval(request, config)
+    wrong_scope = GenerationOnlyApproval(
+        payload_sha256="0" * 64,
+        scope_sha256=approval.scope_sha256,
+        prompt_sha256=approval.prompt_sha256,
+        provider_identity=approval.provider_identity,
+        approved_by=approval.approved_by,
+        provider_data_approval_ref=approval.provider_data_approval_ref,
+        context_snapshot=approval.context_snapshot,
+    )
+    result = run_inline(make_generator(factory, config=config).generate_only_for_approved_evaluation(
+        request, wrong_scope
+    ))
+    assert result.sql is None
+    assert factory.roles == []
+
+
+def test_generation_only_rejects_unsafe_sql_without_execution_or_critic(monkeypatch) -> None:
+    """B3 policy still fails closed on candidate SQL in evaluation mode."""
+    request = make_request()
+    async def inline_to_thread(function, *args, **kwargs):
+        return function(*args, **kwargs)
+    async def inline_wait_for(awaitable, timeout):
+        return await awaitable
+    monkeypatch.setattr(asyncio, "to_thread", inline_to_thread)
+    monkeypatch.setattr(asyncio, "wait_for", inline_wait_for)
+    config = make_config(DWH_SQL_GENERATION_ONLY_ENABLED=True, DWH_SQL_ENVIRONMENT="development")
+    approval = generation_only_approval(request, config)
+    generator_model, critic_model = ScriptedModel(["DELETE FROM BI_DWH.TX"]), ScriptedModel([])
+    factory = RoleCallRecorder(generator_model, critic_model)
+    repository = ScriptedRepository()
+    result = run_inline(make_generator(factory, repository, config=config).generate_only_for_approved_evaluation(
+        request, approval
+    ))
+    assert result.sql is None
+    assert result.generation_only_candidate_sql == "DELETE FROM BI_DWH.TX"
+    assert result.validation_findings
+    assert result.approved is False
+    assert repository.sql == []
+    assert factory.roles == ["generator"]
+    assert critic_model.inputs == []
 @pytest.mark.asyncio
 async def test_success_returns_only_executed_critique_approved_sql() -> None:
     """Successful SQL is passed unchanged to execution and returned after approval."""

@@ -1,0 +1,1755 @@
+{
+  "snapshot_kind": "B9 immutable live evaluation snapshot",
+  "captured_at": "2026-10-29",
+  "scope_sha256": "bd9bf5e7a65667f6029017e93925ae689dbb9313cf86baeaebcf5699c2dbf2ad",
+  "case_count": 12,
+  "provider_dispatch_count": 24,
+  "retry_count": 0,
+  "uncertain_deliveries": 0,
+  "service_a_validation": {
+    "passed": 10,
+    "total": 12,
+    "failed_cases": [
+      "b9-04",
+      "b9-05"
+    ]
+  },
+  "service_b_validation": {
+    "passed": 12,
+    "total": 12
+  },
+  "semantic_parity": {
+    "direct_summary_matches": 4,
+    "bind_aware_normalized_matches": 7,
+    "matching_cases": [
+      "b9-01",
+      "b9-03",
+      "b9-07",
+      "b9-09",
+      "b9-10",
+      "b9-11",
+      "b9-12"
+    ],
+    "eligibility_equivalence_claimed": false
+  },
+  "artifact_hashes": {
+    "results_path": "Docs/B9_live_results_bd9bf5e7_20261029.json",
+    "results_sha256": "e667971b88b8b45c3626827f6c878efb4adbe2ff73e682a49e5a2af6c53ef11b",
+    "journal_path": "Docs/B9_execution_journal_bd9bf5e7_20261029.jsonl",
+    "journal_sha256": "1669057897065a3ddaf945fc6a459a7f5406c47b7c0769ace6067db087450132",
+    "scope_path": "Docs/B9_generation_only_scope.json",
+    "scope_sha256": "bd9bf5e7a65667f6029017e93925ae689dbb9313cf86baeaebcf5699c2dbf2ad",
+    "payload_manifest_path": "Docs/B9_model_payloads.json",
+    "payload_manifest_sha256": "a0e32af7d8589eafa3ba550cbc25105180b0fb35676894fc6db9bcab5a070ca6",
+    "fixtures_path": "services/aml_builder/tests/eval/dwh_scenario/b9_cases.jsonl",
+    "fixtures_sha256": "1f23dbe7ae51eb3dfc0d10a07926b29122369672acefc2aa2592254acda48f9e",
+    "service_a_prompt_sha256": "f4ce1ca823b996a6d04613ab57db68dce21a9030a6b30fae49aa8e79a25af8f4",
+    "service_b_prompt_sha256": "c2b26ed52577a23abfa9bb3449d55f6fb0adbc4e39e8a7ce3ca5247737efdf54"
+  },
+  "provider_identities": {
+    "service_a": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+    "service_b": "openai|gpt-5-nano|https://api.openai.com/v1"
+  },
+  "frozen_baseline": {
+    "path": "Docs/B9_frozen_baseline_20261029.json",
+    "raw_file_sha256": "8243cc92268c78560f27b09adf8031918eb0b7ad962f1797d589eb61735cc7ad",
+    "embedded_baseline_sha256": "9772b9b5f632114356b2d64877b3ba757d3b81f20d0510f76f945bfcf5ff0ca6",
+    "canonical_excluding_embedded_field_sha256": "9772b9b5f632114356b2d64877b3ba757d3b81f20d0510f76f945bfcf5ff0ca6",
+    "modified": false
+  },
+  "snapshot_digest_algorithm": "SHA-256 over UTF-8 JSON from json.dumps(snapshot_without_snapshot_sha256, sort_keys=True, separators=(\",\", \":\"), ensure_ascii=False); then store snapshot_sha256 and write indented UTF-8 JSON with final newline.",
+  "captured_live_results": {
+    "scope_sha256": "bd9bf5e7a65667f6029017e93925ae689dbb9313cf86baeaebcf5699c2dbf2ad",
+    "run_completed_at_utc": "2026-10-29T11:37:25.871950+00:00",
+    "synthetic_only": true,
+    "oracle_execution": false,
+    "customer_row_retrieval": false,
+    "critics": false,
+    "deployment": false,
+    "persistence": false,
+    "tracing_disabled": true,
+    "retries_enabled": false,
+    "dwh_sql_mode": "http",
+    "service_b_transport": "real local HTTP /chat/stream SSE route",
+    "results": [
+      {
+        "case_id": "b9-01",
+        "scenario": "Confirmed explanation code 4 in rolling 14 days",
+        "service_a": {
+          "provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+          "payload_sha256": "3c2e7173d62a95cb3db27dacb966489842cc92bd1bf40cac5522ba8af49d9c89",
+          "candidate_sql": "SELECT\n  t.CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS t\nWHERE t.EXPL_CODE IN (:cs_b1)\n  AND t.TRA_DATE >= SYSDATE - :cs_b2\n  AND t.TRA_DATE < SYSDATE\nGROUP BY t.CUS_NUM",
+          "candidate_accepted_by_service_a": true,
+          "validation_findings": [],
+          "error": "Generation-only candidate is not execution or deployment approved",
+          "metrics": {
+            "llm_calls": 1,
+            "tool_calls": 1,
+            "critique_attempts": 0,
+            "oracle_statements": 0,
+            "tokens": 1111,
+            "elapsed_seconds": 4.228
+          },
+          "approved": false
+        },
+        "service_b": {
+          "provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1",
+          "payload_sha256": "b03d013ae6301527765ae8390723ff511a0a5f5bba7ff7c4a27a02dd29d9d66b",
+          "candidate_sql": "SELECT t.CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS t\nWHERE t.EXPL_CODE IN (:cs_b2)\n  AND t.TRA_DATE >= (SYSDATE - :cs_b1)\n  AND t.TRA_DATE < SYSDATE\nGROUP BY t.CUS_NUM;",
+          "candidate_sql_extracted_by_adapter": "SELECT t.CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS t\nWHERE t.EXPL_CODE IN (:cs_b2)\n  AND t.TRA_DATE >= (SYSDATE - :cs_b1)\n  AND t.TRA_DATE < SYSDATE\nGROUP BY t.CUS_NUM",
+          "candidate_accepted_by_service_b": true,
+          "service_b_validation_findings": [],
+          "service_a_parity_validation_findings": [],
+          "normalizations": [],
+          "sse_events": [
+            {
+              "type": "generation_only_candidate",
+              "text": "SELECT t.CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS t\nWHERE t.EXPL_CODE IN (:cs_b2)\n  AND t.TRA_DATE >= (SYSDATE - :cs_b1)\n  AND t.TRA_DATE < SYSDATE\nGROUP BY t.CUS_NUM;",
+              "approved": false
+            },
+            {
+              "type": "done"
+            }
+          ],
+          "error": "Generation-only candidate is not execution or deployment approved",
+          "approved": false
+        },
+        "semantic_assessment": {
+          "service_a_vs_fixture": "differs_from_fixture",
+          "service_b_vs_fixture": "differs_from_fixture",
+          "service_a_vs_service_b_match": false,
+          "fixture_signature_is_deterministic_reference_only": true
+        }
+      },
+      {
+        "case_id": "b9-02",
+        "scenario": "Transaction amount threshold",
+        "service_a": {
+          "provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+          "payload_sha256": "df8708a343c0ad5f4d8293230b3751f53aa358edb9edd53f27a8529ca22028b0",
+          "candidate_sql": "SELECT DISTINCT\n  CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_AMT >= :cs_b1",
+          "candidate_accepted_by_service_a": true,
+          "validation_findings": [],
+          "error": "Generation-only candidate is not execution or deployment approved",
+          "metrics": {
+            "llm_calls": 1,
+            "tool_calls": 1,
+            "critique_attempts": 0,
+            "oracle_statements": 0,
+            "tokens": 983,
+            "elapsed_seconds": 1.172
+          },
+          "approved": false
+        },
+        "service_b": {
+          "provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1",
+          "payload_sha256": "57e87a69141564a7e2964f1aced7ee8d41a7d6b4649cbe35ebb62312c81262c2",
+          "candidate_sql": "SELECT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_AMT >= :cs_b1\nGROUP BY CUS_NUM;",
+          "candidate_sql_extracted_by_adapter": "SELECT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_AMT >= :cs_b1\nGROUP BY CUS_NUM",
+          "candidate_accepted_by_service_b": true,
+          "service_b_validation_findings": [],
+          "service_a_parity_validation_findings": [],
+          "normalizations": [],
+          "sse_events": [
+            {
+              "type": "generation_only_candidate",
+              "text": "SELECT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_AMT >= :cs_b1\nGROUP BY CUS_NUM;",
+              "approved": false
+            },
+            {
+              "type": "done"
+            }
+          ],
+          "error": "Generation-only candidate is not execution or deployment approved",
+          "approved": false
+        },
+        "semantic_assessment": {
+          "service_a_vs_fixture": "differs_from_fixture",
+          "service_b_vs_fixture": "differs_from_fixture",
+          "service_a_vs_service_b_match": false,
+          "fixture_signature_is_deterministic_reference_only": true
+        }
+      },
+      {
+        "case_id": "b9-03",
+        "scenario": "Customer aggregate amount threshold",
+        "service_a": {
+          "provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+          "payload_sha256": "1c489c101e62261b25f914f55d08485ad0b7216341d244345d9c3229f69819f1",
+          "candidate_sql": "SELECT\n  CUS_NUM,\n  SUM(TRA_AMT) AS TOTAL_TRA_AMT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING SUM(TRA_AMT) >= :cs_b1",
+          "candidate_accepted_by_service_a": true,
+          "validation_findings": [],
+          "error": "Generation-only candidate is not execution or deployment approved",
+          "metrics": {
+            "llm_calls": 1,
+            "tool_calls": 1,
+            "critique_attempts": 0,
+            "oracle_statements": 0,
+            "tokens": 1037,
+            "elapsed_seconds": 1.116
+          },
+          "approved": false
+        },
+        "service_b": {
+          "provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1",
+          "payload_sha256": "f18a233af3a3df6288ff19c2daebc5c7d544f55d4d0e0696ee25c368ceac8eac",
+          "candidate_sql": "SELECT\n  CUS_NUM,\n  SUM(TRA_AMT) AS SUM_TRA_AMT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING SUM(TRA_AMT) >= :cs_b1;",
+          "candidate_sql_extracted_by_adapter": "SELECT\n  CUS_NUM,\n  SUM(TRA_AMT) AS SUM_TRA_AMT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING SUM(TRA_AMT) >= :cs_b1",
+          "candidate_accepted_by_service_b": true,
+          "service_b_validation_findings": [],
+          "service_a_parity_validation_findings": [],
+          "normalizations": [],
+          "sse_events": [
+            {
+              "type": "generation_only_candidate",
+              "text": "SELECT\n  CUS_NUM,\n  SUM(TRA_AMT) AS SUM_TRA_AMT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING SUM(TRA_AMT) >= :cs_b1;",
+              "approved": false
+            },
+            {
+              "type": "done"
+            }
+          ],
+          "error": "Generation-only candidate is not execution or deployment approved",
+          "approved": false
+        },
+        "semantic_assessment": {
+          "service_a_vs_fixture": "matches_fixture",
+          "service_b_vs_fixture": "matches_fixture",
+          "service_a_vs_service_b_match": true,
+          "fixture_signature_is_deterministic_reference_only": true
+        }
+      },
+      {
+        "case_id": "b9-04",
+        "scenario": "At least five qualifying transactions",
+        "service_a": {
+          "provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+          "payload_sha256": "b254a5ab93eec5cff7154d20ae125d247a3c5a1490d79fa53fa8c1fc0600fce8",
+          "candidate_sql": "SELECT\n  CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING COUNT(*) >= :cs_b1",
+          "candidate_accepted_by_service_a": false,
+          "validation_findings": [
+            {
+              "message": "Aggregate intent requires an aliased COUNT(*) projection"
+            }
+          ],
+          "error": "Generation-only candidate is not execution or deployment approved",
+          "metrics": {
+            "llm_calls": 1,
+            "tool_calls": 1,
+            "critique_attempts": 0,
+            "oracle_statements": 0,
+            "tokens": 1014,
+            "elapsed_seconds": 0.917
+          },
+          "approved": false
+        },
+        "service_b": {
+          "provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1",
+          "payload_sha256": "4913a7ea618d39807d7e9063c5334fa9b2bd9e020cc017819972693dcbe30882",
+          "candidate_sql": "SELECT\n  CUS_NUM,\n  COUNT(*) AS \"Transaction count\"\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING COUNT(*) >= :cs_b1",
+          "candidate_sql_extracted_by_adapter": "SELECT\n  CUS_NUM,\n  COUNT(*) AS \"Transaction count\"\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING COUNT(*) >= :cs_b1",
+          "candidate_accepted_by_service_b": true,
+          "service_b_validation_findings": [],
+          "service_a_parity_validation_findings": [],
+          "normalizations": [],
+          "sse_events": [
+            {
+              "type": "generation_only_candidate",
+              "text": "SELECT\n  CUS_NUM,\n  COUNT(*) AS \"Transaction count\"\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING COUNT(*) >= :cs_b1",
+              "approved": false
+            },
+            {
+              "type": "done"
+            }
+          ],
+          "error": "Generation-only candidate is not execution or deployment approved",
+          "approved": false
+        },
+        "semantic_assessment": {
+          "service_a_vs_fixture": "differs_from_fixture",
+          "service_b_vs_fixture": "matches_fixture",
+          "service_a_vs_service_b_match": false,
+          "fixture_signature_is_deterministic_reference_only": true
+        }
+      },
+      {
+        "case_id": "b9-05",
+        "scenario": "At least three distinct transaction dates",
+        "service_a": {
+          "provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+          "payload_sha256": "376da88eecb6e154a5eaddd6301265863936b834fc14bf8d2de9053fd8f322b9",
+          "candidate_sql": "SELECT\n  CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING COUNT(DISTINCT TRA_DATE) >= :cs_b1",
+          "candidate_accepted_by_service_a": false,
+          "validation_findings": [
+            {
+              "message": "Aggregate intent requires an aliased COUNT_DISTINCT(TRA_DATE) projection"
+            }
+          ],
+          "error": "Generation-only candidate is not execution or deployment approved",
+          "metrics": {
+            "llm_calls": 1,
+            "tool_calls": 1,
+            "critique_attempts": 0,
+            "oracle_statements": 0,
+            "tokens": 1028,
+            "elapsed_seconds": 1.441
+          },
+          "approved": false
+        },
+        "service_b": {
+          "provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1",
+          "payload_sha256": "2bef308d55b63a343e098ecb6ec1f5a320a8abc7643fe7585b85c23038d157da",
+          "candidate_sql": "SELECT\n  CUS_NUM,\n  COUNT(DISTINCT TRA_DATE) AS \"Distinct transaction dates\"\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING COUNT(DISTINCT TRA_DATE) >= :cs_b1;",
+          "candidate_sql_extracted_by_adapter": "SELECT\n  CUS_NUM,\n  COUNT(DISTINCT TRA_DATE) AS \"Distinct transaction dates\"\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING COUNT(DISTINCT TRA_DATE) >= :cs_b1",
+          "candidate_accepted_by_service_b": true,
+          "service_b_validation_findings": [],
+          "service_a_parity_validation_findings": [],
+          "normalizations": [],
+          "sse_events": [
+            {
+              "type": "generation_only_candidate",
+              "text": "SELECT\n  CUS_NUM,\n  COUNT(DISTINCT TRA_DATE) AS \"Distinct transaction dates\"\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING COUNT(DISTINCT TRA_DATE) >= :cs_b1;",
+              "approved": false
+            },
+            {
+              "type": "done"
+            }
+          ],
+          "error": "Generation-only candidate is not execution or deployment approved",
+          "approved": false
+        },
+        "semantic_assessment": {
+          "service_a_vs_fixture": "differs_from_fixture",
+          "service_b_vs_fixture": "matches_fixture",
+          "service_a_vs_service_b_match": false,
+          "fixture_signature_is_deterministic_reference_only": true
+        }
+      },
+      {
+        "case_id": "b9-06",
+        "scenario": "Rolling 30 day transaction window",
+        "service_a": {
+          "provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+          "payload_sha256": "cf42057e2629d76c307dc0fd2b90e3de51a26f9a283ed3e8d235998195086e23",
+          "candidate_sql": "SELECT\n  t.CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS t\nWHERE t.TRA_DATE >= SYSDATE - :cs_b1\n  AND t.TRA_DATE < SYSDATE\nGROUP BY t.CUS_NUM",
+          "candidate_accepted_by_service_a": true,
+          "validation_findings": [],
+          "error": "Generation-only candidate is not execution or deployment approved",
+          "metrics": {
+            "llm_calls": 1,
+            "tool_calls": 1,
+            "critique_attempts": 0,
+            "oracle_statements": 0,
+            "tokens": 978,
+            "elapsed_seconds": 1.094
+          },
+          "approved": false
+        },
+        "service_b": {
+          "provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1",
+          "payload_sha256": "280d845dd48cd078fbd949a40b4ebbfbf89fb63a2afc4b06871084181fa5da8e",
+          "candidate_sql": "SELECT DISTINCT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_DATE >= SYSDATE - :cs_b1\n  AND TRA_DATE < SYSDATE;",
+          "candidate_sql_extracted_by_adapter": "SELECT DISTINCT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_DATE >= SYSDATE - :cs_b1\n  AND TRA_DATE < SYSDATE",
+          "candidate_accepted_by_service_b": true,
+          "service_b_validation_findings": [],
+          "service_a_parity_validation_findings": [],
+          "normalizations": [],
+          "sse_events": [
+            {
+              "type": "generation_only_candidate",
+              "text": "SELECT DISTINCT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_DATE >= SYSDATE - :cs_b1\n  AND TRA_DATE < SYSDATE;",
+              "approved": false
+            },
+            {
+              "type": "done"
+            }
+          ],
+          "error": "Generation-only candidate is not execution or deployment approved",
+          "approved": false
+        },
+        "semantic_assessment": {
+          "service_a_vs_fixture": "differs_from_fixture",
+          "service_b_vs_fixture": "differs_from_fixture",
+          "service_a_vs_service_b_match": false,
+          "fixture_signature_is_deterministic_reference_only": true
+        }
+      },
+      {
+        "case_id": "b9-07",
+        "scenario": "Current calendar month activity",
+        "service_a": {
+          "provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+          "payload_sha256": "d3dcae1035b1b15dd2f8295d429dfa10bbcc59094b00339b3649093bc2af9c1c",
+          "candidate_sql": "SELECT\n  CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_DATE >= TRUNC(SYSDATE, 'MM')\n  AND TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)\nGROUP BY CUS_NUM",
+          "candidate_accepted_by_service_a": true,
+          "validation_findings": [],
+          "error": "Generation-only candidate is not execution or deployment approved",
+          "metrics": {
+            "llm_calls": 1,
+            "tool_calls": 1,
+            "critique_attempts": 0,
+            "oracle_statements": 0,
+            "tokens": 982,
+            "elapsed_seconds": 1.192
+          },
+          "approved": false
+        },
+        "service_b": {
+          "provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1",
+          "payload_sha256": "78299f82d755eb23a590ae4cd5d1ccadbded52ae6a1d22c88a9998ab0f2108da",
+          "candidate_sql": "SELECT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_DATE >= TRUNC(SYSDATE, 'MM')\n  AND TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)\nGROUP BY CUS_NUM",
+          "candidate_sql_extracted_by_adapter": "SELECT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_DATE >= TRUNC(SYSDATE, 'MM')\n  AND TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)\nGROUP BY CUS_NUM",
+          "candidate_accepted_by_service_b": true,
+          "service_b_validation_findings": [],
+          "service_a_parity_validation_findings": [],
+          "normalizations": [],
+          "sse_events": [
+            {
+              "type": "generation_only_candidate",
+              "text": "SELECT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_DATE >= TRUNC(SYSDATE, 'MM')\n  AND TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)\nGROUP BY CUS_NUM",
+              "approved": false
+            },
+            {
+              "type": "done"
+            }
+          ],
+          "error": "Generation-only candidate is not execution or deployment approved",
+          "approved": false
+        },
+        "semantic_assessment": {
+          "service_a_vs_fixture": "differs_from_fixture",
+          "service_b_vs_fixture": "differs_from_fixture",
+          "service_a_vs_service_b_match": true,
+          "fixture_signature_is_deterministic_reference_only": true
+        }
+      },
+      {
+        "case_id": "b9-08",
+        "scenario": "Compare recent and preceding 30 day counts",
+        "service_a": {
+          "provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+          "payload_sha256": "61892a2c5d7aadcc773bc080eda2f2c56d2cddedc08094ad04af67dba320d787",
+          "candidate_sql": "SELECT\n    CUS_NUM,\n    COUNT(CASE\n        WHEN TRA_DATE >= SYSDATE - :cs_b1\n         AND TRA_DATE < SYSDATE\n        THEN 1\n    END) AS recent_30_day_txn_count,\n    COUNT(CASE\n        WHEN TRA_DATE >= SYSDATE - (:cs_b2 + :cs_b3)\n         AND TRA_DATE < SYSDATE - :cs_b4\n        THEN 1\n    END) AS preceding_30_day_txn_count\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM",
+          "candidate_accepted_by_service_a": true,
+          "validation_findings": [],
+          "error": "Generation-only candidate is not execution or deployment approved",
+          "metrics": {
+            "llm_calls": 1,
+            "tool_calls": 1,
+            "critique_attempts": 0,
+            "oracle_statements": 0,
+            "tokens": 1137,
+            "elapsed_seconds": 1.583
+          },
+          "approved": false
+        },
+        "service_b": {
+          "provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1",
+          "payload_sha256": "22c6fd290641cc690fd582432f6fe04a3ce148dd960147cf8a1d597ab370719d",
+          "candidate_sql": "SELECT\n  CUS_NUM,\n  SUM(CASE WHEN TRA_DATE >= (SYSDATE - :cs_b1) AND TRA_DATE < SYSDATE THEN 1 ELSE 0 END) AS CURRENT_TXN_CNT,\n  SUM(CASE WHEN TRA_DATE >= (SYSDATE - (:cs_b1 + :cs_b2)) AND TRA_DATE < (SYSDATE - :cs_b3) THEN 1 ELSE 0 END) AS BASELINE_TXN_CNT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM;",
+          "candidate_sql_extracted_by_adapter": "SELECT\n  CUS_NUM,\n  SUM(CASE WHEN TRA_DATE >= (SYSDATE - :cs_b1) AND TRA_DATE < SYSDATE THEN 1 ELSE 0 END) AS CURRENT_TXN_CNT,\n  SUM(CASE WHEN TRA_DATE >= (SYSDATE - (:cs_b1 + :cs_b2)) AND TRA_DATE < (SYSDATE - :cs_b3) THEN 1 ELSE 0 END) AS BASELINE_TXN_CNT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM",
+          "candidate_accepted_by_service_b": true,
+          "service_b_validation_findings": [],
+          "service_a_parity_validation_findings": [],
+          "normalizations": [],
+          "sse_events": [
+            {
+              "type": "generation_only_candidate",
+              "text": "SELECT\n  CUS_NUM,\n  SUM(CASE WHEN TRA_DATE >= (SYSDATE - :cs_b1) AND TRA_DATE < SYSDATE THEN 1 ELSE 0 END) AS CURRENT_TXN_CNT,\n  SUM(CASE WHEN TRA_DATE >= (SYSDATE - (:cs_b1 + :cs_b2)) AND TRA_DATE < (SYSDATE - :cs_b3) THEN 1 ELSE 0 END) AS BASELINE_TXN_CNT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM;",
+              "approved": false
+            },
+            {
+              "type": "done"
+            }
+          ],
+          "error": "Generation-only candidate is not execution or deployment approved",
+          "approved": false
+        },
+        "semantic_assessment": {
+          "service_a_vs_fixture": "differs_from_fixture",
+          "service_b_vs_fixture": "differs_from_fixture",
+          "service_a_vs_service_b_match": false,
+          "fixture_signature_is_deterministic_reference_only": true
+        }
+      },
+      {
+        "case_id": "b9-09",
+        "scenario": "Customer-level repeated amount aggregation",
+        "service_a": {
+          "provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+          "payload_sha256": "1a2a8eaca5f614f13405601f4870cae7532fab1c929baa5635427ceabafd3f07",
+          "candidate_sql": "SELECT\n  CUS_NUM,\n  SUM(TRA_AMT) AS TOTAL_TRA_AMT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING SUM(TRA_AMT) > :cs_b1",
+          "candidate_accepted_by_service_a": true,
+          "validation_findings": [],
+          "error": "Generation-only candidate is not execution or deployment approved",
+          "metrics": {
+            "llm_calls": 1,
+            "tool_calls": 1,
+            "critique_attempts": 0,
+            "oracle_statements": 0,
+            "tokens": 1038,
+            "elapsed_seconds": 1.212
+          },
+          "approved": false
+        },
+        "service_b": {
+          "provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1",
+          "payload_sha256": "8da7c6943a9f77a33cb9257c3828a8409543d9413b51408274aec69c274bb0ac",
+          "candidate_sql": "SELECT\n  CUS_NUM,\n  SUM(TRA_AMT) AS TOTAL_TRA_AMT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING SUM(TRA_AMT) > :cs_b1;",
+          "candidate_sql_extracted_by_adapter": "SELECT\n  CUS_NUM,\n  SUM(TRA_AMT) AS TOTAL_TRA_AMT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING SUM(TRA_AMT) > :cs_b1",
+          "candidate_accepted_by_service_b": true,
+          "service_b_validation_findings": [],
+          "service_a_parity_validation_findings": [],
+          "normalizations": [],
+          "sse_events": [
+            {
+              "type": "generation_only_candidate",
+              "text": "SELECT\n  CUS_NUM,\n  SUM(TRA_AMT) AS TOTAL_TRA_AMT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING SUM(TRA_AMT) > :cs_b1;",
+              "approved": false
+            },
+            {
+              "type": "done"
+            }
+          ],
+          "error": "Generation-only candidate is not execution or deployment approved",
+          "approved": false
+        },
+        "semantic_assessment": {
+          "service_a_vs_fixture": "matches_fixture",
+          "service_b_vs_fixture": "matches_fixture",
+          "service_a_vs_service_b_match": true,
+          "fixture_signature_is_deterministic_reference_only": true
+        }
+      },
+      {
+        "case_id": "b9-10",
+        "scenario": "Confirmed code and amount filters",
+        "service_a": {
+          "provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+          "payload_sha256": "a7962c65e8504a0a0d0cb6cfef0b3492d85dc4433b6139a695ab459fcd3a6d00",
+          "candidate_sql": "SELECT\n  CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE EXPL_CODE IN (:cs_b1, :cs_b2)\n  AND TRA_AMT > :cs_b3\nGROUP BY CUS_NUM",
+          "candidate_accepted_by_service_a": true,
+          "validation_findings": [],
+          "error": "Generation-only candidate is not execution or deployment approved",
+          "metrics": {
+            "llm_calls": 1,
+            "tool_calls": 1,
+            "critique_attempts": 0,
+            "oracle_statements": 0,
+            "tokens": 1136,
+            "elapsed_seconds": 1.332
+          },
+          "approved": false
+        },
+        "service_b": {
+          "provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1",
+          "payload_sha256": "4300aaf7a520f9ed5aa450a4064abc0899949730bcf4eb9898295cf173ae998d",
+          "candidate_sql": "SELECT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_AMT > :cs_b1\n  AND EXPL_CODE IN (:cs_b2, :cs_b3)\nGROUP BY CUS_NUM",
+          "candidate_sql_extracted_by_adapter": "SELECT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_AMT > :cs_b1\n  AND EXPL_CODE IN (:cs_b2, :cs_b3)\nGROUP BY CUS_NUM",
+          "candidate_accepted_by_service_b": true,
+          "service_b_validation_findings": [],
+          "service_a_parity_validation_findings": [],
+          "normalizations": [],
+          "sse_events": [
+            {
+              "type": "generation_only_candidate",
+              "text": "SELECT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_AMT > :cs_b1\n  AND EXPL_CODE IN (:cs_b2, :cs_b3)\nGROUP BY CUS_NUM",
+              "approved": false
+            },
+            {
+              "type": "done"
+            }
+          ],
+          "error": "Generation-only candidate is not execution or deployment approved",
+          "approved": false
+        },
+        "semantic_assessment": {
+          "service_a_vs_fixture": "differs_from_fixture",
+          "service_b_vs_fixture": "differs_from_fixture",
+          "service_a_vs_service_b_match": false,
+          "fixture_signature_is_deterministic_reference_only": true
+        }
+      },
+      {
+        "case_id": "b9-11",
+        "scenario": "Zero activity customer set remains empty",
+        "service_a": {
+          "provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+          "payload_sha256": "63d6aec8fe51a5232cc05b912950044e62fce5f36399cdae9bd196c2abe32892",
+          "candidate_sql": "SELECT\n  CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_DATE >= SYSDATE - :cs_b1\n  AND TRA_DATE < SYSDATE\nGROUP BY CUS_NUM",
+          "candidate_accepted_by_service_a": true,
+          "validation_findings": [],
+          "error": "Generation-only candidate is not execution or deployment approved",
+          "metrics": {
+            "llm_calls": 1,
+            "tool_calls": 1,
+            "critique_attempts": 0,
+            "oracle_statements": 0,
+            "tokens": 978,
+            "elapsed_seconds": 1.059
+          },
+          "approved": false
+        },
+        "service_b": {
+          "provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1",
+          "payload_sha256": "b0fad4e913d01fb4de079e5f32b87c9a0c1756d30c37bf44a14e51e13ac04777",
+          "candidate_sql": "SELECT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_DATE >= (SYSDATE - :cs_b1)\n  AND TRA_DATE < SYSDATE\nGROUP BY CUS_NUM;",
+          "candidate_sql_extracted_by_adapter": "SELECT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_DATE >= (SYSDATE - :cs_b1)\n  AND TRA_DATE < SYSDATE\nGROUP BY CUS_NUM",
+          "candidate_accepted_by_service_b": true,
+          "service_b_validation_findings": [],
+          "service_a_parity_validation_findings": [],
+          "normalizations": [],
+          "sse_events": [
+            {
+              "type": "generation_only_candidate",
+              "text": "SELECT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_DATE >= (SYSDATE - :cs_b1)\n  AND TRA_DATE < SYSDATE\nGROUP BY CUS_NUM;",
+              "approved": false
+            },
+            {
+              "type": "done"
+            }
+          ],
+          "error": "Generation-only candidate is not execution or deployment approved",
+          "approved": false
+        },
+        "semantic_assessment": {
+          "service_a_vs_fixture": "differs_from_fixture",
+          "service_b_vs_fixture": "differs_from_fixture",
+          "service_a_vs_service_b_match": false,
+          "fixture_signature_is_deterministic_reference_only": true
+        }
+      },
+      {
+        "case_id": "b9-12",
+        "scenario": "Customer average transaction amount",
+        "service_a": {
+          "provider_identity": "openai|gpt-5.4-mini|https://api.openai.com/v1",
+          "payload_sha256": "04273f83d6d31dfe9c4a2c989e14808b69f86fc1c721cc0287e028590fded1fe",
+          "candidate_sql": "SELECT\n  CUS_NUM,\n  AVG(TRA_AMT) AS AVG_TRA_AMT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM",
+          "candidate_accepted_by_service_a": true,
+          "validation_findings": [],
+          "error": "Generation-only candidate is not execution or deployment approved",
+          "metrics": {
+            "llm_calls": 1,
+            "tool_calls": 1,
+            "critique_attempts": 0,
+            "oracle_statements": 0,
+            "tokens": 960,
+            "elapsed_seconds": 1.253
+          },
+          "approved": false
+        },
+        "service_b": {
+          "provider_identity": "openai|gpt-5-nano|https://api.openai.com/v1",
+          "payload_sha256": "2691c14c9077d639529dc5c07e08c299754b238a8101c58ff38b7a2b8bd1080d",
+          "candidate_sql": "SELECT CUS_NUM, AVG(TRA_AMT) AS AVG_TRA_AMT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM",
+          "candidate_sql_extracted_by_adapter": "SELECT CUS_NUM, AVG(TRA_AMT) AS AVG_TRA_AMT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM",
+          "candidate_accepted_by_service_b": true,
+          "service_b_validation_findings": [],
+          "service_a_parity_validation_findings": [],
+          "normalizations": [],
+          "sse_events": [
+            {
+              "type": "generation_only_candidate",
+              "text": "SELECT CUS_NUM, AVG(TRA_AMT) AS AVG_TRA_AMT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM",
+              "approved": false
+            },
+            {
+              "type": "done"
+            }
+          ],
+          "error": "Generation-only candidate is not execution or deployment approved",
+          "approved": false
+        },
+        "semantic_assessment": {
+          "service_a_vs_fixture": "matches_fixture",
+          "service_b_vs_fixture": "matches_fixture",
+          "service_a_vs_service_b_match": true,
+          "fixture_signature_is_deterministic_reference_only": true
+        }
+      }
+    ],
+    "run_started_at_utc": "2026-10-29T11:34:06.393379+00:00",
+    "elapsed_seconds": 199.623,
+    "summary": {
+      "cases": 12,
+      "service_a_validator_pass": 10,
+      "service_b_validator_pass": 12,
+      "service_a_matches_fixture_semantics": 3,
+      "service_b_matches_fixture_semantics": 5,
+      "service_a_service_b_semantic_matches": 4
+    }
+  },
+  "captured_journal_records": [
+    {
+      "dispatch_count": 0,
+      "event": "run_started",
+      "max_provider_dispatches": 24,
+      "scope_sha256": "bd9bf5e7a65667f6029017e93925ae689dbb9313cf86baeaebcf5699c2dbf2ad",
+      "timestamp": "2026-10-29T11:34:06.398630+00:00"
+    },
+    {
+      "case_id": "b9-01",
+      "dispatch_count": 0,
+      "event": "case_started",
+      "timestamp": "2026-10-29T11:34:14.337297+00:00"
+    },
+    {
+      "case_id": "b9-01",
+      "delivery_state": "uncertain_until_outcome_recorded",
+      "dispatch_number": 1,
+      "event": "provider_call_write_ahead",
+      "payload_sha256": "3c2e7173d62a95cb3db27dacb966489842cc92bd1bf40cac5522ba8af49d9c89",
+      "service": "Service A",
+      "timestamp": "2026-10-29T11:34:14.400559+00:00"
+    },
+    {
+      "candidate_sql": "SELECT\n  t.CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS t\nWHERE t.EXPL_CODE IN (:cs_b1)\n  AND t.TRA_DATE >= SYSDATE - :cs_b2\n  AND t.TRA_DATE < SYSDATE\nGROUP BY t.CUS_NUM",
+      "candidate_sql_present": true,
+      "candidate_sql_sha256": "a09c34236a14f386fc14c90883fe1175f1c8da1fe98ffc5e322227ecd6fcde51",
+      "case_id": "b9-01",
+      "delivery_state": "response_observed",
+      "dispatch_number": 1,
+      "error": "Generation-only candidate is not execution or deployment approved",
+      "event": "provider_call_outcome",
+      "outcome": "returned",
+      "payload_sha256": "3c2e7173d62a95cb3db27dacb966489842cc92bd1bf40cac5522ba8af49d9c89",
+      "request_id": null,
+      "service": "Service A",
+      "sse_events": [],
+      "timestamp": "2026-10-29T11:34:18.631953+00:00",
+      "validation_findings": []
+    },
+    {
+      "case_id": "b9-01",
+      "delivery_state": "uncertain_until_outcome_recorded",
+      "dispatch_number": 2,
+      "event": "provider_call_write_ahead",
+      "payload_sha256": "b03d013ae6301527765ae8390723ff511a0a5f5bba7ff7c4a27a02dd29d9d66b",
+      "service": "Service B",
+      "timestamp": "2026-10-29T11:34:18.655700+00:00"
+    },
+    {
+      "candidate_sql": "SELECT t.CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS t\nWHERE t.EXPL_CODE IN (:cs_b2)\n  AND t.TRA_DATE >= (SYSDATE - :cs_b1)\n  AND t.TRA_DATE < SYSDATE\nGROUP BY t.CUS_NUM",
+      "candidate_sql_present": true,
+      "candidate_sql_sha256": "f0a9b2e7054310c844ba884075d4435f885c231615cd27fb78a67c6066f08292",
+      "case_id": "b9-01",
+      "delivery_state": "response_observed",
+      "dispatch_number": 2,
+      "error": "Generation-only candidate is not execution or deployment approved",
+      "event": "provider_call_outcome",
+      "outcome": "returned",
+      "payload_sha256": "b03d013ae6301527765ae8390723ff511a0a5f5bba7ff7c4a27a02dd29d9d66b",
+      "request_id": null,
+      "service": "Service B",
+      "sse_events": [
+        {
+          "approved": false,
+          "text": "SELECT t.CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS t\nWHERE t.EXPL_CODE IN (:cs_b2)\n  AND t.TRA_DATE >= (SYSDATE - :cs_b1)\n  AND t.TRA_DATE < SYSDATE\nGROUP BY t.CUS_NUM;",
+          "type": "generation_only_candidate"
+        },
+        {
+          "type": "done"
+        }
+      ],
+      "timestamp": "2026-10-29T11:34:40.558598+00:00",
+      "validation_findings": []
+    },
+    {
+      "case_id": "b9-01",
+      "details": {
+        "semantic_assessment": {
+          "fixture_signature_is_deterministic_reference_only": true,
+          "service_a_vs_fixture": "differs_from_fixture",
+          "service_a_vs_service_b_match": false,
+          "service_b_vs_fixture": "differs_from_fixture"
+        },
+        "service_a_candidate_present": true,
+        "service_a_error": "Generation-only candidate is not execution or deployment approved",
+        "service_a_payload_sha256": "3c2e7173d62a95cb3db27dacb966489842cc92bd1bf40cac5522ba8af49d9c89",
+        "service_b_candidate_present": true,
+        "service_b_error": "Generation-only candidate is not execution or deployment approved",
+        "service_b_payload_sha256": "b03d013ae6301527765ae8390723ff511a0a5f5bba7ff7c4a27a02dd29d9d66b"
+      },
+      "event": "case_outcome",
+      "outcome": "completed",
+      "timestamp": "2026-10-29T11:34:40.592911+00:00"
+    },
+    {
+      "case_id": "b9-02",
+      "dispatch_count": 2,
+      "event": "case_started",
+      "timestamp": "2026-10-29T11:34:40.595488+00:00"
+    },
+    {
+      "case_id": "b9-02",
+      "delivery_state": "uncertain_until_outcome_recorded",
+      "dispatch_number": 3,
+      "event": "provider_call_write_ahead",
+      "payload_sha256": "df8708a343c0ad5f4d8293230b3751f53aa358edb9edd53f27a8529ca22028b0",
+      "service": "Service A",
+      "timestamp": "2026-10-29T11:34:40.616488+00:00"
+    },
+    {
+      "candidate_sql": "SELECT DISTINCT\n  CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_AMT >= :cs_b1",
+      "candidate_sql_present": true,
+      "candidate_sql_sha256": "baf4312617f52da6d760b55eadb99b5a36811927bbe3e85f432ba6793eeb0c59",
+      "case_id": "b9-02",
+      "delivery_state": "response_observed",
+      "dispatch_number": 3,
+      "error": "Generation-only candidate is not execution or deployment approved",
+      "event": "provider_call_outcome",
+      "outcome": "returned",
+      "payload_sha256": "df8708a343c0ad5f4d8293230b3751f53aa358edb9edd53f27a8529ca22028b0",
+      "request_id": null,
+      "service": "Service A",
+      "sse_events": [],
+      "timestamp": "2026-10-29T11:34:41.789623+00:00",
+      "validation_findings": []
+    },
+    {
+      "case_id": "b9-02",
+      "delivery_state": "uncertain_until_outcome_recorded",
+      "dispatch_number": 4,
+      "event": "provider_call_write_ahead",
+      "payload_sha256": "57e87a69141564a7e2964f1aced7ee8d41a7d6b4649cbe35ebb62312c81262c2",
+      "service": "Service B",
+      "timestamp": "2026-10-29T11:34:41.814085+00:00"
+    },
+    {
+      "candidate_sql": "SELECT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_AMT >= :cs_b1\nGROUP BY CUS_NUM",
+      "candidate_sql_present": true,
+      "candidate_sql_sha256": "ee7496e128872ff85d01cfae01d00ccb61595628c30c43a244b441f6d9f12bb4",
+      "case_id": "b9-02",
+      "delivery_state": "response_observed",
+      "dispatch_number": 4,
+      "error": "Generation-only candidate is not execution or deployment approved",
+      "event": "provider_call_outcome",
+      "outcome": "returned",
+      "payload_sha256": "57e87a69141564a7e2964f1aced7ee8d41a7d6b4649cbe35ebb62312c81262c2",
+      "request_id": null,
+      "service": "Service B",
+      "sse_events": [
+        {
+          "approved": false,
+          "text": "SELECT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_AMT >= :cs_b1\nGROUP BY CUS_NUM;",
+          "type": "generation_only_candidate"
+        },
+        {
+          "type": "done"
+        }
+      ],
+      "timestamp": "2026-10-29T11:34:54.852076+00:00",
+      "validation_findings": []
+    },
+    {
+      "case_id": "b9-02",
+      "details": {
+        "semantic_assessment": {
+          "fixture_signature_is_deterministic_reference_only": true,
+          "service_a_vs_fixture": "differs_from_fixture",
+          "service_a_vs_service_b_match": false,
+          "service_b_vs_fixture": "differs_from_fixture"
+        },
+        "service_a_candidate_present": true,
+        "service_a_error": "Generation-only candidate is not execution or deployment approved",
+        "service_a_payload_sha256": "df8708a343c0ad5f4d8293230b3751f53aa358edb9edd53f27a8529ca22028b0",
+        "service_b_candidate_present": true,
+        "service_b_error": "Generation-only candidate is not execution or deployment approved",
+        "service_b_payload_sha256": "57e87a69141564a7e2964f1aced7ee8d41a7d6b4649cbe35ebb62312c81262c2"
+      },
+      "event": "case_outcome",
+      "outcome": "completed",
+      "timestamp": "2026-10-29T11:34:54.864136+00:00"
+    },
+    {
+      "case_id": "b9-03",
+      "dispatch_count": 4,
+      "event": "case_started",
+      "timestamp": "2026-10-29T11:34:54.868506+00:00"
+    },
+    {
+      "case_id": "b9-03",
+      "delivery_state": "uncertain_until_outcome_recorded",
+      "dispatch_number": 5,
+      "event": "provider_call_write_ahead",
+      "payload_sha256": "1c489c101e62261b25f914f55d08485ad0b7216341d244345d9c3229f69819f1",
+      "service": "Service A",
+      "timestamp": "2026-10-29T11:34:54.888384+00:00"
+    },
+    {
+      "candidate_sql": "SELECT\n  CUS_NUM,\n  SUM(TRA_AMT) AS TOTAL_TRA_AMT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING SUM(TRA_AMT) >= :cs_b1",
+      "candidate_sql_present": true,
+      "candidate_sql_sha256": "cc13c0b2de676c82bf4e0753273bb8a855ad8802f1c99069388d861ffb50a520",
+      "case_id": "b9-03",
+      "delivery_state": "response_observed",
+      "dispatch_number": 5,
+      "error": "Generation-only candidate is not execution or deployment approved",
+      "event": "provider_call_outcome",
+      "outcome": "returned",
+      "payload_sha256": "1c489c101e62261b25f914f55d08485ad0b7216341d244345d9c3229f69819f1",
+      "request_id": null,
+      "service": "Service A",
+      "sse_events": [],
+      "timestamp": "2026-10-29T11:34:56.007172+00:00",
+      "validation_findings": []
+    },
+    {
+      "case_id": "b9-03",
+      "delivery_state": "uncertain_until_outcome_recorded",
+      "dispatch_number": 6,
+      "event": "provider_call_write_ahead",
+      "payload_sha256": "f18a233af3a3df6288ff19c2daebc5c7d544f55d4d0e0696ee25c368ceac8eac",
+      "service": "Service B",
+      "timestamp": "2026-10-29T11:34:56.030552+00:00"
+    },
+    {
+      "candidate_sql": "SELECT\n  CUS_NUM,\n  SUM(TRA_AMT) AS SUM_TRA_AMT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING SUM(TRA_AMT) >= :cs_b1",
+      "candidate_sql_present": true,
+      "candidate_sql_sha256": "b4a70556c30ba3865626abd1a4e0e061fb4eb5c9e53c5dc4fc933458f69d71d3",
+      "case_id": "b9-03",
+      "delivery_state": "response_observed",
+      "dispatch_number": 6,
+      "error": "Generation-only candidate is not execution or deployment approved",
+      "event": "provider_call_outcome",
+      "outcome": "returned",
+      "payload_sha256": "f18a233af3a3df6288ff19c2daebc5c7d544f55d4d0e0696ee25c368ceac8eac",
+      "request_id": null,
+      "service": "Service B",
+      "sse_events": [
+        {
+          "approved": false,
+          "text": "SELECT\n  CUS_NUM,\n  SUM(TRA_AMT) AS SUM_TRA_AMT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING SUM(TRA_AMT) >= :cs_b1;",
+          "type": "generation_only_candidate"
+        },
+        {
+          "type": "done"
+        }
+      ],
+      "timestamp": "2026-10-29T11:35:09.785392+00:00",
+      "validation_findings": []
+    },
+    {
+      "case_id": "b9-03",
+      "details": {
+        "semantic_assessment": {
+          "fixture_signature_is_deterministic_reference_only": true,
+          "service_a_vs_fixture": "matches_fixture",
+          "service_a_vs_service_b_match": true,
+          "service_b_vs_fixture": "matches_fixture"
+        },
+        "service_a_candidate_present": true,
+        "service_a_error": "Generation-only candidate is not execution or deployment approved",
+        "service_a_payload_sha256": "1c489c101e62261b25f914f55d08485ad0b7216341d244345d9c3229f69819f1",
+        "service_b_candidate_present": true,
+        "service_b_error": "Generation-only candidate is not execution or deployment approved",
+        "service_b_payload_sha256": "f18a233af3a3df6288ff19c2daebc5c7d544f55d4d0e0696ee25c368ceac8eac"
+      },
+      "event": "case_outcome",
+      "outcome": "completed",
+      "timestamp": "2026-10-29T11:35:09.796196+00:00"
+    },
+    {
+      "case_id": "b9-04",
+      "dispatch_count": 6,
+      "event": "case_started",
+      "timestamp": "2026-10-29T11:35:09.798401+00:00"
+    },
+    {
+      "case_id": "b9-04",
+      "delivery_state": "uncertain_until_outcome_recorded",
+      "dispatch_number": 7,
+      "event": "provider_call_write_ahead",
+      "payload_sha256": "b254a5ab93eec5cff7154d20ae125d247a3c5a1490d79fa53fa8c1fc0600fce8",
+      "service": "Service A",
+      "timestamp": "2026-10-29T11:35:09.816598+00:00"
+    },
+    {
+      "candidate_sql": "SELECT\n  CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING COUNT(*) >= :cs_b1",
+      "candidate_sql_present": true,
+      "candidate_sql_sha256": "7bc5c016e1c4d0272202410830684f2b17630075ac064c614a6c3a5c5cf70249",
+      "case_id": "b9-04",
+      "delivery_state": "response_observed",
+      "dispatch_number": 7,
+      "error": "Generation-only candidate is not execution or deployment approved",
+      "event": "provider_call_outcome",
+      "outcome": "returned",
+      "payload_sha256": "b254a5ab93eec5cff7154d20ae125d247a3c5a1490d79fa53fa8c1fc0600fce8",
+      "request_id": null,
+      "service": "Service A",
+      "sse_events": [],
+      "timestamp": "2026-10-29T11:35:10.735486+00:00",
+      "validation_findings": [
+        {
+          "message": "Aggregate intent requires an aliased COUNT(*) projection"
+        }
+      ]
+    },
+    {
+      "case_id": "b9-04",
+      "delivery_state": "uncertain_until_outcome_recorded",
+      "dispatch_number": 8,
+      "event": "provider_call_write_ahead",
+      "payload_sha256": "4913a7ea618d39807d7e9063c5334fa9b2bd9e020cc017819972693dcbe30882",
+      "service": "Service B",
+      "timestamp": "2026-10-29T11:35:10.753375+00:00"
+    },
+    {
+      "candidate_sql": "SELECT\n  CUS_NUM,\n  COUNT(*) AS \"Transaction count\"\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING COUNT(*) >= :cs_b1",
+      "candidate_sql_present": true,
+      "candidate_sql_sha256": "5a49078e3ca0ec612a06d53d52437a94a2fbf15875584922337e65ce073e37ad",
+      "case_id": "b9-04",
+      "delivery_state": "response_observed",
+      "dispatch_number": 8,
+      "error": "Generation-only candidate is not execution or deployment approved",
+      "event": "provider_call_outcome",
+      "outcome": "returned",
+      "payload_sha256": "4913a7ea618d39807d7e9063c5334fa9b2bd9e020cc017819972693dcbe30882",
+      "request_id": null,
+      "service": "Service B",
+      "sse_events": [
+        {
+          "approved": false,
+          "text": "SELECT\n  CUS_NUM,\n  COUNT(*) AS \"Transaction count\"\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING COUNT(*) >= :cs_b1",
+          "type": "generation_only_candidate"
+        },
+        {
+          "type": "done"
+        }
+      ],
+      "timestamp": "2026-10-29T11:35:22.396778+00:00",
+      "validation_findings": []
+    },
+    {
+      "case_id": "b9-04",
+      "details": {
+        "semantic_assessment": {
+          "fixture_signature_is_deterministic_reference_only": true,
+          "service_a_vs_fixture": "differs_from_fixture",
+          "service_a_vs_service_b_match": false,
+          "service_b_vs_fixture": "matches_fixture"
+        },
+        "service_a_candidate_present": true,
+        "service_a_error": "Generation-only candidate is not execution or deployment approved",
+        "service_a_payload_sha256": "b254a5ab93eec5cff7154d20ae125d247a3c5a1490d79fa53fa8c1fc0600fce8",
+        "service_b_candidate_present": true,
+        "service_b_error": "Generation-only candidate is not execution or deployment approved",
+        "service_b_payload_sha256": "4913a7ea618d39807d7e9063c5334fa9b2bd9e020cc017819972693dcbe30882"
+      },
+      "event": "case_outcome",
+      "outcome": "completed",
+      "timestamp": "2026-10-29T11:35:22.410462+00:00"
+    },
+    {
+      "case_id": "b9-05",
+      "dispatch_count": 8,
+      "event": "case_started",
+      "timestamp": "2026-10-29T11:35:22.412728+00:00"
+    },
+    {
+      "case_id": "b9-05",
+      "delivery_state": "uncertain_until_outcome_recorded",
+      "dispatch_number": 9,
+      "event": "provider_call_write_ahead",
+      "payload_sha256": "376da88eecb6e154a5eaddd6301265863936b834fc14bf8d2de9053fd8f322b9",
+      "service": "Service A",
+      "timestamp": "2026-10-29T11:35:22.433394+00:00"
+    },
+    {
+      "candidate_sql": "SELECT\n  CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING COUNT(DISTINCT TRA_DATE) >= :cs_b1",
+      "candidate_sql_present": true,
+      "candidate_sql_sha256": "c4b404fd43545f2724c55d2ba868fd8d746d1d767302e5942def2ed9dc178589",
+      "case_id": "b9-05",
+      "delivery_state": "response_observed",
+      "dispatch_number": 9,
+      "error": "Generation-only candidate is not execution or deployment approved",
+      "event": "provider_call_outcome",
+      "outcome": "returned",
+      "payload_sha256": "376da88eecb6e154a5eaddd6301265863936b834fc14bf8d2de9053fd8f322b9",
+      "request_id": null,
+      "service": "Service A",
+      "sse_events": [],
+      "timestamp": "2026-10-29T11:35:23.875963+00:00",
+      "validation_findings": [
+        {
+          "message": "Aggregate intent requires an aliased COUNT_DISTINCT(TRA_DATE) projection"
+        }
+      ]
+    },
+    {
+      "case_id": "b9-05",
+      "delivery_state": "uncertain_until_outcome_recorded",
+      "dispatch_number": 10,
+      "event": "provider_call_write_ahead",
+      "payload_sha256": "2bef308d55b63a343e098ecb6ec1f5a320a8abc7643fe7585b85c23038d157da",
+      "service": "Service B",
+      "timestamp": "2026-10-29T11:35:23.899468+00:00"
+    },
+    {
+      "candidate_sql": "SELECT\n  CUS_NUM,\n  COUNT(DISTINCT TRA_DATE) AS \"Distinct transaction dates\"\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING COUNT(DISTINCT TRA_DATE) >= :cs_b1",
+      "candidate_sql_present": true,
+      "candidate_sql_sha256": "3c69b1550fcda434cade55f2deb2b5676dd4991cf1f21699f5b464cb0d4fd58d",
+      "case_id": "b9-05",
+      "delivery_state": "response_observed",
+      "dispatch_number": 10,
+      "error": "Generation-only candidate is not execution or deployment approved",
+      "event": "provider_call_outcome",
+      "outcome": "returned",
+      "payload_sha256": "2bef308d55b63a343e098ecb6ec1f5a320a8abc7643fe7585b85c23038d157da",
+      "request_id": null,
+      "service": "Service B",
+      "sse_events": [
+        {
+          "approved": false,
+          "text": "SELECT\n  CUS_NUM,\n  COUNT(DISTINCT TRA_DATE) AS \"Distinct transaction dates\"\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING COUNT(DISTINCT TRA_DATE) >= :cs_b1;",
+          "type": "generation_only_candidate"
+        },
+        {
+          "type": "done"
+        }
+      ],
+      "timestamp": "2026-10-29T11:35:35.622151+00:00",
+      "validation_findings": []
+    },
+    {
+      "case_id": "b9-05",
+      "details": {
+        "semantic_assessment": {
+          "fixture_signature_is_deterministic_reference_only": true,
+          "service_a_vs_fixture": "differs_from_fixture",
+          "service_a_vs_service_b_match": false,
+          "service_b_vs_fixture": "matches_fixture"
+        },
+        "service_a_candidate_present": true,
+        "service_a_error": "Generation-only candidate is not execution or deployment approved",
+        "service_a_payload_sha256": "376da88eecb6e154a5eaddd6301265863936b834fc14bf8d2de9053fd8f322b9",
+        "service_b_candidate_present": true,
+        "service_b_error": "Generation-only candidate is not execution or deployment approved",
+        "service_b_payload_sha256": "2bef308d55b63a343e098ecb6ec1f5a320a8abc7643fe7585b85c23038d157da"
+      },
+      "event": "case_outcome",
+      "outcome": "completed",
+      "timestamp": "2026-10-29T11:35:35.633216+00:00"
+    },
+    {
+      "case_id": "b9-06",
+      "dispatch_count": 10,
+      "event": "case_started",
+      "timestamp": "2026-10-29T11:35:35.635450+00:00"
+    },
+    {
+      "case_id": "b9-06",
+      "delivery_state": "uncertain_until_outcome_recorded",
+      "dispatch_number": 11,
+      "event": "provider_call_write_ahead",
+      "payload_sha256": "cf42057e2629d76c307dc0fd2b90e3de51a26f9a283ed3e8d235998195086e23",
+      "service": "Service A",
+      "timestamp": "2026-10-29T11:35:35.653450+00:00"
+    },
+    {
+      "candidate_sql": "SELECT\n  t.CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS t\nWHERE t.TRA_DATE >= SYSDATE - :cs_b1\n  AND t.TRA_DATE < SYSDATE\nGROUP BY t.CUS_NUM",
+      "candidate_sql_present": true,
+      "candidate_sql_sha256": "154323fc05aae73d26492d59df0a173ec957d54d239a125d072532db043d707b",
+      "case_id": "b9-06",
+      "delivery_state": "response_observed",
+      "dispatch_number": 11,
+      "error": "Generation-only candidate is not execution or deployment approved",
+      "event": "provider_call_outcome",
+      "outcome": "returned",
+      "payload_sha256": "cf42057e2629d76c307dc0fd2b90e3de51a26f9a283ed3e8d235998195086e23",
+      "request_id": null,
+      "service": "Service A",
+      "sse_events": [],
+      "timestamp": "2026-10-29T11:35:36.749727+00:00",
+      "validation_findings": []
+    },
+    {
+      "case_id": "b9-06",
+      "delivery_state": "uncertain_until_outcome_recorded",
+      "dispatch_number": 12,
+      "event": "provider_call_write_ahead",
+      "payload_sha256": "280d845dd48cd078fbd949a40b4ebbfbf89fb63a2afc4b06871084181fa5da8e",
+      "service": "Service B",
+      "timestamp": "2026-10-29T11:35:36.769623+00:00"
+    },
+    {
+      "candidate_sql": "SELECT DISTINCT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_DATE >= SYSDATE - :cs_b1\n  AND TRA_DATE < SYSDATE",
+      "candidate_sql_present": true,
+      "candidate_sql_sha256": "56378e218e84581adfee3a8459c272bedb5a11c2bd1ff83f5eaf30edcd7bbee8",
+      "case_id": "b9-06",
+      "delivery_state": "response_observed",
+      "dispatch_number": 12,
+      "error": "Generation-only candidate is not execution or deployment approved",
+      "event": "provider_call_outcome",
+      "outcome": "returned",
+      "payload_sha256": "280d845dd48cd078fbd949a40b4ebbfbf89fb63a2afc4b06871084181fa5da8e",
+      "request_id": null,
+      "service": "Service B",
+      "sse_events": [
+        {
+          "approved": false,
+          "text": "SELECT DISTINCT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_DATE >= SYSDATE - :cs_b1\n  AND TRA_DATE < SYSDATE;",
+          "type": "generation_only_candidate"
+        },
+        {
+          "type": "done"
+        }
+      ],
+      "timestamp": "2026-10-29T11:35:50.666965+00:00",
+      "validation_findings": []
+    },
+    {
+      "case_id": "b9-06",
+      "details": {
+        "semantic_assessment": {
+          "fixture_signature_is_deterministic_reference_only": true,
+          "service_a_vs_fixture": "differs_from_fixture",
+          "service_a_vs_service_b_match": false,
+          "service_b_vs_fixture": "differs_from_fixture"
+        },
+        "service_a_candidate_present": true,
+        "service_a_error": "Generation-only candidate is not execution or deployment approved",
+        "service_a_payload_sha256": "cf42057e2629d76c307dc0fd2b90e3de51a26f9a283ed3e8d235998195086e23",
+        "service_b_candidate_present": true,
+        "service_b_error": "Generation-only candidate is not execution or deployment approved",
+        "service_b_payload_sha256": "280d845dd48cd078fbd949a40b4ebbfbf89fb63a2afc4b06871084181fa5da8e"
+      },
+      "event": "case_outcome",
+      "outcome": "completed",
+      "timestamp": "2026-10-29T11:35:50.681178+00:00"
+    },
+    {
+      "case_id": "b9-07",
+      "dispatch_count": 12,
+      "event": "case_started",
+      "timestamp": "2026-10-29T11:35:50.683652+00:00"
+    },
+    {
+      "case_id": "b9-07",
+      "delivery_state": "uncertain_until_outcome_recorded",
+      "dispatch_number": 13,
+      "event": "provider_call_write_ahead",
+      "payload_sha256": "d3dcae1035b1b15dd2f8295d429dfa10bbcc59094b00339b3649093bc2af9c1c",
+      "service": "Service A",
+      "timestamp": "2026-10-29T11:35:50.706852+00:00"
+    },
+    {
+      "candidate_sql": "SELECT\n  CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_DATE >= TRUNC(SYSDATE, 'MM')\n  AND TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)\nGROUP BY CUS_NUM",
+      "candidate_sql_present": true,
+      "candidate_sql_sha256": "26042fac4b9e538be0e87cdb8580f0ab9d8687f3606c893ee71258530ed0172d",
+      "case_id": "b9-07",
+      "delivery_state": "response_observed",
+      "dispatch_number": 13,
+      "error": "Generation-only candidate is not execution or deployment approved",
+      "event": "provider_call_outcome",
+      "outcome": "returned",
+      "payload_sha256": "d3dcae1035b1b15dd2f8295d429dfa10bbcc59094b00339b3649093bc2af9c1c",
+      "request_id": null,
+      "service": "Service A",
+      "sse_events": [],
+      "timestamp": "2026-10-29T11:35:51.902124+00:00",
+      "validation_findings": []
+    },
+    {
+      "case_id": "b9-07",
+      "delivery_state": "uncertain_until_outcome_recorded",
+      "dispatch_number": 14,
+      "event": "provider_call_write_ahead",
+      "payload_sha256": "78299f82d755eb23a590ae4cd5d1ccadbded52ae6a1d22c88a9998ab0f2108da",
+      "service": "Service B",
+      "timestamp": "2026-10-29T11:35:51.922882+00:00"
+    },
+    {
+      "candidate_sql": "SELECT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_DATE >= TRUNC(SYSDATE, 'MM')\n  AND TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)\nGROUP BY CUS_NUM",
+      "candidate_sql_present": true,
+      "candidate_sql_sha256": "593fa93e6a371825374751b665ddd4dbfb243320a4c3a4c25c8eefe324982b16",
+      "case_id": "b9-07",
+      "delivery_state": "response_observed",
+      "dispatch_number": 14,
+      "error": "Generation-only candidate is not execution or deployment approved",
+      "event": "provider_call_outcome",
+      "outcome": "returned",
+      "payload_sha256": "78299f82d755eb23a590ae4cd5d1ccadbded52ae6a1d22c88a9998ab0f2108da",
+      "request_id": null,
+      "service": "Service B",
+      "sse_events": [
+        {
+          "approved": false,
+          "text": "SELECT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_DATE >= TRUNC(SYSDATE, 'MM')\n  AND TRA_DATE < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)\nGROUP BY CUS_NUM",
+          "type": "generation_only_candidate"
+        },
+        {
+          "type": "done"
+        }
+      ],
+      "timestamp": "2026-10-29T11:36:07.822526+00:00",
+      "validation_findings": []
+    },
+    {
+      "case_id": "b9-07",
+      "details": {
+        "semantic_assessment": {
+          "fixture_signature_is_deterministic_reference_only": true,
+          "service_a_vs_fixture": "differs_from_fixture",
+          "service_a_vs_service_b_match": true,
+          "service_b_vs_fixture": "differs_from_fixture"
+        },
+        "service_a_candidate_present": true,
+        "service_a_error": "Generation-only candidate is not execution or deployment approved",
+        "service_a_payload_sha256": "d3dcae1035b1b15dd2f8295d429dfa10bbcc59094b00339b3649093bc2af9c1c",
+        "service_b_candidate_present": true,
+        "service_b_error": "Generation-only candidate is not execution or deployment approved",
+        "service_b_payload_sha256": "78299f82d755eb23a590ae4cd5d1ccadbded52ae6a1d22c88a9998ab0f2108da"
+      },
+      "event": "case_outcome",
+      "outcome": "completed",
+      "timestamp": "2026-10-29T11:36:07.834726+00:00"
+    },
+    {
+      "case_id": "b9-08",
+      "dispatch_count": 14,
+      "event": "case_started",
+      "timestamp": "2026-10-29T11:36:07.836980+00:00"
+    },
+    {
+      "case_id": "b9-08",
+      "delivery_state": "uncertain_until_outcome_recorded",
+      "dispatch_number": 15,
+      "event": "provider_call_write_ahead",
+      "payload_sha256": "61892a2c5d7aadcc773bc080eda2f2c56d2cddedc08094ad04af67dba320d787",
+      "service": "Service A",
+      "timestamp": "2026-10-29T11:36:07.854198+00:00"
+    },
+    {
+      "candidate_sql": "SELECT\n    CUS_NUM,\n    COUNT(CASE\n        WHEN TRA_DATE >= SYSDATE - :cs_b1\n         AND TRA_DATE < SYSDATE\n        THEN 1\n    END) AS recent_30_day_txn_count,\n    COUNT(CASE\n        WHEN TRA_DATE >= SYSDATE - (:cs_b2 + :cs_b3)\n         AND TRA_DATE < SYSDATE - :cs_b4\n        THEN 1\n    END) AS preceding_30_day_txn_count\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM",
+      "candidate_sql_present": true,
+      "candidate_sql_sha256": "eb75eafc3128a9b7378e9da588fd159f7cfd9c20b0bfcf5616b014b2f1445996",
+      "case_id": "b9-08",
+      "delivery_state": "response_observed",
+      "dispatch_number": 15,
+      "error": "Generation-only candidate is not execution or deployment approved",
+      "event": "provider_call_outcome",
+      "outcome": "returned",
+      "payload_sha256": "61892a2c5d7aadcc773bc080eda2f2c56d2cddedc08094ad04af67dba320d787",
+      "request_id": null,
+      "service": "Service A",
+      "sse_events": [],
+      "timestamp": "2026-10-29T11:36:09.439261+00:00",
+      "validation_findings": []
+    },
+    {
+      "case_id": "b9-08",
+      "delivery_state": "uncertain_until_outcome_recorded",
+      "dispatch_number": 16,
+      "event": "provider_call_write_ahead",
+      "payload_sha256": "22c6fd290641cc690fd582432f6fe04a3ce148dd960147cf8a1d597ab370719d",
+      "service": "Service B",
+      "timestamp": "2026-10-29T11:36:09.463179+00:00"
+    },
+    {
+      "candidate_sql": "SELECT\n  CUS_NUM,\n  SUM(CASE WHEN TRA_DATE >= (SYSDATE - :cs_b1) AND TRA_DATE < SYSDATE THEN 1 ELSE 0 END) AS CURRENT_TXN_CNT,\n  SUM(CASE WHEN TRA_DATE >= (SYSDATE - (:cs_b1 + :cs_b2)) AND TRA_DATE < (SYSDATE - :cs_b3) THEN 1 ELSE 0 END) AS BASELINE_TXN_CNT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM",
+      "candidate_sql_present": true,
+      "candidate_sql_sha256": "105e79f1fd3283ef7afa3c20448cd13dcdbf6da132564f920e831a562f2d6a51",
+      "case_id": "b9-08",
+      "delivery_state": "response_observed",
+      "dispatch_number": 16,
+      "error": "Generation-only candidate is not execution or deployment approved",
+      "event": "provider_call_outcome",
+      "outcome": "returned",
+      "payload_sha256": "22c6fd290641cc690fd582432f6fe04a3ce148dd960147cf8a1d597ab370719d",
+      "request_id": null,
+      "service": "Service B",
+      "sse_events": [
+        {
+          "approved": false,
+          "text": "SELECT\n  CUS_NUM,\n  SUM(CASE WHEN TRA_DATE >= (SYSDATE - :cs_b1) AND TRA_DATE < SYSDATE THEN 1 ELSE 0 END) AS CURRENT_TXN_CNT,\n  SUM(CASE WHEN TRA_DATE >= (SYSDATE - (:cs_b1 + :cs_b2)) AND TRA_DATE < (SYSDATE - :cs_b3) THEN 1 ELSE 0 END) AS BASELINE_TXN_CNT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM;",
+          "type": "generation_only_candidate"
+        },
+        {
+          "type": "done"
+        }
+      ],
+      "timestamp": "2026-10-29T11:36:30.980446+00:00",
+      "validation_findings": []
+    },
+    {
+      "case_id": "b9-08",
+      "details": {
+        "semantic_assessment": {
+          "fixture_signature_is_deterministic_reference_only": true,
+          "service_a_vs_fixture": "differs_from_fixture",
+          "service_a_vs_service_b_match": false,
+          "service_b_vs_fixture": "differs_from_fixture"
+        },
+        "service_a_candidate_present": true,
+        "service_a_error": "Generation-only candidate is not execution or deployment approved",
+        "service_a_payload_sha256": "61892a2c5d7aadcc773bc080eda2f2c56d2cddedc08094ad04af67dba320d787",
+        "service_b_candidate_present": true,
+        "service_b_error": "Generation-only candidate is not execution or deployment approved",
+        "service_b_payload_sha256": "22c6fd290641cc690fd582432f6fe04a3ce148dd960147cf8a1d597ab370719d"
+      },
+      "event": "case_outcome",
+      "outcome": "completed",
+      "timestamp": "2026-10-29T11:36:30.999271+00:00"
+    },
+    {
+      "case_id": "b9-09",
+      "dispatch_count": 16,
+      "event": "case_started",
+      "timestamp": "2026-10-29T11:36:31.001485+00:00"
+    },
+    {
+      "case_id": "b9-09",
+      "delivery_state": "uncertain_until_outcome_recorded",
+      "dispatch_number": 17,
+      "event": "provider_call_write_ahead",
+      "payload_sha256": "1a2a8eaca5f614f13405601f4870cae7532fab1c929baa5635427ceabafd3f07",
+      "service": "Service A",
+      "timestamp": "2026-10-29T11:36:31.022008+00:00"
+    },
+    {
+      "candidate_sql": "SELECT\n  CUS_NUM,\n  SUM(TRA_AMT) AS TOTAL_TRA_AMT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING SUM(TRA_AMT) > :cs_b1",
+      "candidate_sql_present": true,
+      "candidate_sql_sha256": "c59554bdeca6ef23fc3f1a3c603cce25de9011b00003af58543e32ef14293355",
+      "case_id": "b9-09",
+      "delivery_state": "response_observed",
+      "dispatch_number": 17,
+      "error": "Generation-only candidate is not execution or deployment approved",
+      "event": "provider_call_outcome",
+      "outcome": "returned",
+      "payload_sha256": "1a2a8eaca5f614f13405601f4870cae7532fab1c929baa5635427ceabafd3f07",
+      "request_id": null,
+      "service": "Service A",
+      "sse_events": [],
+      "timestamp": "2026-10-29T11:36:32.235683+00:00",
+      "validation_findings": []
+    },
+    {
+      "case_id": "b9-09",
+      "delivery_state": "uncertain_until_outcome_recorded",
+      "dispatch_number": 18,
+      "event": "provider_call_write_ahead",
+      "payload_sha256": "8da7c6943a9f77a33cb9257c3828a8409543d9413b51408274aec69c274bb0ac",
+      "service": "Service B",
+      "timestamp": "2026-10-29T11:36:32.254928+00:00"
+    },
+    {
+      "candidate_sql": "SELECT\n  CUS_NUM,\n  SUM(TRA_AMT) AS TOTAL_TRA_AMT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING SUM(TRA_AMT) > :cs_b1",
+      "candidate_sql_present": true,
+      "candidate_sql_sha256": "c59554bdeca6ef23fc3f1a3c603cce25de9011b00003af58543e32ef14293355",
+      "case_id": "b9-09",
+      "delivery_state": "response_observed",
+      "dispatch_number": 18,
+      "error": "Generation-only candidate is not execution or deployment approved",
+      "event": "provider_call_outcome",
+      "outcome": "returned",
+      "payload_sha256": "8da7c6943a9f77a33cb9257c3828a8409543d9413b51408274aec69c274bb0ac",
+      "request_id": null,
+      "service": "Service B",
+      "sse_events": [
+        {
+          "approved": false,
+          "text": "SELECT\n  CUS_NUM,\n  SUM(TRA_AMT) AS TOTAL_TRA_AMT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM\nHAVING SUM(TRA_AMT) > :cs_b1;",
+          "type": "generation_only_candidate"
+        },
+        {
+          "type": "done"
+        }
+      ],
+      "timestamp": "2026-10-29T11:36:43.778009+00:00",
+      "validation_findings": []
+    },
+    {
+      "case_id": "b9-09",
+      "details": {
+        "semantic_assessment": {
+          "fixture_signature_is_deterministic_reference_only": true,
+          "service_a_vs_fixture": "matches_fixture",
+          "service_a_vs_service_b_match": true,
+          "service_b_vs_fixture": "matches_fixture"
+        },
+        "service_a_candidate_present": true,
+        "service_a_error": "Generation-only candidate is not execution or deployment approved",
+        "service_a_payload_sha256": "1a2a8eaca5f614f13405601f4870cae7532fab1c929baa5635427ceabafd3f07",
+        "service_b_candidate_present": true,
+        "service_b_error": "Generation-only candidate is not execution or deployment approved",
+        "service_b_payload_sha256": "8da7c6943a9f77a33cb9257c3828a8409543d9413b51408274aec69c274bb0ac"
+      },
+      "event": "case_outcome",
+      "outcome": "completed",
+      "timestamp": "2026-10-29T11:36:43.813908+00:00"
+    },
+    {
+      "case_id": "b9-10",
+      "dispatch_count": 18,
+      "event": "case_started",
+      "timestamp": "2026-10-29T11:36:43.824720+00:00"
+    },
+    {
+      "case_id": "b9-10",
+      "delivery_state": "uncertain_until_outcome_recorded",
+      "dispatch_number": 19,
+      "event": "provider_call_write_ahead",
+      "payload_sha256": "a7962c65e8504a0a0d0cb6cfef0b3492d85dc4433b6139a695ab459fcd3a6d00",
+      "service": "Service A",
+      "timestamp": "2026-10-29T11:36:43.854156+00:00"
+    },
+    {
+      "candidate_sql": "SELECT\n  CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE EXPL_CODE IN (:cs_b1, :cs_b2)\n  AND TRA_AMT > :cs_b3\nGROUP BY CUS_NUM",
+      "candidate_sql_present": true,
+      "candidate_sql_sha256": "e5fdbb9b7a00e6f0353e4d122f577f7ce986100a96ca2bad64057656fd1ed36b",
+      "case_id": "b9-10",
+      "delivery_state": "response_observed",
+      "dispatch_number": 19,
+      "error": "Generation-only candidate is not execution or deployment approved",
+      "event": "provider_call_outcome",
+      "outcome": "returned",
+      "payload_sha256": "a7962c65e8504a0a0d0cb6cfef0b3492d85dc4433b6139a695ab459fcd3a6d00",
+      "request_id": null,
+      "service": "Service A",
+      "sse_events": [],
+      "timestamp": "2026-10-29T11:36:45.197176+00:00",
+      "validation_findings": []
+    },
+    {
+      "case_id": "b9-10",
+      "delivery_state": "uncertain_until_outcome_recorded",
+      "dispatch_number": 20,
+      "event": "provider_call_write_ahead",
+      "payload_sha256": "4300aaf7a520f9ed5aa450a4064abc0899949730bcf4eb9898295cf173ae998d",
+      "service": "Service B",
+      "timestamp": "2026-10-29T11:36:45.241929+00:00"
+    },
+    {
+      "candidate_sql": "SELECT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_AMT > :cs_b1\n  AND EXPL_CODE IN (:cs_b2, :cs_b3)\nGROUP BY CUS_NUM",
+      "candidate_sql_present": true,
+      "candidate_sql_sha256": "a67454da9f6e32a4093dda48f555d5e8675b087a1ee0e30fab366ccbb552b6a4",
+      "case_id": "b9-10",
+      "delivery_state": "response_observed",
+      "dispatch_number": 20,
+      "error": "Generation-only candidate is not execution or deployment approved",
+      "event": "provider_call_outcome",
+      "outcome": "returned",
+      "payload_sha256": "4300aaf7a520f9ed5aa450a4064abc0899949730bcf4eb9898295cf173ae998d",
+      "request_id": null,
+      "service": "Service B",
+      "sse_events": [
+        {
+          "approved": false,
+          "text": "SELECT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_AMT > :cs_b1\n  AND EXPL_CODE IN (:cs_b2, :cs_b3)\nGROUP BY CUS_NUM",
+          "type": "generation_only_candidate"
+        },
+        {
+          "type": "done"
+        }
+      ],
+      "timestamp": "2026-10-29T11:37:02.932855+00:00",
+      "validation_findings": []
+    },
+    {
+      "case_id": "b9-10",
+      "details": {
+        "semantic_assessment": {
+          "fixture_signature_is_deterministic_reference_only": true,
+          "service_a_vs_fixture": "differs_from_fixture",
+          "service_a_vs_service_b_match": false,
+          "service_b_vs_fixture": "differs_from_fixture"
+        },
+        "service_a_candidate_present": true,
+        "service_a_error": "Generation-only candidate is not execution or deployment approved",
+        "service_a_payload_sha256": "a7962c65e8504a0a0d0cb6cfef0b3492d85dc4433b6139a695ab459fcd3a6d00",
+        "service_b_candidate_present": true,
+        "service_b_error": "Generation-only candidate is not execution or deployment approved",
+        "service_b_payload_sha256": "4300aaf7a520f9ed5aa450a4064abc0899949730bcf4eb9898295cf173ae998d"
+      },
+      "event": "case_outcome",
+      "outcome": "completed",
+      "timestamp": "2026-10-29T11:37:02.943344+00:00"
+    },
+    {
+      "case_id": "b9-11",
+      "dispatch_count": 20,
+      "event": "case_started",
+      "timestamp": "2026-10-29T11:37:02.945631+00:00"
+    },
+    {
+      "case_id": "b9-11",
+      "delivery_state": "uncertain_until_outcome_recorded",
+      "dispatch_number": 21,
+      "event": "provider_call_write_ahead",
+      "payload_sha256": "63d6aec8fe51a5232cc05b912950044e62fce5f36399cdae9bd196c2abe32892",
+      "service": "Service A",
+      "timestamp": "2026-10-29T11:37:02.962305+00:00"
+    },
+    {
+      "candidate_sql": "SELECT\n  CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_DATE >= SYSDATE - :cs_b1\n  AND TRA_DATE < SYSDATE\nGROUP BY CUS_NUM",
+      "candidate_sql_present": true,
+      "candidate_sql_sha256": "fca9e7e25769d17ab0db3496944ad5088d87ac9c76c715966775d6ddb439c7bd",
+      "case_id": "b9-11",
+      "delivery_state": "response_observed",
+      "dispatch_number": 21,
+      "error": "Generation-only candidate is not execution or deployment approved",
+      "event": "provider_call_outcome",
+      "outcome": "returned",
+      "payload_sha256": "63d6aec8fe51a5232cc05b912950044e62fce5f36399cdae9bd196c2abe32892",
+      "request_id": null,
+      "service": "Service A",
+      "sse_events": [],
+      "timestamp": "2026-10-29T11:37:04.022999+00:00",
+      "validation_findings": []
+    },
+    {
+      "case_id": "b9-11",
+      "delivery_state": "uncertain_until_outcome_recorded",
+      "dispatch_number": 22,
+      "event": "provider_call_write_ahead",
+      "payload_sha256": "b0fad4e913d01fb4de079e5f32b87c9a0c1756d30c37bf44a14e51e13ac04777",
+      "service": "Service B",
+      "timestamp": "2026-10-29T11:37:04.043522+00:00"
+    },
+    {
+      "candidate_sql": "SELECT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_DATE >= (SYSDATE - :cs_b1)\n  AND TRA_DATE < SYSDATE\nGROUP BY CUS_NUM",
+      "candidate_sql_present": true,
+      "candidate_sql_sha256": "2dd9a5994476de79992f202471ce6f11ef1647270b85a3523c56b442e344ba17",
+      "case_id": "b9-11",
+      "delivery_state": "response_observed",
+      "dispatch_number": 22,
+      "error": "Generation-only candidate is not execution or deployment approved",
+      "event": "provider_call_outcome",
+      "outcome": "returned",
+      "payload_sha256": "b0fad4e913d01fb4de079e5f32b87c9a0c1756d30c37bf44a14e51e13ac04777",
+      "request_id": null,
+      "service": "Service B",
+      "sse_events": [
+        {
+          "approved": false,
+          "text": "SELECT CUS_NUM\nFROM BI_DWH.PIO_TRANSACTIONS\nWHERE TRA_DATE >= (SYSDATE - :cs_b1)\n  AND TRA_DATE < SYSDATE\nGROUP BY CUS_NUM;",
+          "type": "generation_only_candidate"
+        },
+        {
+          "type": "done"
+        }
+      ],
+      "timestamp": "2026-10-29T11:37:18.357703+00:00",
+      "validation_findings": []
+    },
+    {
+      "case_id": "b9-11",
+      "details": {
+        "semantic_assessment": {
+          "fixture_signature_is_deterministic_reference_only": true,
+          "service_a_vs_fixture": "differs_from_fixture",
+          "service_a_vs_service_b_match": false,
+          "service_b_vs_fixture": "differs_from_fixture"
+        },
+        "service_a_candidate_present": true,
+        "service_a_error": "Generation-only candidate is not execution or deployment approved",
+        "service_a_payload_sha256": "63d6aec8fe51a5232cc05b912950044e62fce5f36399cdae9bd196c2abe32892",
+        "service_b_candidate_present": true,
+        "service_b_error": "Generation-only candidate is not execution or deployment approved",
+        "service_b_payload_sha256": "b0fad4e913d01fb4de079e5f32b87c9a0c1756d30c37bf44a14e51e13ac04777"
+      },
+      "event": "case_outcome",
+      "outcome": "completed",
+      "timestamp": "2026-10-29T11:37:18.368639+00:00"
+    },
+    {
+      "case_id": "b9-12",
+      "dispatch_count": 22,
+      "event": "case_started",
+      "timestamp": "2026-10-29T11:37:18.370437+00:00"
+    },
+    {
+      "case_id": "b9-12",
+      "delivery_state": "uncertain_until_outcome_recorded",
+      "dispatch_number": 23,
+      "event": "provider_call_write_ahead",
+      "payload_sha256": "04273f83d6d31dfe9c4a2c989e14808b69f86fc1c721cc0287e028590fded1fe",
+      "service": "Service A",
+      "timestamp": "2026-10-29T11:37:18.387552+00:00"
+    },
+    {
+      "candidate_sql": "SELECT\n  CUS_NUM,\n  AVG(TRA_AMT) AS AVG_TRA_AMT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM",
+      "candidate_sql_present": true,
+      "candidate_sql_sha256": "ea7c384d99d0f568a3f642e285a90a9f5c3055bdbc982658165360743cd81289",
+      "case_id": "b9-12",
+      "delivery_state": "response_observed",
+      "dispatch_number": 23,
+      "error": "Generation-only candidate is not execution or deployment approved",
+      "event": "provider_call_outcome",
+      "outcome": "returned",
+      "payload_sha256": "04273f83d6d31dfe9c4a2c989e14808b69f86fc1c721cc0287e028590fded1fe",
+      "request_id": null,
+      "service": "Service A",
+      "sse_events": [],
+      "timestamp": "2026-10-29T11:37:19.639536+00:00",
+      "validation_findings": []
+    },
+    {
+      "case_id": "b9-12",
+      "delivery_state": "uncertain_until_outcome_recorded",
+      "dispatch_number": 24,
+      "event": "provider_call_write_ahead",
+      "payload_sha256": "2691c14c9077d639529dc5c07e08c299754b238a8101c58ff38b7a2b8bd1080d",
+      "service": "Service B",
+      "timestamp": "2026-10-29T11:37:19.657842+00:00"
+    },
+    {
+      "candidate_sql": "SELECT CUS_NUM, AVG(TRA_AMT) AS AVG_TRA_AMT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM",
+      "candidate_sql_present": true,
+      "candidate_sql_sha256": "86b222b4dbeb0a754b2ecfc19b23176864a65cb72e573ab60413d80623f83f41",
+      "case_id": "b9-12",
+      "delivery_state": "response_observed",
+      "dispatch_number": 24,
+      "error": "Generation-only candidate is not execution or deployment approved",
+      "event": "provider_call_outcome",
+      "outcome": "returned",
+      "payload_sha256": "2691c14c9077d639529dc5c07e08c299754b238a8101c58ff38b7a2b8bd1080d",
+      "request_id": null,
+      "service": "Service B",
+      "sse_events": [
+        {
+          "approved": false,
+          "text": "SELECT CUS_NUM, AVG(TRA_AMT) AS AVG_TRA_AMT\nFROM BI_DWH.PIO_TRANSACTIONS\nGROUP BY CUS_NUM",
+          "type": "generation_only_candidate"
+        },
+        {
+          "type": "done"
+        }
+      ],
+      "timestamp": "2026-10-29T11:37:25.858148+00:00",
+      "validation_findings": []
+    },
+    {
+      "case_id": "b9-12",
+      "details": {
+        "semantic_assessment": {
+          "fixture_signature_is_deterministic_reference_only": true,
+          "service_a_vs_fixture": "matches_fixture",
+          "service_a_vs_service_b_match": true,
+          "service_b_vs_fixture": "matches_fixture"
+        },
+        "service_a_candidate_present": true,
+        "service_a_error": "Generation-only candidate is not execution or deployment approved",
+        "service_a_payload_sha256": "04273f83d6d31dfe9c4a2c989e14808b69f86fc1c721cc0287e028590fded1fe",
+        "service_b_candidate_present": true,
+        "service_b_error": "Generation-only candidate is not execution or deployment approved",
+        "service_b_payload_sha256": "2691c14c9077d639529dc5c07e08c299754b238a8101c58ff38b7a2b8bd1080d"
+      },
+      "event": "case_outcome",
+      "outcome": "completed",
+      "timestamp": "2026-10-29T11:37:25.869743+00:00"
+    },
+    {
+      "details": {
+        "results_path": "/workspace/Docs/B9_live_results_bd9bf5e7_20261029.json"
+      },
+      "dispatch_count": 24,
+      "event": "run_completed",
+      "max_provider_dispatches": 24,
+      "timestamp": "2026-10-29T11:37:26.014968+00:00"
+    }
+  ],
+  "captured_candidate_count": 24,
+  "snapshot_sha256": "6441936cb4207e07259f0073431487d3850e4121ef6eaec129453fbbe7875267"
+}

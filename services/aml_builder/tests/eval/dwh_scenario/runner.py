@@ -15,7 +15,9 @@ from sqlglot import exp
 Generator = Callable[[dict[str, Any]], dict[str, Any]]
 
 
-def semantic_signature(sql: str) -> tuple[Any, ...] | None:
+def semantic_signature(
+    sql: str, bind_values: dict[str, Any] | None = None
+) -> tuple[Any, ...] | None:
     """Build a formatting-independent SQL meaning profile from the Oracle AST.
 
     Conjunct order and harmless parentheses do not affect the signature. The
@@ -33,6 +35,19 @@ def semantic_signature(sql: str) -> tuple[Any, ...] | None:
     if not isinstance(root, (exp.Select, exp.Union, exp.Intersect, exp.Except)):
         return None
 
+    aliases = {
+        table.alias.casefold(): table.name.casefold()
+        for table in root.find_all(exp.Table)
+        if table.alias
+    }
+    physical_tables = [
+        table for table in root.find_all(exp.Table)
+        if table.name.casefold() not in {
+            cte.alias_or_name.casefold()
+            for cte in root.find_all(exp.CTE) if cte.alias_or_name
+        }
+    ]
+
     def canonical(node: exp.Expression) -> str:
         while isinstance(node, exp.Paren):
             node = node.this
@@ -48,7 +63,38 @@ def semantic_signature(sql: str) -> tuple[Any, ...] | None:
 
             flatten(node)
             return " AND ".join(sorted(canonical(term) for term in terms))
-        return node.sql(dialect="oracle", normalize=True, pretty=False).casefold()
+        normalized = node.copy()
+        if bind_values:
+            normalized = normalized.transform(
+                lambda item: _canonical_bind(item, bind_values), copy=False
+            )
+        # Parentheses around a complete SYSDATE-minus-offset expression on a
+        # TRA_DATE comparison's right side are presentation-only. Preserve
+        # parentheses inside the offset arithmetic, where they change meaning.
+        for paren in list(normalized.find_all(exp.Paren)):
+            parent = paren.parent
+            offset = paren
+            while isinstance(offset, exp.Paren):
+                offset = offset.this
+            if (
+                isinstance(parent, (exp.GTE, exp.GT, exp.LT, exp.LTE))
+                and parent.expression is paren
+                and isinstance(parent.this, exp.Column)
+                and parent.this.name.upper() == "TRA_DATE"
+                and isinstance(offset, exp.Sub)
+                and isinstance(offset.this, exp.CurrentTimestamp)
+                and offset.this.args.get("sysdate")
+            ):
+                parent.set("expression", offset.copy())
+        for column in normalized.find_all(exp.Column):
+            physical_name = aliases.get(column.table.casefold())
+            if physical_name is None and not column.table and len(physical_tables) == 1:
+                physical_name = physical_tables[0].name.casefold()
+            if physical_name:
+                column.set("table", exp.to_identifier(physical_name))
+        for table in normalized.find_all(exp.Table):
+            table.set("alias", None)
+        return normalized.sql(dialect="oracle", normalize=True, pretty=False).casefold()
 
     select = root if isinstance(root, exp.Select) else root.this
     if not isinstance(select, exp.Select):
@@ -61,16 +107,65 @@ def semantic_signature(sql: str) -> tuple[Any, ...] | None:
     return (
         tuple(
             sorted(
-                table.sql(dialect="oracle", normalize=True).casefold()
+                f"{table.db}.{table.name}".casefold()
                 for table in root.find_all(exp.Table)
             )
         ),
-        tuple(canonical(item) for item in select.expressions),
+        # Output labels are presentation metadata. Keep the expression and
+        # projection order/multiplicity because those affect result shape.
+        tuple(
+            canonical(item.this if isinstance(item, exp.Alias) else item)
+            for item in select.expressions
+        ),
         tuple(sorted(where_terms)),
         tuple(canonical(item) for item in root.find_all(exp.Join)),
         tuple(canonical(item) for item in root.find_all(exp.Group)),
+        tuple(canonical(item.this) for item in root.find_all(exp.Having)),
         bool(select.args.get("distinct")),
     )
+
+
+def semantic_pair_matches(
+    sql_a: str | None,
+    binds_a: dict[str, Any] | None,
+    sql_b: str | None,
+    binds_b: dict[str, Any] | None,
+) -> bool:
+    """Compare two candidates after intent-derived binds and AST normalization.
+
+    Args:
+        sql_a: Service A or first candidate SQL.
+        binds_a: Trusted, intent-derived bind values for the first SQL.
+        sql_b: Service B or second candidate SQL.
+        binds_b: Trusted, intent-derived bind values for the second SQL.
+
+    Returns:
+        True when both candidates have the same normalized semantic signature.
+
+    Raises:
+        None.
+    """
+    if not sql_a or not sql_b:
+        return False
+    signature_a = semantic_signature(sql_a, binds_a)
+    signature_b = semantic_signature(sql_b, binds_b)
+    return signature_a is not None and signature_a == signature_b
+
+
+def _canonical_bind(
+    node: exp.Expression, bind_values: dict[str, Any]
+) -> exp.Expression:
+    """Replace an approved placeholder with its contract value for comparison."""
+    if not isinstance(node, exp.Placeholder):
+        return node
+    value = bind_values.get(node.name, bind_values.get(node.name.casefold()))
+    if value is None:
+        return node
+    if isinstance(value, bool):
+        return exp.Literal.number("1" if value else "0")
+    if isinstance(value, (int, float)):
+        return exp.Literal.number(str(value))
+    return exp.Literal.string(str(value))
 
 
 def load_cases(path: Path) -> list[dict[str, Any]]:

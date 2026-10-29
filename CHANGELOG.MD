@@ -3,6 +3,189 @@
 All notable changes to this project are documented here.
 Format: `[DATE] TYPE: Description`
 
+## [2026-10-29] fix: Preserve anchored date-window validation
+
+- Corrected a B9 temporal validator regression: an anchored rolling interval is validated against its exact bound date pair and no longer receives a redundant SYSDATE-upper-bound check.
+- Updated legacy offline fixtures to use confirmed-filter binds, complete comparison ranges, and customer-grain aggregation evidence consistent with their declared intents.
+
+## [2026-10-29] docs: Close B9 as development-complete
+
+- Marked B9 **development-complete, production-unverified**. The final Service A COUNT prompt scope has deterministic coverage and a complete Linux mock HTTP/SSE dry run, but has not been evaluated with live models. No deployment or production settings change was made.
+
+## [2026-10-29] test: Verify B9 HTTP/SSE route in Linux with mocks
+
+- Ran the complete 12-case route dry run in Linux Docker with network disabled: 24 mocked responses, zero provider dispatches, all SQL pairs structurally matched, and SSE/artifact checks passed.
+- The strict validators consistently reject b9-01 because its deterministic fixture omits the required half-open `TRA_DATE < SYSDATE` boundary; the dry-run test verifies this expected rejection.
+- Stored separate result and journal artifacts under `Docs/B9_mock_dry_run_linux_d24ceb8_20261029.*`. No live run was authorized or performed.
+
+## [2026-10-29] fix: Complete offline B9 COUNT and comparator corrections
+
+- Added narrowly scoped Service A prompt instructions requiring aliased COUNT evidence for
+  aggregate transaction-count and distinct-date thresholds. No validator was weakened and
+  Service B prompt was left unchanged.
+- Unified fixture, mock-run, and post-run parity comparisons through one bind-aware semantic
+  comparator with safe date-offset parenthesis normalization.
+- Preserved the completed 24-candidate live run and journal in an immutable snapshot. Verified
+  the frozen baseline without modifying it: its canonical digest excluding the embedded digest
+  matches `9772b9...0ca6`; raw file SHA-256 is `8243cc...c7ad`.
+- Regenerated the exact payload disclosures and development-only approval package under scope
+  `d24ceb8538482a8e8b551a22890f704c78f07c4a135f3878be599e56569766a9`. This scope is pending
+  separate authorization. No new model calls were made.
+
+## [2026-10-29] eval: Complete fresh authorized B9 generation-only run
+
+- Completed one 12-case A/B run under scope
+  bd9bf5e7a65667f6029017e93925ae689dbb9313cf86baeaebcf5699c2dbf2ad with
+  24 observed provider outcomes, zero retries, and no uncertain deliveries.
+- Service A passed deterministic validation for 10/12 candidates; Service B
+  passed 12/12. Direct signatures matched 4/12; intent-bound structural
+  comparison with safe SYSDATE-offset parenthesis normalization matched 7/12.
+- Added a focused comparator normalization for harmless parentheses around
+  TRA_DATE SYSDATE offsets while preserving additive comparison arithmetic.
+- Preserved the frozen baseline. Results and the fsynced journal are stored in
+  Docs/B9_live_results_bd9bf5e7_20261029.json and
+  Docs/B9_execution_journal_bd9bf5e7_20261029.jsonl. The one-run authorization
+  is consumed; no subsequent model calls were made.
+
+## [2026-10-29] fix: Refine B9 prompts and reissue offline approval scope
+
+- Tightened Service A and B generation prompts for explicit comparison-window
+  bind roles, exact customer-level output measures, required aggregate evidence,
+  and no inferred comparison HAVING predicates.
+- Corrected the Service B legacy temporal fixture to use separate conditional
+  current/baseline count measures. Updated Service A comparison regression SQL
+  to use distinct temporal binds and a genuinely invalid inclusive boundary.
+- Narrowly extended Service B's generation-only count CASE constant allowance
+  to typed immediately-preceding comparisons with positive integer durations;
+  unrelated literal use and mismatched temporal offsets remain rejected.
+- Refreshed the full 12-case payload disclosure and approval manifest. New scope
+  `bd9bf5e7a65667f6029017e93925ae689dbb9313cf86baeaebcf5699c2dbf2ad` is
+  pending fresh authorization. The frozen 24-candidate baseline was preserved.
+- Offline focused suites: Service A 35 passed; Service B 58 passed. No live
+  models, Oracle, customer rows, critics, or deployment were used.
+
+## [2026-10-29] docs: Freeze B9 captured SQL baseline
+
+- Classified the seven unmatched live SQL pairs by eligibility and result-shape
+  impact, documented the remaining legacy Service B fixture failures, and
+  proposed targeted prompt-only updates without changing prompts.
+- Preserved all 24 captured candidates and pinned their SQL, payload, source,
+  fixture, validator, comparator, and prompt hashes in
+  `Docs/B9_frozen_baseline_20261029.json` (manifest SHA-256
+  `9772b9b5f632114356b2d64877b3ba757d3b81f20d0510f76f945bfcf5ff0ca6`).
+- No model calls, Oracle access, prompt edits, or runtime changes were made.
+
+## [2026-10-29] fix: Refine offline B9 SQL contract comparison
+
+- Service A now accepts only the exact existential MAX(CASE...) form for a
+  DETAIL threshold and derives comparison-window additive binds from the
+  confirmed interval lengths. Parentheses around canonical rolling offsets do
+  not change the contract; conflicting or incomplete offsets still fail.
+- Customer result validation rejects unrequested aggregate output measures.
+- Service B accepts repeated binds only for verified generation-only comparison
+  boundaries; normal execution and other repeated-bind patterns remain rejected.
+- The offline semantic signature now ignores projection alias labels, includes
+  HAVING, and can compare contract-derived bind values. Stored B9 SQL reanalysis
+  is 5/12 structural matches; this is not Oracle result equivalence.
+- Case 9 remains a generation/output-evidence omission and is not rewritten by
+  the validator or adapter.
+
+## [2026-10-29] eval: Complete authorized B9 live generation run
+
+- Completed all 12 approved synthetic cases through Service A local generation
+  and Service B's real HTTP/SSE route under scope
+  `6690f75a0acc814a5be7cb3ea2e679818b99aac267d25624d812837edb7e54ce`.
+- The durable journal records 24 write-ahead calls and 24 observed outcomes,
+  no retries or uncertain deliveries, and a completed terminal record. Service A
+  validation passed 9/12; Service B passed 7/12. No provider request IDs were
+  surfaced by the adapters. The report distinguishes strict-validation failures,
+  result-shape differences, and the structural signature's comparison limits.
+- Confirmed generation-only isolation: `DWH_SQL_MODE=http`, tracing disabled,
+  base URL override unset, and no Oracle execution, customer-row retrieval,
+  critics, deployment, or persistence. Results and journal are in `Docs/`.
+
+## [2026-10-29] test: Complete B9 Linux mock dry run
+
+- Exercised all 12 synthetic cases through Service A's local generator and
+  Service B's real HTTP SSE route in a disposable Linux container, with both
+  provider surfaces mocked. Recorded 24 mock responses and zero real dispatches.
+- Verified scope/payload/fixture hashes, SQL identity, unapproved candidate
+  isolation, SSE completion, and semantic signatures. Strict validation remains
+  unchanged; case b9-01 is recorded as invalid for its missing rolling upper
+  bound. Preserved the result and journal under `Docs/B9_mock_dry_run_linux*`.
+- No live model, Oracle, customer-data, critic, or deployment path was used.
+
+## [2026-10-29] feat: Add durable B9 execution journal
+
+- Added append-only, fsynced write-ahead logging for B9 provider dispatches,
+  with a hard 24-dispatch cap, payload and candidate hashes, timestamps,
+  per-case outcomes, SSE events, request IDs when exposed, and explicit run
+  completion, failure, and interruption records.
+- Added read-only recovery that marks unresolved calls as unknown and never
+  retries them, with deterministic tests for write-ahead ordering, budget
+  enforcement, interruption, and torn-record recovery.
+- Service B tracing preflight now uses Cloud-Safe's deterministic environment
+  and callback guard instead of assuming a tracing field exists in settings.
+- The disposable runner now creates its temporary Service B directories before
+  importing the HTTP app, including the parent path required by Windows logging.
+- Added a Windows-safe Service B app import smoke test with mocked credentials,
+  an in-memory session database, disposable log/static/artifact paths, and no
+  provider or Oracle startup calls.
+- The disposable live runner supplies an inert CPU-only Torch import shim when
+  Torch is absent; the guarded generation-only route does not use Torch. This
+  keeps Linux live-run startup from requiring the multi-gigabyte ML runtime.
+- The live runner removes Service A's legacy top-level `web` import root before
+  loading Service B, preventing Linux namespace resolution from selecting the
+  wrong API package.
+- The disposable Service B graph import uses the approved OpenAI provider for
+  its dormant summarizer client; only the reviewed generation model is invoked.
+- Service A approval and runtime now share the same schema-context and message
+  builder, preventing payload-hash drift between disclosed and dispatched text.
+- Documented journal setup and inspection in `Docs/B9_live_execution_logging.md`.
+  The approved B9 scope was not changed; this work made no live calls.
+
+## [2026-10-29] fix: Preserve B9 temporal and aggregate comparison semantics
+
+- Carry a deterministic typed temporal contract from Service A to Service B,
+  preserving calendar, rolling, and non-overlapping comparison boundaries.
+- Tighten both generation prompts around bind-only thresholds, customer-grain
+  projections, aggregate aliases, exact temporal forms, and explicit comparison
+  semantics; no validator was relaxed for invalid temporal SQL.
+- Recognize aliased date-conditioned SUM/COUNT CASE measures only for confirmed
+  transaction-count comparisons, independently of temporal validation.
+- Regenerated B9 synthetic payload disclosures and hashes. The updated scope
+  `6690f75a0acc814a5be7cb3ea2e679818b99aac267d25624d812837edb7e54ce` is pending
+  authorization; no live calls were made.
+
+## [2026-10-29] fix: Enforce B9 aggregate and temporal result contracts
+
+- Require explicitly aliased aggregate evidence projections alongside CUS_NUM for aggregate thresholds and per-customer measures; corrected case 9 fixture SQL and regenerated the development-only scope hash.
+- Require half-open rolling ranges; Service B may complete only a canonical bound rolling lower predicate missing < SYSDATE, and reports that normalization in its unapproved generation-only SSE event. Fixed B code-filter checks to use trusted derived bind values.
+- Added a separately typed Service B generation-only SSE candidate (`approved=false`) while preserving the approved-only normal SSE handoff; the existing Service A HTTP adapter accepts it only for exact guarded scope.
+- Revalidated stored candidates offline only; no model calls or Oracle access.
+
+## [2026-10-29] test: Exercise B9 HTTP SSE integration with offline fixtures
+
+- Added an opt-in loopback TCP transport test for Service A's existing adapter, using a deterministic chunked and fragmented SSE response. It verifies POST metadata, event parsing, unapproved candidate isolation, and disclosure propagation without a provider or Oracle call.
+- Added a Linux integration test that sends Service A's guarded request through the real Service B Uvicorn `/chat/stream` route with one deterministic mocked graph result. HTTP 200, SSE candidate/completion, SQL identity, `approved=false`, disclosure propagation, and absence of Oracle import are asserted; **1 passed**. No prompt, validator, or Service B application code changed.
+- Windows sandbox Python 3.14 still blocks event-loop self-pipe creation in loopback socket-pair fallback `accept()` before coroutine entry; Linux execution resolves the transport test blocker without a runtime workaround. The B9 report distinguishes route transport verification from live model/SQL parity.
+
+## [2026-10-29] fix: Correct B9 scope and finalize exact payload approval
+
+- Corrected the unsupported case 2 cash-deposit label and made case 12's
+  customer-average intent, `AVG(TRA_AMT)` SQL, and empty bind set consistent.
+- Added deterministic checks for all 12 fixture bind contracts, A/B semantic
+  signatures, and completeness/hash integrity of both services' exact model
+  message disclosures.
+- Updated the B9 report and consolidated approval package under the corrected
+  scope hash. `DWH_SQL_MODE=http` remains unchanged.
+- Completed the explicitly authorized 12-case generation-only run and recorded
+  all generated SQL, provider errors, and per-case validation outcomes in
+  `Docs/B9_live_results.json`. Service A validated 8/12; Service B returned
+  SQL for 9/12, validated 4/12, and had three provider connection errors. No
+  Oracle execution, critics, or production configuration changes occurred.
+- Rechecked stored Service A SQL after tightening B3 bind derivation: literal confirmed filters and thresholds and missing threshold predicates now fail closed; only cases 7 and 12 pass current validation. Added focused regressions and the B9 failure matrix, targeted follow-up recommendations, and Service B HTTP SSE blocker. No model reruns were made.
+
 ## [2026-10-28] feat: Complete B8 acceptance and bind validation
 
 - Preserved HTTP as the production default and separated the configurable DWH
@@ -24,6 +207,41 @@ Format: `[DATE] TYPE: Description`
 - Production cutover remains blocked: no production approval or executed-result
   parity was established, and least-privilege credentials and DBA resource
   controls still require verification. No production-readiness claim is made.
+
+## [2026-10-28] test: Add B9 broad synthetic SQL parity coverage
+
+- Added 12 offline A/B SQL fixtures grounded in B8-verified transaction columns,
+  covering filters, aggregates, counts, time windows, grouping, multiple
+  confirmed filters, zero activity and denominator handling.
+- Extended evaluator checks for Oracle read safety, CUS_NUM/result shape,
+  confirmed filter binds and semantic equality; normalized table aliases in the
+  existing B0 semantic signature. No live calls, Oracle scenario execution,
+  critic calls or production configuration changes were made.
+- Documented offline outcomes and the exact provider-data and generation-only
+  scope still needed for expanded live model parity in
+  `Docs/B9_synthetic_sql_parity.md`.
+
+## [2026-10-28] feat: Guard Service B generation-only evaluation
+
+- Added a default-disabled development-only Service B route on the existing
+  generation graph. It accepts only hash-pinned synthetic AML intent and
+  schema, binds no tools, skips memory/critic paths, validates the SQL
+  deterministically, and terminates without execution or deployment.
+- Added regression coverage for scope/schema/prompt/tracing failures and blocked
+  tool dispatch. Finalized the single B9 approval package with both prompt
+  hashes, provider identities, exact fixture and schema scope. No live calls
+  were made; explicit authorization for the 12-case run remains required.
+
+## [2026-10-28] feat: Add hash-gated generation-only evaluation path
+
+- Added a development-only, default-disabled local generator method that binds
+  the exact provider/model/prompt/messages hash, accepts a pinned metadata
+  snapshot, and returns only B3-validated SQL with `approved=false`.
+- The evaluation path does not invoke retrieval adapters, the Oracle repository,
+  critics, or deployment; it also requires DWH_SQL_MODE=http. Added boundary
+  regressions and a single review package with scope hash and provider/prompt
+  identities. Live calls remain blocked pending a request-scoped execution
+  disable on Service B and approval of the exact live scope.
 
 ## [2026-10-26] feat: Add B6 generator mode selection and shadow comparison
 
