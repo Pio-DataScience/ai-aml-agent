@@ -16,7 +16,7 @@ Format: `[DATE] TYPE: Description`
 
 - Ran the complete 12-case route dry run in Linux Docker with network disabled: 24 mocked responses, zero provider dispatches, all SQL pairs structurally matched, and SSE/artifact checks passed.
 - The strict validators consistently reject b9-01 because its deterministic fixture omits the required half-open `TRA_DATE < SYSDATE` boundary; the dry-run test verifies this expected rejection.
-- Stored separate result and journal artifacts under `Docs/B9_mock_dry_run_linux_d24ceb8_20261029.*`. No live run was authorized or performed.
+- Stored the scoped result and journal under `Docs/B9_mock_dry_run_linux_d24ceb8_20261029.*`. Superseded mock output and failed pre-dispatch attempt records are locally archived under `.local-archives/B9-20261029/`, excluded from Git; hashes remain in `Docs/B9_synthetic_sql_parity.md`. No live run was authorized or performed for this mock run.
 
 ## [2026-10-29] fix: Complete offline B9 COUNT and comparator corrections
 

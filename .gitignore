@@ -69,3 +69,4 @@ scratch_*
 checkpoints_out.txt
 *.tmp
 .pytest-temp/
+.local-archives/
