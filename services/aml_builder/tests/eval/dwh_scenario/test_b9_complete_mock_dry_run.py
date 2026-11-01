@@ -410,12 +410,8 @@ def test_complete_twelve_case_mock_dry_run(monkeypatch, tmp_path: Path) -> None:
     assert "web.services.oracle" not in sys.modules
     assert len(results) == 12
 
-    output_path = Path(os.environ.get(
-        "B9_DRY_RUN_ARTIFACT", str(ROOT / "Docs" / "B9_mock_dry_run_linux.json")
-    ))
-    journal_path = Path(os.environ.get(
-        "B9_DRY_RUN_JOURNAL", str(ROOT / "Docs" / "B9_mock_dry_run_linux_journal.jsonl")
-    ))
+    output_path = tmp_path / "B9_mock_dry_run_linux.json"
+    journal_path = tmp_path / "B9_mock_dry_run_linux_journal.jsonl"
     assert not output_path.exists() and not journal_path.exists()
     mock_journal = [
         {
